@@ -47,9 +47,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   // working set 随步骤增长：本切片无工具不会增长，预留给后续工具结果回灌。
   const working: ChatMessage[] = [...history];
   let reply = "";
-  let step = 0;
 
-  for (step = 1; step <= maxSteps; step++) {
+  for (let step = 1; step <= maxSteps; step++) {
     if (signal?.aborted) {
       throw new Error(`turn aborted before step ${step}`);
     }
