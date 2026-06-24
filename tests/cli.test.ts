@@ -33,6 +33,20 @@ describe("cli main", () => {
     expect(text).toContain("model_return");
   });
 
+  it("does not print the trace to stderr when --trace is absent (trace is opt-in)", async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["hi"], {
+      adapter: stubAdapter("hello"),
+      stdout: (s) => out.push(s),
+      stderr: (s) => err.push(s),
+    });
+
+    expect(code).toBe(0);
+    expect(out.join("")).toContain("hello");
+    expect(err.join("")).toBe("");
+  });
+
   it("reads the input from stdin when no positional arg is given", async () => {
     const out: string[] = [];
     const code = await main([], {
