@@ -9,8 +9,9 @@
 import { runTurn } from "./harness/loop";
 import { Tracer } from "./harness/tracer";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
+import type { ModelAdapter } from "./harness/types";
 
-async function readStdin(): Promise<string> {
+async function readStdinDefault(): Promise<string> {
   if (process.stdin.isTTY) return "";
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -19,26 +20,42 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function main(argv: readonly string[]): Promise<number> {
+// 依赖注入：默认接真实 adapter / stdio / stdin，单测可注入 stub 不触网、不读真实 stdin。
+export interface CliDeps {
+  readonly adapter?: ModelAdapter;
+  readonly stdout?: (s: string) => void;
+  readonly stderr?: (s: string) => void;
+  readonly readStdin?: () => Promise<string>;
+}
+
+export async function main(
+  argv: readonly string[],
+  deps: CliDeps = {},
+): Promise<number> {
+  const stdout = deps.stdout ?? ((s) => process.stdout.write(s));
+  const stderr = deps.stderr ?? ((s) => process.stderr.write(s));
+  const readStdin = deps.readStdin ?? readStdinDefault;
+
   const showTrace = argv.includes("--trace");
   const positional = argv.filter((a) => !a.startsWith("--"));
-  const userInput = (positional.join(" ").trim() || (await readStdin()).trim());
+  const userInput = positional.join(" ").trim() || (await readStdin()).trim();
 
   if (!userInput) {
-    process.stderr.write("用法: cli [--trace] <一句话>  (或经 stdin 传入)\n");
+    stderr("用法: cli [--trace] <一句话>  (或经 stdin 传入)\n");
     return 2;
   }
 
   const tracer = new Tracer();
-  const adapter = new DeepSeekAdapter();
+  // adapter 延迟到确有输入时才构造：缺 key 时真实 adapter 会抛，空输入路径不应触发。
+  const adapter = deps.adapter ?? new DeepSeekAdapter();
 
   const result = await runTurn({ userInput, adapter, tracer });
 
-  process.stdout.write(`${result.reply}\n`);
+  stdout(`${result.reply}\n`);
 
   if (showTrace) {
-    process.stderr.write("\n--- trace ---\n");
-    process.stderr.write(`${tracer.render()}\n`);
+    stderr("\n--- trace ---\n");
+    stderr(`${tracer.render()}\n`);
   }
   return 0;
 }
