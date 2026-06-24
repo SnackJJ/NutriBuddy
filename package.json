@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "sandcastle": "npx tsx .sandcastle/main.mts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.10.0",
+    "@types/node": "^26.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

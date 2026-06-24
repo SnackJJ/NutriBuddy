@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# env / secrets
+.env
+.env.*
+
+# sandcastle runtime
+.sandcastle/logs/
+.sandcastle/worktrees/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# logs
+*.log
+
+# continuous-learning local artifacts
+instinct-*.md
+
+# OS
+.DS_Store
