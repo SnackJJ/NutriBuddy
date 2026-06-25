@@ -1,38 +1,28 @@
 # NutriBuddy — 项目行动记录
 
-> 完整 PRD 在 `docs/PRD.md`，本文只记录已确定的决策和当前待办。
+> 完整 PRD 在 `docs/PRD-v2.md`（2026-06-25 grilling 后重写），v1 保留在 `docs/PRD.md`。
 
 ## 已确定
 
 - **原则**：自建 harness 机械（loop/context/memory/verification/trace），库只填管线（调模型/存向量/rerank）
-- **不做**：LangGraph/CrewAI 等框架、拍照录入、native App（初期）
-- **技术栈**：Next.js + Supabase + 自建 agent harness；模型 v1 用 API → v2 端侧 Qwen
-- **八模块**：Loop / ContextAssembler / ToolRegistry / MemoryStore / Retriever / Verifier / Tracer / ModelAdapter
+- **不做**：LangGraph/CrewAI 等框架、拍照录入、native App（初期）、端侧推理/RL（归 NutriMind）
+- **语言**：TypeScript（全栈）
+- **技术栈**：Next.js + Supabase（Postgres + pgvector）+ 自建 agent harness
+- **Agent 拓扑**：单 agent + 确定性预处理 + post-gate（ADR 0001，经 NutriOrion 对抗性验证后维持）
+- **Loop**：ReAct + CodeAct 混合，SQL 用模板注入
+- **数据**：USDA FoodData Central + NIH ODS + USDA Dietary Guidelines
+- **场景**：英文西式饮食，Web 应用，开源
+- **Eval**：三层评分（代码评 + LLM judge + 人校准），M1 只用代码评
 
-## 待讨论 / 待定
+## 模块
 
-- [ ] 编程语言选型：Python 先迭代 harness → 再挂 Next.js，还是直接用 TS 写？
-- [ ] M1 起步顺序：先搭哪几块跑最小闭环？
-- [ ] 营养数据库选型（USDA / Open Food Facts / 自建？）
-- [ ] 权威知识源清单（NIH ODS / 中国膳食指南 / 其他？）
-- [ ] eval 集规模和覆盖范围
+八模块（M1 搭六块）：Loop / ContextAssembler / ToolRegistry / MemoryStore / Tracer / ModelAdapter
 
-## Agent skills
-
-### Issue tracker
-
-GitHub Issues，PR 作为需求入口（开启）。See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-默认标签：`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-单上下文：`CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+推迟到 M2：Retriever（路 B 知识 RAG）、独立 Verifier 模块
 
 ## 当前状态
 
-- 仓库初始化完成，PRD v1 在 `docs/PRD.md`
-- Agent skills 配置完成
-- 代码尚未开始
+- PRD v2 完成（`docs/PRD-v2.md`）
+- ADR 0001 经对抗性验证后加强
+- CONTEXT.md 已建立
+- M1 Issues 待创建

@@ -1,0 +1,5 @@
+{
+  "terminal.integrated.fontFamily": "DroidSansM Nerd Font, monospace",
+  "terminal.integrated.fontSize": 16,
+  "terminal.integrated.gpuAcceleration": "off"
+}

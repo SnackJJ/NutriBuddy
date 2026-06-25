@@ -1,42 +1,21 @@
-# NutriBuddy — Context
+# NutriBuddy — 领域术语表
 
-营养顾问 agent 的术语表(ubiquitous language)。八模块架构的职责见 `docs/PRD.md §4`,本文只钉术语,不写实现。
+> 本文只定义领域概念，不含实现细节。术语按首字母排序。
 
-## Language
+## NutriBuddy
 
-### 模型路由
+一个自建 agent harness 驱动的个人营养顾问应用。目标是在自建的 control loop / context / memory / verification / trace 机械之上，实现可信的营养建议。**不含端侧推理、小模型 RL 适配——这些归 NutriMind（另一个项目）。**
 
-**Model tier(模型档位)**:
-能力/成本旋钮,取值 `flash`(`deepseek-v4-flash`,便宜)或 `pro`(`deepseek-v4-pro`,强、约 3× 价)。
-_Avoid_: "大模型/小模型"(指代不清)、"flash/pro 两款模型"(thinking 是另一个独立轴,不是模型款式)
+## NutriMind
 
-**Thinking mode(思考模式)**:
-强度旋钮,与档位正交。DeepSeek V4 用**参数**控制(非独立 model id),flash 默认开。
-_Avoid_: 把"开 thinking"和"换 pro"混为"提高强度"——它们是两个旋钮。
+独立项目，承接端侧小模型 + RL 适配的远期目标。NutriBuddy 的工程产出（harness 设计模式）可以迁移到 NutriMind，但 NutriBuddy 的架构选择不受端侧约束。
 
-**Step-level routing(步骤级路由)**:
-路由决策在 **harness 设计期**按 loop 步骤的种类静态绑定档位,**不在运行期判断 query 难易**。
-_Avoid_: "task routing / query routing"(暗示按用户整句话判难易,本项目明确不这么做)
+## Trajectory（轨迹）
 
-**Escalation(升级)**:
-默认档位跑,Verifier 判失败/覆盖不达标时,用更高档位重试该步骤。v1.5 引入,v1 暂不做。
+NutriBuddy 的 Tracer 模块记录的 agent 每一步决策数据（模型看到什么 → 决定调用什么工具 → 工具返回什么 → 最终产出什么）。**格式设计上需考虑后续可被 NutriMind 的 RL 训练消费**——这是两个项目之间的数据飞轮。Trajectory 不是 debug log，是训练数据资产。
 
-### Agent 拓扑
+## 技术选型
 
-**Subagent(子 agent)**:
-带独立 context 的嵌套 loop,被主 agent 调用、干活、只返回摘要。**按机制成立(隔离冗长中间产物 / 自治多步),绝不按主题成立。** 本项目唯一的 subagent 是**检索**(路 B,必要时并行 fan-out)。
-_Avoid_: 按领域设"补剂营养师/运动营养师"等专家 agent(按主题拆 = 反模式)、"agent team / orchestra / 同级 peer"(机制上同一原语,且本项目只有一个面向用户的主 agent,天然层级)
-
-**Sub-call(子调用)**:
-工具实现内部的一次模型调用,无自己的 loop、无自治(如规范化、摘要)。不是 subagent。
-
-**领域专长 = 装备,不是 agent**:
-回答某领域更准,靠给**同一个主 agent**挂对应的 **skill / 领域 context 包**(对的检索范围 + 领域 context + 工具),不靠换 agent。膳食规划留在主 agent,不拆。
-
-### 模块(术语,职责见 PRD §4)
-
-**ModelAdapter**:
-唯一对外暴露 `{model, thinking}` 两旋钮的模块;换模型/换供应商只动这里。
-
-**Verifier**:
-代码层的判停 + 约束/安全闸。数字核实与过敏/疾病硬约束**由代码做,不交给模型**。
+- **语言**：TypeScript（全栈，Next.js API route 内跑 harness）。参考 Claude Code、Codex 等前沿 Agent 应用的 TS 实践。
+- **前端/后端**：Next.js + Supabase
+- **模型**：API 模型（DeepSeek / 通义千问 / Claude），不接端侧推理

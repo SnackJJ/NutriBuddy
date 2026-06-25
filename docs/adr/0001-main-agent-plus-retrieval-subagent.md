@@ -18,3 +18,15 @@ NutriBuddy 采用「主 agent + 单一检索 subagent」拓扑,不做按领域�
 3. **违背"别让框架掌控控制流"**(PRD §0/§1 非目标)——专家团就是亲手搭、再被其奴役的控制流框架。
 
 调研依据:Claude Code / Anthropic 触发 subagent 的场景(冗长输出隔离、breadth-first 并行探索、工具限制)在 NutriBuddy 要么不适用,要么塌回"检索的并行版";Anthropic 明确"步骤强依赖、低价值、短链路"不该用多 agent,而营养助手主链路正是窄而强依赖。专家"会诊"体验放到产品呈现层,不进架构。
+
+### 补充验证（2026-06-25）：多领域 agent 分离不是共识
+
+考察了 NutriOrion（arxiv/2602.18650）的并行 domain agent 方案（Body/Clinical/Medication/Diet 各自独立 context + 聚合），并做了一次对抗性验证。结论：**NutriOrion 最值得搬的是它的 Safety Constraint Mechanism（硬约束注入），不是它的多 agent 拓扑。** 并行 domain agent 方案存在以下问题：
+
+1. **零生产部署**：所有生产中的医疗多 agent 系统（Rede Mater Dei 12 agent、Foxconn CoDoctor）用的是 supervisor routing，不是 NutriOrion 的并行独立 agent + 聚合模式。
+2. **Optimization Paradox**（Stanford, 2026）：分别优化各领域 agent 反而降低系统整体诊断准确率（85.5% → 67.7%, p<0.001）。
+3. **MAST 研究**（NeurIPS 2025）：41-87% 的多 agent 失败源于规格问题和 agent 间协调错误。
+4. **Hallucination as Context Drift**（2026）：agent 间同步使幻觉恶化 34-42%。
+5. **大厂一致建议**：Anthropic、Shopify、Microsoft、Google DeepMind/MIT、Cognition（Devin 团队）均建议从单 agent 起步。
+
+**替代方案**：单 agent + 代码层确定性预处理（提取过敏/用药/禁忌 → 解决已知冲突 → 注入硬约束）+ 代码层 post-gate（输出 ∩ 禁忌 ≠ ∅ → 硬拦 fail loud）。NutriOrion 的硬约束机制完全适用于单 agent 架构。
