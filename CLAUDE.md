@@ -25,4 +25,8 @@
 - PRD v2 完成（`docs/PRD-v2.md`）
 - ADR 0001 经对抗性验证后加强
 - CONTEXT.md 已建立
+- 自建 harness 切片推进中（Loop/ContextAssembler/ModelAdapter/Tracer/CLI，issue #1）
+- 项目骨架已就绪（issue #3）：Next.js 14 App Router + TS strict + Tailwind + ESLint/Prettier；
+  Supabase 客户端 `src/lib/supabase.ts`（server service-role / browser anon，含单测）；
+  环境变量见 `.env.local.example`。`npm run dev` 可启动（`next build` 已验证编译通过）。
 - M1 Issues 待创建
