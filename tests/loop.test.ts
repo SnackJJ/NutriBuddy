@@ -74,6 +74,28 @@ describe("runTurn", () => {
     expect(tracer.events().map((e) => e.type)).toContain("max_steps_reached");
   });
 
+  it("feeds an unfinished step's output back into the next step's prompt", async () => {
+    const tracer = new Tracer();
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls += 1;
+      return calls === 1
+        ? { content: "STEP1-OUT", stop: false }
+        : { content: "final", stop: true };
+    });
+
+    const result = await runTurn({ userInput: "go", adapter, tracer, maxSteps: 3 });
+
+    expect(result.reply).toBe("final");
+    expect(result.steps).toBe(2);
+
+    // step 2's prompt must carry step 1's output — proving the working set grows.
+    const prompts = tracer.events().filter((e) => e.type === "model_prompt");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0].payload).not.toContain("STEP1-OUT");
+    expect(prompts[1].payload).toContain("STEP1-OUT");
+  });
+
   it("is interruptible via an AbortSignal before the model is called", async () => {
     const tracer = new Tracer();
     const generate = vi.fn(async () => ({ content: "x", stop: true }));
