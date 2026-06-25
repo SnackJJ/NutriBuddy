@@ -67,4 +67,21 @@ describe("DeepSeekAdapter", () => {
       adapter.generate({ model: "flash", thinking: false, messages: [] }),
     ).rejects.toThrow(/401/);
   });
+
+  it("throws on a 200 response whose body lacks choices[0].message.content", async () => {
+    // A 2xx with a malformed payload must fail loudly, not silently return
+    // { content: undefined } and pretend the model answered.
+    const adapter = new DeepSeekAdapter({
+      apiKey: "k",
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ choices: [{ message: {} }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+
+    await expect(
+      adapter.generate({ model: "flash", thinking: false, messages: [] }),
+    ).rejects.toThrow(/content/);
+  });
 });
