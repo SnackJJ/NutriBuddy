@@ -30,12 +30,22 @@ function requireEnv(env: Env, key: string): string {
   return value;
 }
 
+/** 解析可注入的依赖（env / createClient），默认走真实运行环境。 */
+function resolveDeps(options: SupabaseFactoryOptions): {
+  env: Env;
+  create: CreateClientImpl;
+} {
+  return {
+    env: options.env ?? process.env,
+    create: options.createClientImpl ?? createClient,
+  };
+}
+
 /** 服务端客户端：service-role key，绕过 RLS，绝不持久化 session。 */
 export function createServerSupabase(
   options: SupabaseFactoryOptions = {},
 ): SupabaseClient {
-  const env = options.env ?? process.env;
-  const create = options.createClientImpl ?? createClient;
+  const { env, create } = resolveDeps(options);
   const url = requireEnv(env, "NEXT_PUBLIC_SUPABASE_URL");
   const serviceRoleKey = requireEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
   return create(url, serviceRoleKey, {
@@ -47,8 +57,7 @@ export function createServerSupabase(
 export function createBrowserSupabase(
   options: SupabaseFactoryOptions = {},
 ): SupabaseClient {
-  const env = options.env ?? process.env;
-  const create = options.createClientImpl ?? createClient;
+  const { env, create } = resolveDeps(options);
   const url = requireEnv(env, "NEXT_PUBLIC_SUPABASE_URL");
   const anonKey = requireEnv(env, "NEXT_PUBLIC_SUPABASE_ANON_KEY");
   return create(url, anonKey);
