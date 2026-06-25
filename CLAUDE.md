@@ -35,4 +35,7 @@ GitHub Issues，PR 作为需求入口（开启）。See `docs/agents/issue-track
 
 - 仓库初始化完成，PRD v1 在 `docs/PRD.md`
 - Agent skills 配置完成
-- 代码尚未开始
+- 自建 harness 切片推进中（Loop/ContextAssembler/ModelAdapter/Tracer/CLI，issue #1）
+- 项目骨架已就绪（issue #3）：Next.js 14 App Router + TS strict + Tailwind + ESLint/Prettier；
+  Supabase 客户端 `src/lib/supabase.ts`（server service-role / browser anon，含单测）；
+  环境变量见 `.env.local.example`。`npm run dev` 可启动（`next build` 已验证编译通过）。

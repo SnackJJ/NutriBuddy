@@ -4,6 +4,11 @@ node_modules/
 # env / secrets
 .env
 .env.*
+!.env.local.example
+
+# next.js build output
+.next/
+next-env.d.ts
 
 # sandcastle runtime
 .sandcastle/logs/
