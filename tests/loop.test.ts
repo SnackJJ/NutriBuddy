@@ -96,6 +96,31 @@ describe("runTurn", () => {
     expect(prompts[1].payload).toContain("STEP1-OUT");
   });
 
+  it("weaves caller-supplied history into the model prompt before the new input", async () => {
+    // Multi-turn foundation: prior conversation must reach the model, in order,
+    // ahead of this turn's user input. Guards loop.ts seeding working = [...history].
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
+
+    await runTurn({
+      userInput: "and how much in two eggs?",
+      adapter,
+      tracer,
+      history: [
+        { role: "user", content: "PRIOR-Q-protein in one egg" },
+        { role: "assistant", content: "PRIOR-A-about 6 grams" },
+      ],
+    });
+
+    const prompt = tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    expect(prompt).toContain("PRIOR-Q-protein in one egg");
+    expect(prompt).toContain("PRIOR-A-about 6 grams");
+    // history precedes this turn's input
+    expect(prompt.indexOf("PRIOR-A-about 6 grams")).toBeLessThan(
+      prompt.indexOf("and how much in two eggs?"),
+    );
+  });
+
   it("is interruptible via an AbortSignal before the model is called", async () => {
     const tracer = new Tracer();
     const generate = vi.fn(async () => ({ content: "x", stop: true }));
