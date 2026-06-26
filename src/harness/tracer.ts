@@ -6,7 +6,12 @@ export type TraceEventType =
   | "user_input"
   | "model_prompt"
   | "model_return"
-  | "max_steps_reached";
+  | "max_steps_reached"
+  // 下列两类由后续 ToolRegistry / Verifier 切片产出；先在共享词表里登记，
+  // 让 eval 代码评分器（issue #6）能按真实 trace 形状读「调了哪个工具 / 是否被 post-gate 硬拦」。
+  // tool_call 的 payload 约定为工具名（或 JSON {name,args}）；post_gate_blocked 出现即代表被拦。
+  | "tool_call"
+  | "post_gate_blocked";
 
 export interface TraceInput {
   readonly step: number;
