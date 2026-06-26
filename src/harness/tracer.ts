@@ -6,7 +6,9 @@ export type TraceEventType =
   | "user_input"
   | "model_prompt"
   | "model_return"
-  | "max_steps_reached";
+  | "max_steps_reached"
+  | "gate_block"
+  | "gate_exhausted";
 
 export interface TraceInput {
   readonly step: number;

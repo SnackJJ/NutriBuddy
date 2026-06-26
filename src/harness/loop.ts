@@ -19,9 +19,17 @@ import type {
 } from "./types";
 import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
+import {
+  buildPreGateContext,
+  checkPostGate,
+  type UserContext,
+} from "./gate";
+import type { InteractionStore } from "../lib/drugInteractions";
 
-/** 默认最大步数（PRD §2.2：M1 不拆分 Verifier，MAX_STEPS=5）。 */
-export const MAX_STEPS = 5;
+/** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
+export const MAX_STEPS = 8;
+/** Post-gate 最大重试次数（issue #10）。 */
+const MAX_POST_GATE_RETRIES = 2;
 
 export interface RunTurnInput {
   readonly userInput: string;
@@ -36,6 +44,10 @@ export interface RunTurnInput {
   readonly signal?: AbortSignal;
   /** 工具调度表：工具名 → 处理器。未注册的工具调用记录 act 事件后静默跳过。 */
   readonly tools?: ReadonlyMap<string, ToolHandler>;
+  /** Pre/post-gate：用户安全上下文（过敏 + 用药）。缺省时不启用 gate。 */
+  readonly userContext?: UserContext;
+  /** Pre/post-gate：药物-营养素相互作用数据源。userContext 存在时需传入。 */
+  readonly interactionStore?: InteractionStore;
 }
 
 export interface TurnResult {
@@ -45,6 +57,16 @@ export interface TurnResult {
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
   return messages.map((m) => `${m.role}: ${m.content}`).join("\n");
+}
+
+/** Post-gate 重试耗尽后的兜底回复。 */
+function gateExhaustedReply(reasons: readonly string[]): string {
+  const list = reasons.map((r) => `  - ${r}`).join("\n");
+  return (
+    "I cannot safely answer your question. My responses were blocked " +
+    `after ${MAX_POST_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
+    "Please consult a doctor or registered dietitian for personalized advice."
+  );
 }
 
 /**
@@ -70,15 +92,28 @@ export async function* run(
     maxSteps = MAX_STEPS,
     signal,
     tools,
+    userContext,
+    interactionStore,
   } = input;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
+  // ─── Pre-gate：构建 pinned region，注入系统提示词 ─────────────────
+  const gateCtx =
+    userContext && interactionStore
+      ? await buildPreGateContext(userContext, interactionStore)
+      : null;
+  const effectiveSystemPrompt = gateCtx?.pinnedRegion
+    ? `${systemPrompt}\n\n${gateCtx.pinnedRegion}`
+    : systemPrompt;
+  const interactions = gateCtx?.interactions ?? [];
+
   // working set 随步骤增长：工具结果回灌为 user 消息，未交卷的模型产出
   // 回灌为 assistant 消息。
-  const working = [...history];
+  const working: ChatMessage[] = [...history];
   let reply = "";
+  let postGateRetries = 0;
 
   for (let step = 1; step <= maxSteps; step++) {
     if (signal?.aborted) {
@@ -88,7 +123,7 @@ export async function* run(
 
     // ── Thought ──────────────────────────────────────────────────────
     const messages = assembleContext({
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       history: working,
       userInput,
     });
@@ -99,7 +134,7 @@ export async function* run(
     });
     eventLog?.record({
       type: "model_call",
-      data: { step, model: tier, thinking, systemPrompt },
+      data: { step, model: tier, thinking, systemPrompt: effectiveSystemPrompt },
     });
 
     yield { type: "thought", step };
@@ -146,7 +181,62 @@ export async function* run(
     yield { type: "observe", step, content: response.content };
 
     reply = response.content;
+
     if (response.stop) {
+      // ─── Post-gate：检查输出是否违反硬约束 ──────────────────────
+      if (userContext && interactionStore) {
+        const check = checkPostGate(reply, userContext, interactions);
+
+        if (!check.passed) {
+          eventLog?.record({
+            type: "gate_block",
+            data: {
+              attempt: postGateRetries + 1,
+              maxRetries: MAX_POST_GATE_RETRIES,
+              reasons: check.reasons,
+              blockedContent: reply,
+              step,
+            },
+          });
+
+          if (postGateRetries < MAX_POST_GATE_RETRIES) {
+            postGateRetries++;
+            // 将违规回复和 block 反馈回灌为上下文，要求模型重新生成
+            const reasonList = check.reasons.map((r) => `  - ${r}`).join("\n");
+            const retryFeedback =
+              `Your previous response was BLOCKED by safety constraints:\n${reasonList}\n\n` +
+              `Please regenerate your response. Make absolutely sure you do NOT mention ` +
+              `or recommend any of the blocked foods or allergens listed above. ` +
+              `This is a hard safety requirement.`;
+
+            working.push({ role: "assistant", content: reply });
+            working.push({ role: "user", content: retryFeedback });
+            tracer.record({
+              step,
+              type: "gate_block",
+              payload: `Post-gate blocked (attempt ${postGateRetries}/${MAX_POST_GATE_RETRIES}): ${check.reasons.join("; ")}`,
+            });
+            continue;
+          }
+
+          // 重试耗尽：返回兜底回复
+          eventLog?.record({
+            type: "agent_response",
+            data: {
+              content: gateExhaustedReply(check.reasons),
+              step,
+              gateExhausted: true,
+            },
+          });
+          tracer.record({
+            step,
+            type: "gate_exhausted",
+            payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
+          });
+          return { reply: gateExhaustedReply(check.reasons), steps: step };
+        }
+      }
+
       eventLog?.record({
         type: "agent_response",
         data: { content: response.content, step },
