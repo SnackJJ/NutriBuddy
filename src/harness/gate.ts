@@ -20,9 +20,11 @@ export interface UserContext {
   readonly medications: readonly string[];
 }
 
-/** Pre-gate 产物：注入系统提示词的 pinned region。 */
+/** Pre-gate 产物：注入系统提示词的 pinned region + 预取的相互作用数据。 */
 export interface PreGateContext {
   readonly pinnedRegion: string;
+  /** 预取的药物-营养素相互作用，供 post-gate 复用（避免重复查询）。 */
+  readonly interactions: readonly DrugNutrientInteraction[];
 }
 
 /** Post-gate 检查结果。 */
@@ -185,10 +187,10 @@ const ALLERGEN_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /** 展开过敏原为待匹配关键词列表（含同义词扩展）。 */
-function expandAllergenTerms(allergen: string): string[] {
+function expandAllergenTerms(allergen: string): readonly string[] {
   const key = allergen.toLowerCase().replace(/[^a-z_]/g, "");
   const synonyms = ALLERGEN_SYNONYMS[key];
-  if (synonyms) return [...synonyms];
+  if (synonyms) return synonyms;
   return [allergen.toLowerCase()];
 }
 
@@ -219,7 +221,7 @@ export async function buildPreGateContext(
 ): Promise<PreGateContext> {
   const interactions =
     user.medications.length > 0
-      ? await getInteractions([...user.medications], store)
+      ? await getInteractions(user.medications, store)
       : [];
 
   const sections: string[] = [];
@@ -253,7 +255,7 @@ export async function buildPreGateContext(
     sections.push(medSection);
   }
 
-  return { pinnedRegion: sections.join("\n\n") };
+  return { pinnedRegion: sections.join("\n\n"), interactions };
 }
 
 // ─── Post-gate ─────────────────────────────────────────────────────────
@@ -290,12 +292,10 @@ export function checkPostGate(
   for (const interaction of interactions) {
     if (interaction.severity !== "high") continue;
     for (const food of interaction.foodExamples) {
-      // 对食物示例也用词边界匹配，避免 "potato" 命中 "potato chips" 以外等
-      const escaped = food.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const regex = new RegExp(`\\b${escaped}\\b`, "i");
-      if (regex.test(lowerOutput)) {
+      const hit = containsAnyTerm(lowerOutput, [food]);
+      if (hit) {
         reasons.push(
-          `Drug-nutrient conflict: "${food}" conflicts with ${interaction.drugName} ` +
+          `Drug-nutrient conflict: "${hit}" conflicts with ${interaction.drugName} ` +
             `(${interaction.nutrient}, severity: ${interaction.severity})`,
         );
       }

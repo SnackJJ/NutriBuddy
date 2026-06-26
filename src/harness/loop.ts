@@ -11,7 +11,7 @@ import {
   checkPostGate,
   type UserContext,
 } from "./gate";
-import type { DrugNutrientInteraction, InteractionStore } from "../lib/drugInteractions";
+import type { InteractionStore } from "../lib/drugInteractions";
 
 export const MAX_STEPS = 8;
 /** Post-gate 最大重试次数（issue #10）。 */
@@ -73,23 +73,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
   // ─── Pre-gate：构建 pinned region，注入系统提示词 ─────────────────
-  let interactions: DrugNutrientInteraction[] = [];
-  let effectiveSystemPrompt = systemPrompt;
-
-  if (userContext && interactionStore) {
-    const gateCtx = await buildPreGateContext(userContext, interactionStore);
-    if (gateCtx.pinnedRegion) {
-      effectiveSystemPrompt = `${systemPrompt}\n\n${gateCtx.pinnedRegion}`;
-    }
-    // 预取交互规则，供 post-gate 复用（避免每次重试都重新查询）
-    if (userContext.medications.length > 0) {
-      const { getInteractions } = await import("../lib/drugInteractions");
-      interactions = await getInteractions(
-        [...userContext.medications],
-        interactionStore,
-      );
-    }
-  }
+  const gateCtx =
+    userContext && interactionStore
+      ? await buildPreGateContext(userContext, interactionStore)
+      : null;
+  const effectiveSystemPrompt = gateCtx?.pinnedRegion
+    ? `${systemPrompt}\n\n${gateCtx.pinnedRegion}`
+    : systemPrompt;
+  const interactions = gateCtx?.interactions ?? [];
 
   // working set 随步骤增长：本切片无工具不会增长，预留给后续工具结果回灌。
   const working: ChatMessage[] = [...history];

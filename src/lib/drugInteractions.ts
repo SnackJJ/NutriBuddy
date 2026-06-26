@@ -40,7 +40,7 @@ export function normalizeDrug(name: string): string {
  * 无有效用药时直接返回空，不打扰数据源。
  */
 export async function getInteractions(
-  userMedications: string[],
+  userMedications: readonly string[],
   store: InteractionStore,
 ): Promise<DrugNutrientInteraction[]> {
   const meds = new Set(userMedications.map(normalizeDrug).filter(Boolean));
