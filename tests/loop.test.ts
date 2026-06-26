@@ -1,15 +1,392 @@
 import { describe, it, expect, vi } from "vitest";
-import { runTurn } from "../src/harness/loop";
+import { run, runTurn } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
 import { EventLog, type LogEvent } from "../src/harness/eventLog";
 import { fixedDeps } from "./helpers/eventLog";
-import type { ModelAdapter, ModelRequest, ModelResponse } from "../src/harness/types";
+import type {
+  ModelAdapter,
+  ModelRequest,
+  ModelResponse,
+  ToolCall,
+  AgentEvent,
+  TerminalResult,
+} from "../src/harness/types";
 
-function stubAdapter(impl: (req: ModelRequest) => ModelResponse): ModelAdapter {
+function stubAdapter(
+  impl: (req: ModelRequest) => ModelResponse | Promise<ModelResponse>,
+): ModelAdapter {
   return { generate: async (req) => impl(req) };
 }
 
-describe("runTurn", () => {
+/**
+ * Collect all AgentEvents from the async generator and return them along
+ * with the TerminalResult.
+ */
+async function collect(
+  gen: AsyncGenerator<AgentEvent, TerminalResult, undefined>,
+): Promise<{ events: AgentEvent[]; result: TerminalResult }> {
+  const events: AgentEvent[] = [];
+  let result: TerminalResult | undefined;
+  for (;;) {
+    const it = await gen.next();
+    if (it.done) {
+      result = it.value;
+      break;
+    }
+    events.push(it.value);
+  }
+  return { events, result: result! };
+}
+
+describe("run", () => {
+  it("yields thought → observe and returns stopReason=end_turn for a single-step turn", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+
+    const { events, result } = await collect(
+      run({ userInput: "一个鸡蛋多少蛋白质？", adapter, tracer }),
+    );
+
+    expect(result.reply).toBe("约 6 克蛋白质");
+    expect(result.steps).toBe(1);
+    expect(result.stopReason).toBe("end_turn");
+
+    // Should yield at least thought + observe
+    const types = events.map((e) => e.type);
+    expect(types).toContain("thought");
+    expect(types).toContain("observe");
+
+    // observe carries the model content
+    const obs = events.find((e) => e.type === "observe");
+    expect(obs?.content).toBe("约 6 克蛋白质");
+  });
+
+  it("enforces MAX_STEPS=5 and returns stopReason=max_steps", async () => {
+    const tracer = new Tracer();
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls += 1;
+      return { content: `step ${calls}`, stop: false };
+    });
+
+    const { events, result } = await collect(
+      run({ userInput: "go", adapter, tracer }),
+    );
+
+    // Default MAX_STEPS is 5
+    expect(calls).toBe(5);
+    expect(result.steps).toBe(5);
+    expect(result.stopReason).toBe("max_steps");
+    expect(result.reply).toBe("step 5");
+
+    // Each step yields thought + observe
+    const thoughtCount = events.filter((e) => e.type === "thought").length;
+    expect(thoughtCount).toBe(5);
+  });
+
+  it("can override maxSteps via input", async () => {
+    const tracer = new Tracer();
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls += 1;
+      return { content: `step ${calls}`, stop: false };
+    });
+
+    const { result } = await collect(
+      run({ userInput: "go", adapter, tracer, maxSteps: 3 }),
+    );
+
+    expect(calls).toBe(3);
+    expect(result.steps).toBe(3);
+    expect(result.stopReason).toBe("max_steps");
+  });
+
+  it("detects tool calls, dispatches through the tools map, and injects results", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        // First call: model emits a tool call
+        return {
+          content: "我需要查一下鸡蛋的营养数据。",
+          stop: false,
+          toolCalls: [
+            { name: "search_food", args: { food: "egg" } } satisfies ToolCall,
+          ],
+        };
+      }
+      // Second call: model gives final answer after seeing tool result
+      return { content: "鸡蛋含有约 6g 蛋白质。", stop: true };
+    });
+
+    const searchResults: string[] = [];
+    const tools = new Map([
+      [
+        "search_food",
+        async (args: Readonly<Record<string, unknown>>) => {
+          const food = String(args.food);
+          searchResults.push(food);
+          return `${food}: 6g protein per large egg`;
+        },
+      ],
+    ]);
+
+    const { events, result } = await collect(
+      run({ userInput: "鸡蛋营养？", adapter, tracer, tools }),
+    );
+
+    expect(result.reply).toBe("鸡蛋含有约 6g 蛋白质。");
+    expect(result.steps).toBe(2);
+    expect(result.stopReason).toBe("end_turn");
+    expect(searchResults).toEqual(["egg"]);
+
+    // Event flow: thought → act → observe → thought → observe
+    const types = events.map((e) => e.type);
+    expect(types).toEqual(["thought", "act", "observe", "thought", "observe"]);
+
+    // act carries the tool call
+    const act = events.find((e) => e.type === "act");
+    expect(act?.toolCall).toMatchObject({ name: "search_food", args: { food: "egg" } });
+
+    // observe carries the tool result
+    const obs = events.find(
+      (e) => e.type === "observe" && e.toolResult,
+    );
+    expect(obs?.toolResult).toMatchObject({
+      name: "search_food",
+      result: "egg: 6g protein per large egg",
+    });
+  });
+
+  it("skips tool dispatch for unknown tool names (no-op, continues loop)", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          content: "尝试调用不存在的工具。",
+          stop: false,
+          toolCalls: [{ name: "nonexistent", args: {} } satisfies ToolCall],
+        };
+      }
+      return { content: "fallback answer", stop: true };
+    });
+
+    // Empty tools map — no handler for "nonexistent"
+    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+
+    const { events, result } = await collect(
+      run({ userInput: "q", adapter, tracer, tools }),
+    );
+
+    expect(result.reply).toBe("fallback answer");
+    expect(result.steps).toBe(2);
+
+    // act is still emitted, but observe has empty toolResult for unknown tools
+    const act = events.find((e) => e.type === "act");
+    expect(act?.toolCall?.name).toBe("nonexistent");
+  });
+
+  it("continues the loop when model returns stop=false without tool calls", async () => {
+    const tracer = new Tracer();
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls += 1;
+      return calls === 1
+        ? { content: "thinking step 1", stop: false }
+        : { content: "final answer", stop: true };
+    });
+
+    const { events, result } = await collect(
+      run({ userInput: "go", adapter, tracer }),
+    );
+
+    expect(result.reply).toBe("final answer");
+    expect(result.steps).toBe(2);
+    expect(result.stopReason).toBe("end_turn");
+
+    // First observe has the intermediate content
+    const observeEvents = events.filter((e) => e.type === "observe");
+    expect(observeEvents[0].content).toBe("thinking step 1");
+    expect(observeEvents[1].content).toBe("final answer");
+  });
+
+  it("traces user input, model prompts, and model returns", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "hi back", stop: true }));
+
+    await collect(run({ userInput: "hi", adapter, tracer }));
+
+    const types = tracer.events().map((e) => e.type);
+    expect(types).toContain("user_input");
+    expect(types).toContain("model_prompt");
+    expect(types).toContain("model_return");
+  });
+
+  it("records EventLog entries (user_message, model_call, agent_response)", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-run", deps);
+    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+
+    await collect(
+      run({ userInput: "一个鸡蛋多少蛋白质？", adapter, tracer, eventLog }),
+    );
+
+    const logged: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
+    expect(logged.map((e) => e.type)).toEqual([
+      "user_message",
+      "model_call",
+      "agent_response",
+    ]);
+    expect(logged[0].data).toEqual({ content: "一个鸡蛋多少蛋白质？" });
+  });
+
+  it("records error event in EventLog when MAX_STEPS is exhausted", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-max", deps);
+    const adapter = stubAdapter(() => ({ content: "not done", stop: false }));
+
+    await collect(run({ userInput: "go", adapter, tracer, eventLog, maxSteps: 3 }));
+
+    const logged: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
+    expect(logged.map((e) => e.type)).toEqual([
+      "user_message",
+      "model_call",
+      "model_call",
+      "model_call",
+      "error",
+    ]);
+    expect(logged[4].data).toMatchObject({
+      reason: "max_steps_reached",
+      maxSteps: 3,
+    });
+  });
+
+  it("is interruptible via AbortSignal before the model is called", async () => {
+    const tracer = new Tracer();
+    const generate = vi.fn(async () => ({ content: "x", stop: true }));
+    const controller = new AbortController();
+    controller.abort();
+
+    const gen = run({
+      userInput: "q",
+      adapter: { generate },
+      tracer,
+      signal: controller.signal,
+    });
+
+    await expect(gen.next()).rejects.toThrow(/abort/i);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("records error event on abort", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-abort", deps);
+    const generate = vi.fn(async () => ({ content: "x", stop: true }));
+    const controller = new AbortController();
+    controller.abort();
+
+    const gen = run({
+      userInput: "q",
+      adapter: { generate },
+      tracer,
+      eventLog,
+      signal: controller.signal,
+    });
+
+    await expect(gen.next()).rejects.toThrow(/abort/i);
+
+    const logged: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
+    expect(logged.map((e) => e.type)).toEqual(["user_message", "error"]);
+  });
+
+  it("does not blow up when eventLog is not provided (backward compat)", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
+
+    const { result } = await collect(
+      run({ userInput: "hi", adapter, tracer }),
+    );
+    expect(result.reply).toBe("ok");
+  });
+
+  it("weaves caller-supplied history into the model prompt", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
+
+    await collect(
+      run({
+        userInput: "and how much in two eggs?",
+        adapter,
+        tracer,
+        history: [
+          { role: "user", content: "PRIOR-Q-protein in one egg" },
+          { role: "assistant", content: "PRIOR-A-about 6 grams" },
+        ],
+      }),
+    );
+
+    const prompt = tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    expect(prompt).toContain("PRIOR-Q-protein in one egg");
+    expect(prompt).toContain("PRIOR-A-about 6 grams");
+  });
+
+  it("passes model+thinking knobs through to the adapter", async () => {
+    const tracer = new Tracer();
+    const generate = vi.fn<(req: ModelRequest) => Promise<ModelResponse>>(
+      async () => ({ content: "x", stop: true }),
+    );
+
+    await collect(
+      run({
+        userInput: "q",
+        adapter: { generate },
+        tracer,
+        tier: "flash",
+        thinking: true,
+      }),
+    );
+
+    expect(generate).toHaveBeenCalledOnce();
+    const req = generate.mock.calls[0][0];
+    expect(req.model).toBe("flash");
+    expect(req.thinking).toBe(true);
+  });
+
+  it("feeds tool results as user messages into subsequent steps", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          content: "查询中...",
+          stop: false,
+          toolCalls: [{ name: "calc", args: { expr: "1+1" } } satisfies ToolCall],
+        };
+      }
+      return { content: "结果是 2", stop: true };
+    });
+
+    const tools = new Map([
+      ["calc", async () => "2"],
+    ]);
+
+    await collect(run({ userInput: "计算", adapter, tracer, tools }));
+
+    // Step 2's prompt must contain the tool result from step 1
+    const prompts = tracer.events().filter((e) => e.type === "model_prompt");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1].payload).toContain("2");
+  });
+});
+
+describe("runTurn (backward compat)", () => {
   it("runs one turn: assembles context, calls the model, returns the reply", async () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));

@@ -26,15 +26,56 @@ export interface ModelRequest extends ModelKnobs {
   readonly messages: readonly ChatMessage[];
 }
 
+export interface ToolCall {
+  readonly name: string;
+  readonly args: Readonly<Record<string, unknown>>;
+}
+
+export interface ToolResult {
+  readonly name: string;
+  readonly result: string;
+}
+
 export interface ModelResponse {
   readonly content: string;
   /**
-   * 是否就此交卷。本切片无工具，真实 adapter 恒为 true（单步即终）；
-   * 字段为后续工具切片预留：emit 工具调用的步骤会返回 false 以请求下一步。
+   * 是否就此交卷。true = 模型已给出最终答案；false = 模型还在中间推理
+   * （发出了工具调用，或需要额外步骤）。为工具切片预留。
    */
   readonly stop: boolean;
+  /** 模型发出的工具调用列表；M1 adapter 暂不产出，由 loop 的测试 stub 驱动。 */
+  readonly toolCalls?: readonly ToolCall[];
 }
 
 export interface ModelAdapter {
   generate(req: ModelRequest): Promise<ModelResponse>;
 }
+
+/** ReAct 循环中每一步的可观测事件。 */
+export type AgentEventType = "thought" | "act" | "observe";
+
+export interface AgentEvent {
+  readonly type: AgentEventType;
+  readonly step: number;
+  /** thought / observe 的文本内容。 */
+  readonly content?: string;
+  /** act 的工具调用。 */
+  readonly toolCall?: ToolCall;
+  /** observe 的工具返回。 */
+  readonly toolResult?: ToolResult;
+}
+
+/** ReAct 循环终止原因。 */
+export type StopReason = "end_turn" | "max_steps" | "aborted";
+
+/** Async generator 的最终返回。 */
+export interface TerminalResult {
+  readonly reply: string;
+  readonly steps: number;
+  readonly stopReason: StopReason;
+}
+
+/** 工具处理器：接收 args 返回字符串结果。 */
+export type ToolHandler = (
+  args: Readonly<Record<string, unknown>>,
+) => Promise<string>;
