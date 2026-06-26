@@ -62,7 +62,7 @@ describe("run", () => {
     expect(obs?.content).toBe("约 6 克蛋白质");
   });
 
-  it("enforces MAX_STEPS=5 and returns stopReason=max_steps", async () => {
+  it("enforces MAX_STEPS=8 and returns stopReason=max_steps", async () => {
     const tracer = new Tracer();
     let calls = 0;
     const adapter = stubAdapter(() => {
@@ -74,15 +74,15 @@ describe("run", () => {
       run({ userInput: "go", adapter, tracer }),
     );
 
-    // Default MAX_STEPS is 5
-    expect(calls).toBe(5);
-    expect(result.steps).toBe(5);
+    // Default MAX_STEPS is 8
+    expect(calls).toBe(8);
+    expect(result.steps).toBe(8);
     expect(result.stopReason).toBe("max_steps");
-    expect(result.reply).toBe("step 5");
+    expect(result.reply).toBe("step 8");
 
     // Each step yields thought + observe
     const thoughtCount = events.filter((e) => e.type === "thought").length;
-    expect(thoughtCount).toBe(5);
+    expect(thoughtCount).toBe(8);
   });
 
   it("can override maxSteps via input", async () => {

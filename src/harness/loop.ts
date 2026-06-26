@@ -233,7 +233,7 @@ export async function* run(
             type: "gate_exhausted",
             payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
           });
-          return { reply: gateExhaustedReply(check.reasons), steps: step };
+          return { reply: gateExhaustedReply(check.reasons), steps: step, stopReason: "gate_blocked" };
         }
       }
 
