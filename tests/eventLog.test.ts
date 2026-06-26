@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EventLog, type TraceEvent } from "../src/harness/eventLog";
+import { EventLog, type LogEvent } from "../src/harness/eventLog";
 
 // 一个内存版 append sink：把每次写入的 (path, line) 收下来，供断言 JSONL 行内容，
 // 不碰真实文件系统（保持单测纯净、确定）。
@@ -36,7 +36,7 @@ describe("EventLog（事件溯源持久日志）", () => {
     expect(path).toBe("traces/sess-abc.jsonl");
     expect(line.endsWith("\n")).toBe(true);
 
-    const parsed = JSON.parse(line) as TraceEvent;
+    const parsed = JSON.parse(line) as LogEvent;
     expect(parsed).toEqual({
       id: "evt_0",
       timestamp: "2026-06-26T00:00:00.000Z",
@@ -77,7 +77,7 @@ describe("EventLog（事件溯源持久日志）", () => {
 
     log.record({ type: "tool_call", data: context });
 
-    const parsed = JSON.parse(sink.writes[0].line) as TraceEvent;
+    const parsed = JSON.parse(sink.writes[0].line) as LogEvent;
     expect(parsed.type).toBe("tool_call");
     expect(parsed.data).toEqual(context);
   });
@@ -88,7 +88,7 @@ describe("EventLog（事件溯源持久日志）", () => {
 
     log.record({ type: "gate_block", data: { reason: "unsafe_dose", rule: "ul_check" } });
 
-    const parsed = JSON.parse(sink.writes[0].line) as TraceEvent;
+    const parsed = JSON.parse(sink.writes[0].line) as LogEvent;
     expect(parsed.type).toBe("gate_block");
     expect(parsed.data).toEqual({ reason: "unsafe_dose", rule: "ul_check" });
   });
@@ -99,7 +99,7 @@ describe("EventLog（事件溯源持久日志）", () => {
 
     log.record({ type: "error" });
 
-    const parsed = JSON.parse(sink.writes[0].line) as TraceEvent;
+    const parsed = JSON.parse(sink.writes[0].line) as LogEvent;
     expect(parsed.data).toEqual({});
   });
 

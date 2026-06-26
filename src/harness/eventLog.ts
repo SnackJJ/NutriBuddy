@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
  * - error          ：异常 / 撞上限 / 解析失败
  * - gate_block     ：post-gate 硬拦（ADR 0001 的确定性后置闸）
  */
-export type TraceEventType =
+export type LogEventType =
   | "model_call"
   | "tool_call"
   | "tool_result"
@@ -31,19 +31,19 @@ export type TraceEventType =
   | "gate_block";
 
 /** 落盘的一条事件。不可变，自描述。 */
-export interface TraceEvent {
+export interface LogEvent {
   /** 进程内单调 id，关联同一 session 内的事件。 */
   readonly id: string;
   /** 事件发生时刻，ISO 8601。 */
   readonly timestamp: string;
-  readonly type: TraceEventType;
+  readonly type: LogEventType;
   /** 事件载荷：工具调用塞完整 context，gate_block 塞拦截原因，等等。 */
   readonly data: Readonly<Record<string, unknown>>;
 }
 
 /** record 的入参：id/timestamp 由 Tracer 合成，调用方只给 type + data。 */
-export interface TraceEventInput {
-  readonly type: TraceEventType;
+export interface LogEventInput {
+  readonly type: LogEventType;
   readonly data?: Readonly<Record<string, unknown>>;
 }
 
@@ -102,8 +102,8 @@ export class EventLog {
   }
 
   /** 合成完整事件、追加一行 JSON、返回落盘的事件供调用方关联。 */
-  record(input: TraceEventInput): TraceEvent {
-    const event: TraceEvent = {
+  record(input: LogEventInput): LogEvent {
+    const event: LogEvent = {
       id: this.nextId(),
       timestamp: this.now().toISOString(),
       type: input.type,
