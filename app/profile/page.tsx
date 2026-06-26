@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { profileFormSchema, GOAL_TYPES } from "@/lib/profileValidation";
+import type { GoalType } from "@/lib/profileValidation";
 import type { UserProfile } from "@/lib/memoryStore";
 
 /** Generate a stable client-side userId stored in localStorage (M1 — no auth yet). */
@@ -84,7 +85,7 @@ function TagInput({
 }
 
 /** Goal type display names for the select dropdown. */
-const GOAL_LABELS: Record<string, string> = {
+const GOAL_LABELS: Record<GoalType, string> = {
   weight_loss: "Weight Loss",
   muscle_gain: "Muscle Gain",
   maintain: "Maintain Weight",
@@ -116,6 +117,19 @@ export default function ProfilePage() {
     text: string;
   } | null>(null);
 
+  /** Sync a UserProfile from the server into the local form state fields. */
+  function applyProfileToForm(p: UserProfile) {
+    setAllergies([...p.allergies]);
+    setMedications([...p.medications]);
+    setGoalType(p.goalType ?? "");
+    setProteinTargetG(p.proteinTargetG?.toString() ?? "");
+    setKcalTarget(p.kcalTarget?.toString() ?? "");
+    setFatTargetG(p.fatTargetG?.toString() ?? "");
+    setCarbsTargetG(p.carbsTargetG?.toString() ?? "");
+    setHeightCm(p.heightCm?.toString() ?? "");
+    setWeightKg(p.weightKg?.toString() ?? "");
+  }
+
   // Load profile on mount
   useEffect(() => {
     let cancelled = false;
@@ -127,17 +141,7 @@ export default function ProfilePage() {
         if (cancelled) return;
         const p: UserProfile | null = data.profile;
         setProfile(p);
-        if (p) {
-          setAllergies([...p.allergies]);
-          setMedications([...p.medications]);
-          setGoalType(p.goalType ?? "");
-          setProteinTargetG(p.proteinTargetG?.toString() ?? "");
-          setKcalTarget(p.kcalTarget?.toString() ?? "");
-          setFatTargetG(p.fatTargetG?.toString() ?? "");
-          setCarbsTargetG(p.carbsTargetG?.toString() ?? "");
-          setHeightCm(p.heightCm?.toString() ?? "");
-          setWeightKg(p.weightKg?.toString() ?? "");
-        }
+        if (p) applyProfileToForm(p);
       } catch {
         if (!cancelled) {
           setMessage({ type: "error", text: "Failed to load profile." });
@@ -196,16 +200,7 @@ export default function ProfilePage() {
       }
       const updated: UserProfile = data.profile;
       setProfile(updated);
-      // Re-sync form state with server result
-      setAllergies([...updated.allergies]);
-      setMedications([...updated.medications]);
-      setGoalType(updated.goalType ?? "");
-      setProteinTargetG(updated.proteinTargetG?.toString() ?? "");
-      setKcalTarget(updated.kcalTarget?.toString() ?? "");
-      setFatTargetG(updated.fatTargetG?.toString() ?? "");
-      setCarbsTargetG(updated.carbsTargetG?.toString() ?? "");
-      setHeightCm(updated.heightCm?.toString() ?? "");
-      setWeightKg(updated.weightKg?.toString() ?? "");
+      applyProfileToForm(updated);
       setMessage({ type: "success", text: "Profile saved." });
     } catch {
       setMessage({ type: "error", text: "Network error. Please try again." });

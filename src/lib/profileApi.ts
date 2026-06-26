@@ -47,13 +47,12 @@ export async function handleUpdateProfile(
 
     // Only include keys that were present in the raw input — don't let Zod defaults
     // (e.g. allergies=[]) overwrite existing store values.
-    const rawInput = body as Record<string, unknown>;
-    const patch: ProfilePatch = {};
-    for (const key of Object.keys(rawInput)) {
-      if (key in parsed.data && rawInput[key as keyof typeof parsed.data] !== undefined) {
-        (patch as Record<string, unknown>)[key] = parsed.data[key as keyof typeof parsed.data];
-      }
-    }
+    const rawKeys = new Set(Object.keys(body as Record<string, unknown>));
+    const data = parsed.data as Record<string, unknown>;
+    const patch = Object.fromEntries(
+      Object.entries(data).filter(([k]) => rawKeys.has(k)),
+    ) as ProfilePatch;
+
     const profile = await store.updateProfile(userId, patch);
     return new Response(JSON.stringify({ profile }), {
       status: 200,
