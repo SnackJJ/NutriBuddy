@@ -43,6 +43,13 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
+// Model selection: Claude Code model names are mapped to actual backend models
+// via ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL env vars in .sandcastle/.env.
+// Currently routing to DeepSeek (deepseek-v4-pro) — see .sandcastle/.env.
+//
+// Effort levels are set per-agent (not via global env) to avoid DeepSeek
+// thinking-mode interference with structured output on simple tasks.
+
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
@@ -54,6 +61,18 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
+// Per-agent model + effort configuration.
+// Planner: high (deep analysis but no thinking-mode StructuredOutput issues)
+// Implementer: max (deep reasoning for coding)
+// Reviewer: high (thorough review without thinking-mode overhead)
+// Merger: medium (straightforward merge + test)
+const AGENT = {
+  planner: sandcastle.claudeCode("claude-opus-4-8", { effort: "high" }),
+  implementer: sandcastle.claudeCode("claude-opus-4-8", { effort: "max" }),
+  reviewer: sandcastle.claudeCode("claude-opus-4-8", { effort: "high" }),
+  merger: sandcastle.claudeCode("claude-opus-4-8", { effort: "medium" }),
+};
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -64,27 +83,57 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   // Phase 1: Plan
   //
-  // The planning agent (opus, for deeper reasoning) reads the open issue list,
-  // builds a dependency graph, and selects the issues that can be worked in
-  // parallel right now (i.e., no blocking dependencies on other open issues).
+  // The planning agent reads the open issue list, builds a dependency graph,
+  // and selects the issues that can be worked in parallel right now (i.e., no
+  // blocking dependencies on other open issues).
   //
   // It outputs a <plan> JSON block — Output.object parses and validates it.
+  // On StructuredOutputError (e.g. DeepSeek thinking mode drops the <plan>
+  // tag), retry up to 3 times with the same session so the agent re-emits.
   // -------------------------------------------------------------------------
-  const plan = await sandcastle.run({
-    hooks,
-    sandbox: docker(),
-    name: "planner",
-    // One iteration is enough: the planner just needs to read and reason,
-    // not write code. (Structured output requires maxIterations: 1.)
-    maxIterations: 1,
-    // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/plan-prompt.md",
-    // Extract and validate the <plan> JSON into a typed object. Throws
-    // StructuredOutputError if the tag is missing, the JSON is malformed, or
-    // validation fails — which aborts the loop.
-    output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
-  });
+  const MAX_PLAN_RETRIES = 3;
+
+  const plan = await (async () => {
+    let lastSessionId: string | undefined;
+
+    for (let attempt = 0; attempt <= MAX_PLAN_RETRIES; attempt++) {
+      try {
+        const opts: sandcastle.RunOptions = {
+          hooks,
+          sandbox: docker(),
+          name: "planner",
+          maxIterations: 1,
+          agent: AGENT.planner,
+          promptFile: "./.sandcastle/plan-prompt.md",
+          output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
+        };
+        if (lastSessionId) {
+          opts.resumeSession = lastSessionId;
+          opts.prompt =
+            "Your previous output was missing the <plan> JSON block. " +
+            "Re-read the issues, analyze dependencies, and output ONLY " +
+            "the <plan> tag with the JSON array of unblocked issues.";
+        }
+        return await sandcastle.run(opts);
+      } catch (error) {
+        if (
+          error instanceof sandcastle.StructuredOutputError &&
+          error.tag === "plan" &&
+          error.sessionId
+        ) {
+          lastSessionId = error.sessionId;
+          if (attempt < MAX_PLAN_RETRIES) {
+            console.log(
+              `  Planner missing <plan> tag, retrying (${attempt + 1}/${MAX_PLAN_RETRIES})...`,
+            );
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+    throw new Error("Unreachable");
+  })();
 
   const issues = plan.output.issues;
 
@@ -125,7 +174,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
           name: "implementer",
           maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-opus-4-8"),
+          agent: AGENT.implementer,
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
             TASK_ID: issue.id,
@@ -139,7 +188,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-opus-4-8"),
+            agent: AGENT.reviewer,
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
@@ -210,7 +259,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     sandbox: docker(),
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
+    agent: AGENT.merger,
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.

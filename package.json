@@ -1,6 +1,8 @@
 {
   "scripts": {
     "sandcastle": "npx tsx .sandcastle/main.mts",
+    "sandcastle:deepseek": "cp .sandcastle/.env.deepseek .sandcastle/.env && npx tsx .sandcastle/main.mts",
+    "sandcastle:claude": "cp .sandcastle/.env.claude .sandcastle/.env && npx tsx .sandcastle/main.mts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

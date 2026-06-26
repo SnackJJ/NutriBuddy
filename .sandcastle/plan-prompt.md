@@ -14,6 +14,8 @@ The list above has already been filtered to issues ready for work.
 
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
 
+Do not use tools, do not ask follow-up questions, and do not add any prose outside the final `<plan>` block.
+
 An issue B is **blocked by** issue A if:
 
 - B requires code or infrastructure that A introduces

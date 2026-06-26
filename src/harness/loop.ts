@@ -25,7 +25,6 @@ import {
   type UserContext,
 } from "./gate";
 import type { InteractionStore } from "../lib/drugInteractions";
-import { buildTemplatePromptSection } from "./sqlTemplates";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -100,23 +99,14 @@ export async function* run(
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
-  // CodeAct 模板注入：注册了 code_act 工具时，将白名单模板描述注入 system prompt
-  const templateSection = tools?.has("code_act")
-    ? buildTemplatePromptSection()
-    : "";
-
+  // ─── Pre-gate：构建 pinned region，注入系统提示词 ─────────────────
   const gateCtx =
     userContext && interactionStore
       ? await buildPreGateContext(userContext, interactionStore)
       : null;
-
-  const effectiveSystemPrompt = [
-    systemPrompt,
-    templateSection,
-    gateCtx?.pinnedRegion,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const effectiveSystemPrompt = gateCtx?.pinnedRegion
+    ? `${systemPrompt}\n\n${gateCtx.pinnedRegion}`
+    : systemPrompt;
   const interactions = gateCtx?.interactions ?? [];
 
   // working set 随步骤增长：工具结果回灌为 user 消息，未交卷的模型产出
