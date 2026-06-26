@@ -8,6 +8,7 @@
 
 import { runTurn } from "./harness/loop";
 import { Tracer } from "./harness/tracer";
+import type { EventLog } from "./harness/eventLog";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
 import type { ModelAdapter } from "./harness/types";
 
@@ -23,6 +24,7 @@ async function readStdinDefault(): Promise<string> {
 // 依赖注入：默认接真实 adapter / stdio / stdin，单测可注入 stub 不触网、不读真实 stdin。
 export interface CliDeps {
   readonly adapter?: ModelAdapter;
+  readonly eventLog?: EventLog;
   readonly stdout?: (s: string) => void;
   readonly stderr?: (s: string) => void;
   readonly readStdin?: () => Promise<string>;
@@ -49,7 +51,12 @@ export async function main(
   // adapter 延迟到确有输入时才构造：缺 key 时真实 adapter 会抛，空输入路径不应触发。
   const adapter = deps.adapter ?? new DeepSeekAdapter();
 
-  const result = await runTurn({ userInput, adapter, tracer });
+  const result = await runTurn({
+    userInput,
+    adapter,
+    tracer,
+    eventLog: deps.eventLog,
+  });
 
   stdout(`${result.reply}\n`);
 

@@ -21,6 +21,9 @@ dist/
 # logs
 *.log
 
+# tracer event-sourcing output (runtime artifact, one JSONL per session)
+traces/
+
 # continuous-learning local artifacts
 instinct-*.md
 

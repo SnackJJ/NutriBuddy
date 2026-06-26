@@ -5,6 +5,7 @@
 import { assembleContext, DEFAULT_SYSTEM_PROMPT } from "./contextAssembler";
 import type { ChatMessage, ModelAdapter, ModelTier } from "./types";
 import type { Tracer } from "./tracer";
+import { EventLog } from "./eventLog";
 
 export const MAX_STEPS = 8;
 
@@ -12,6 +13,7 @@ export interface RunTurnInput {
   readonly userInput: string;
   readonly adapter: ModelAdapter;
   readonly tracer: Tracer;
+  readonly eventLog?: EventLog;
   readonly history?: readonly ChatMessage[];
   readonly systemPrompt?: string;
   readonly tier?: ModelTier;
@@ -34,6 +36,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     userInput,
     adapter,
     tracer,
+    eventLog,
     history = [],
     systemPrompt = DEFAULT_SYSTEM_PROMPT,
     tier = "flash",
@@ -43,6 +46,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   } = input;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
+  eventLog?.record({ type: "user_message", data: { content: userInput } });
 
   // working set 随步骤增长：本切片无工具不会增长，预留给后续工具结果回灌。
   const working: ChatMessage[] = [...history];
@@ -50,17 +54,26 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
 
   for (let step = 1; step <= maxSteps; step++) {
     if (signal?.aborted) {
+      eventLog?.record({ type: "error", data: { reason: "aborted", step } });
       throw new Error(`turn aborted before step ${step}`);
     }
 
     const messages = assembleContext({ systemPrompt, history: working, userInput });
     tracer.record({ step, type: "model_prompt", payload: renderPrompt(messages) });
+    eventLog?.record({
+      type: "model_call",
+      data: { step, model: tier, thinking, systemPrompt },
+    });
 
     const response = await adapter.generate({ model: tier, thinking, messages });
     tracer.record({ step, type: "model_return", payload: response.content });
 
     reply = response.content;
     if (response.stop) {
+      eventLog?.record({
+        type: "agent_response",
+        data: { content: response.content, step },
+      });
       return { reply, steps: step };
     }
 
@@ -72,6 +85,10 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     step: maxSteps,
     type: "max_steps_reached",
     payload: `已达 MAX_STEPS=${maxSteps}，强制停止。`,
+  });
+  eventLog?.record({
+    type: "error",
+    data: { reason: "max_steps_reached", maxSteps, step: maxSteps },
   });
   return { reply, steps: maxSteps };
 }
