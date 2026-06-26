@@ -119,5 +119,6 @@ export class EventLog {
   }
 }
 
-// 下一步（后续切片，非本 issue）：loop 在 user_input/model/工具/撞上限处改喂规范
-// 事件；post-gate 切片在硬拦处 record({ type: "gate_block", ... }）。
+// 下一步（后续切片，非本 issue）：post-gate 切片在硬拦处
+// record({ type: "gate_block", ... })；工具切片在 tool_call/tool_result 时喂事件；
+// 可加 EventLog.read() 重放器。
