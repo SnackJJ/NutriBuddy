@@ -26,16 +26,12 @@ async function collect(
   gen: AsyncGenerator<AgentEvent, TerminalResult, undefined>,
 ): Promise<{ events: AgentEvent[]; result: TerminalResult }> {
   const events: AgentEvent[] = [];
-  let result: TerminalResult | undefined;
-  for (;;) {
-    const it = await gen.next();
-    if (it.done) {
-      result = it.value;
-      break;
-    }
-    events.push(it.value);
+  let next = await gen.next();
+  while (!next.done) {
+    events.push(next.value);
+    next = await gen.next();
   }
-  return { events, result: result! };
+  return { events, result: next.value };
 }
 
 describe("run", () => {

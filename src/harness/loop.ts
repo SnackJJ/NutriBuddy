@@ -77,7 +77,7 @@ export async function* run(
 
   // working set 随步骤增长：工具结果回灌为 user 消息，未交卷的模型产出
   // 回灌为 assistant 消息。
-  const working: ChatMessage[] = [...history];
+  const working = [...history];
   let reply = "";
 
   for (let step = 1; step <= maxSteps; step++) {
@@ -177,10 +177,9 @@ export async function* run(
  */
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   const gen = run(input);
-  let it = await gen.next();
-  while (!it.done) {
-    it = await gen.next();
+  let next = await gen.next();
+  while (!next.done) {
+    next = await gen.next();
   }
-  const terminal = it.value as TerminalResult;
-  return { reply: terminal.reply, steps: terminal.steps };
+  return { reply: next.value.reply, steps: next.value.steps };
 }
