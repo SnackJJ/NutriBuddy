@@ -8,7 +8,7 @@
 
 import { runTurn } from "./harness/loop";
 import { Tracer } from "./harness/tracer";
-import { EventLog } from "./harness/eventLog";
+import type { EventLog } from "./harness/eventLog";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
 import type { ModelAdapter } from "./harness/types";
 

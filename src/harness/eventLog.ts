@@ -30,7 +30,6 @@ export type LogEventType =
   | "error"
   | "gate_block";
 
-/** 落盘的一条事件。不可变，自描述。 */
 export interface LogEvent {
   /** 进程内单调 id，关联同一 session 内的事件。 */
   readonly id: string;
@@ -41,7 +40,7 @@ export interface LogEvent {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
-/** record 的入参：id/timestamp 由 Tracer 合成，调用方只给 type + data。 */
+/** record 的入参：id/timestamp 由 EventLog 合成，调用方只给 type + data。 */
 export interface LogEventInput {
   readonly type: LogEventType;
   readonly data?: Readonly<Record<string, unknown>>;
@@ -101,7 +100,6 @@ export class EventLog {
     this.nextId = deps.nextId ?? (() => `${sessionId}-${counter++}`);
   }
 
-  /** 合成完整事件、追加一行 JSON、返回落盘的事件供调用方关联。 */
   record(input: LogEventInput): LogEvent {
     const event: LogEvent = {
       id: this.nextId(),
@@ -113,7 +111,6 @@ export class EventLog {
     return event;
   }
 
-  /** 本 session 的 JSONL 文件路径。 */
   path(): string {
     return this.filePath;
   }

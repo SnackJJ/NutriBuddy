@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { runTurn } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
 import { EventLog, type LogEvent } from "../src/harness/eventLog";
+import { fixedDeps } from "./helpers/eventLog";
 import type { ModelAdapter, ModelRequest, ModelResponse } from "../src/harness/types";
 
 function stubAdapter(impl: (req: ModelRequest) => ModelResponse): ModelAdapter {
@@ -136,30 +137,9 @@ describe("runTurn", () => {
 
   // ─── EventLog integration ──────────────────────────────────────────────
 
-  /** 内存版 append sink，收集 JSONL 写入便于断言。 */
-  function memSink() {
-    const writes: { path: string; line: string }[] = [];
-    return {
-      writes,
-      append: (path: string, line: string) => writes.push({ path, line }),
-    };
-  }
-
-  function eventLogTestDeps(sink = memSink()) {
-    let n = 0;
-    return {
-      sink,
-      deps: {
-        append: sink.append,
-        now: () => new Date("2026-06-26T00:00:00.000Z"),
-        nextId: () => `evt_${n++}`,
-      },
-    };
-  }
-
   it("records user_message → model_call → agent_response in a single-step turn", async () => {
     const tracer = new Tracer();
-    const { sink, deps } = eventLogTestDeps();
+    const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-1", deps);
     const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
 
@@ -191,7 +171,7 @@ describe("runTurn", () => {
 
   it("records model_call per step then error when MAX_STEPS is exhausted", async () => {
     const tracer = new Tracer();
-    const { sink, deps } = eventLogTestDeps();
+    const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-2", deps);
     const adapter = stubAdapter(() => ({ content: "not done", stop: false }));
 
@@ -227,7 +207,7 @@ describe("runTurn", () => {
 
   it("records error event on abort before model call", async () => {
     const tracer = new Tracer();
-    const { sink, deps } = eventLogTestDeps();
+    const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-3", deps);
     const generate = vi.fn(async () => ({ content: "x", stop: true }));
     const controller = new AbortController();

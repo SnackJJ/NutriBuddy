@@ -1,31 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { EventLog, type LogEvent } from "../src/harness/eventLog";
+import { memSink, fixedDeps } from "./helpers/eventLog";
 
-// 一个内存版 append sink：把每次写入的 (path, line) 收下来，供断言 JSONL 行内容，
-// 不碰真实文件系统（保持单测纯净、确定）。
-function memSink() {
-  const writes: { path: string; line: string }[] = [];
-  return {
-    writes,
-    append: (path: string, line: string) => writes.push({ path, line }),
-  };
-}
-
-// 固定时钟 + 计数 id，确定性可断言。
-function fixedDeps(sink = memSink()) {
-  let n = 0;
-  return {
-    sink,
-    deps: {
-      append: sink.append,
-      now: () => new Date("2026-06-26T00:00:00.000Z"),
-      nextId: () => `evt_${n++}`,
-    },
-  };
-}
-
-describe("EventLog（事件溯源持久日志）", () => {
-  it("每条事件追加一行 JSON 到 traces/{sessionId}.jsonl，含 id/timestamp/type/data", () => {
+describe("EventLog", () => {
+  it("appends one JSON line per event to traces/{sessionId}.jsonl, with id/timestamp/type/data", () => {
     const { sink, deps } = fixedDeps();
     const log = new EventLog("sess-abc", deps);
 
@@ -45,7 +23,7 @@ describe("EventLog（事件溯源持久日志）", () => {
     });
   });
 
-  it("仅追加、按序写多行；每个 session 一个文件", () => {
+  it("appends sequentially to one file per session", () => {
     const { sink, deps } = fixedDeps();
     const log = new EventLog("s1", deps);
 
@@ -66,7 +44,7 @@ describe("EventLog（事件溯源持久日志）", () => {
     ]);
   });
 
-  it("工具调用记录完整 context（data 原样落盘）", () => {
+  it("records full tool-call context verbatim in data", () => {
     const { sink, deps } = fixedDeps();
     const log = new EventLog("s2", deps);
     const context = {
@@ -82,7 +60,7 @@ describe("EventLog（事件溯源持久日志）", () => {
     expect(parsed.data).toEqual(context);
   });
 
-  it("post-gate 硬拦记录 gate_block 事件", () => {
+  it("records gate_block events for post-gate hard blocks", () => {
     const { sink, deps } = fixedDeps();
     const log = new EventLog("s3", deps);
 
@@ -93,7 +71,7 @@ describe("EventLog（事件溯源持久日志）", () => {
     expect(parsed.data).toEqual({ reason: "unsafe_dose", rule: "ul_check" });
   });
 
-  it("data 省略时落空对象，不写 undefined", () => {
+  it("defaults data to empty object when omitted", () => {
     const { sink, deps } = fixedDeps();
     const log = new EventLog("s4", deps);
 
@@ -103,14 +81,14 @@ describe("EventLog（事件溯源持久日志）", () => {
     expect(parsed.data).toEqual({});
   });
 
-  it("拒绝会越权写出 traces/ 之外的 session_id（路径穿越防护）", () => {
+  it("rejects session IDs that would escape traces/ (path traversal protection)", () => {
     const { deps } = fixedDeps();
     expect(() => new EventLog("../etc/passwd", deps)).toThrow(/session/i);
     expect(() => new EventLog("a/b", deps)).toThrow(/session/i);
     expect(() => new EventLog("", deps)).toThrow(/session/i);
   });
 
-  it("record 返回落盘的完整事件，供调用方关联", () => {
+  it("returns the recorded event from record() for caller correlation", () => {
     const { deps } = fixedDeps();
     const log = new EventLog("s5", deps);
 
