@@ -3,6 +3,11 @@ import { runTurn } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
 import { EventLog, type LogEvent } from "../src/harness/eventLog";
 import { fixedDeps } from "./helpers/eventLog";
+import type { UserContext } from "../src/harness/gate";
+import type {
+  DrugNutrientInteraction,
+  InteractionStore,
+} from "../src/lib/drugInteractions";
 import type { ModelAdapter, ModelRequest, ModelResponse } from "../src/harness/types";
 
 function stubAdapter(impl: (req: ModelRequest) => ModelResponse): ModelAdapter {
@@ -235,5 +240,171 @@ describe("runTurn", () => {
     // should not throw
     const result = await runTurn({ userInput: "hi", adapter, tracer });
     expect(result.reply).toBe("ok");
+  });
+
+  // ─── Pre-gate / Post-gate integration ─────────────────────────────────
+
+  function fakeInteractionStore(
+    rows: DrugNutrientInteraction[],
+  ): InteractionStore {
+    return { all: async () => rows };
+  }
+
+  const HIGH_SEVERITY_INTERACTIONS: DrugNutrientInteraction[] = [
+    {
+      drugName: "warfarin",
+      nutrient: "vitamin K",
+      foodExamples: ["kale", "spinach", "broccoli"],
+      severity: "high",
+      source: "NIH ODS",
+    },
+  ];
+
+  it("injects pre-gate context into the system prompt when user context is provided", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "safe answer", stop: true }));
+
+    await runTurn({
+      userInput: "what should I eat?",
+      adapter,
+      tracer,
+      userContext: { allergies: ["peanut"], medications: ["warfarin"] },
+      interactionStore: fakeInteractionStore(HIGH_SEVERITY_INTERACTIONS),
+    });
+
+    const prompt = tracer.events().find((e) => e.type === "model_prompt");
+    expect(prompt?.payload).toContain("peanut");
+    expect(prompt?.payload).toContain("warfarin");
+    expect(prompt?.payload).toContain("vitamin K");
+    expect(prompt?.payload).toContain("SAFETY CONSTRAINT");
+  });
+
+  it("does not inject gate context when user context is absent (backward compat)", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
+
+    await runTurn({ userInput: "hi", adapter, tracer });
+
+    const prompt = tracer.events().find((e) => e.type === "model_prompt");
+    expect(prompt?.payload).not.toContain("SAFETY CONSTRAINT");
+  });
+
+  it("post-gate: retries on block and returns clean response when model fixes it", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-gate-1", deps);
+
+    // First call returns blocked content, second call returns safe content
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls++;
+      if (calls === 1) {
+        return { content: "I recommend drinking milk daily.", stop: true };
+      }
+      return { content: "I recommend drinking water.", stop: true };
+    });
+
+    const result = await runTurn({
+      userInput: "what should I drink?",
+      adapter,
+      tracer,
+      eventLog,
+      userContext: { allergies: ["milk"], medications: [] },
+      interactionStore: fakeInteractionStore([]),
+    });
+
+    // Should return the clean (second) response
+    expect(result.reply).toBe("I recommend drinking water.");
+
+    // Should have gate_block event for the first (blocked) response
+    const events: LogEvent[] = sink.writes
+      .map((w) => JSON.parse(w.line));
+    const gateBlocks = events.filter((e) => e.type === "gate_block");
+    expect(gateBlocks).toHaveLength(1);
+    expect(gateBlocks[0].data).toMatchObject({
+      attempt: 1,
+      maxRetries: 2,
+    });
+    expect(gateBlocks[0].data.reasons).toBeDefined();
+
+    // One agent_response for the clean (second) response;
+    // the blocked first response is NOT recorded as agent_response.
+    const responses = events.filter((e) => e.type === "agent_response");
+    expect(responses).toHaveLength(1);
+  });
+
+  it("post-gate: returns fallback message after 2 retries exhausted", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-gate-2", deps);
+
+    // Always returns blocked content
+    const adapter = stubAdapter(() => ({
+      content: "Drink more milk for calcium!",
+      stop: true,
+    }));
+
+    const result = await runTurn({
+      userInput: "how can I get more calcium?",
+      adapter,
+      tracer,
+      eventLog,
+      userContext: { allergies: ["milk"], medications: [] },
+      interactionStore: fakeInteractionStore([]),
+    });
+
+    // Fallback: cannot safely answer
+    expect(result.reply).toContain("cannot safely answer");
+
+    // Should have 3 gate_block events: original + 2 retries all blocked
+    const events: LogEvent[] = sink.writes
+      .map((w) => JSON.parse(w.line));
+    const gateBlocks = events.filter((e) => e.type === "gate_block");
+    expect(gateBlocks).toHaveLength(3);
+    expect(gateBlocks[0].data.attempt).toBe(1);
+    expect(gateBlocks[1].data.attempt).toBe(2);
+    expect(gateBlocks[2].data.attempt).toBe(3);
+
+    // One agent_response for the exhaustion fallback
+    const responses = events.filter((e) => e.type === "agent_response");
+    expect(responses).toHaveLength(1);
+    expect(responses[0].data.gateExhausted).toBe(true);
+  });
+
+  it("post-gate: blocks on high-severity drug-nutrient conflict in output", async () => {
+    const tracer = new Tracer();
+    const { sink, deps } = fixedDeps();
+    const eventLog = new EventLog("sess-gate-3", deps);
+
+    let calls = 0;
+    const adapter = stubAdapter(() => {
+      calls++;
+      if (calls === 1) {
+        return {
+          content: "A kale salad would be great for your health!",
+          stop: true,
+        };
+      }
+      return { content: "A cucumber salad is a safe choice.", stop: true };
+    });
+
+    const result = await runTurn({
+      userInput: "what salad should I make?",
+      adapter,
+      tracer,
+      eventLog,
+      userContext: { allergies: [], medications: ["warfarin"] },
+      interactionStore: fakeInteractionStore(HIGH_SEVERITY_INTERACTIONS),
+    });
+
+    expect(result.reply).toBe("A cucumber salad is a safe choice.");
+
+    const events: LogEvent[] = sink.writes
+      .map((w) => JSON.parse(w.line));
+    const gateBlocks = events.filter((e) => e.type === "gate_block");
+    expect(gateBlocks).toHaveLength(1);
+    const reason = (gateBlocks[0].data.reasons as string[])[0];
+    expect(reason).toContain("kale");
+    expect(reason).toContain("warfarin");
   });
 });
