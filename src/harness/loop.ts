@@ -100,14 +100,11 @@ export async function* run(
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
-  // ─── CodeAct 模板注入 ────────────────────────────────────────────
-  // 当 tools map 注册了 code_act 工具时，将预验证模板描述注入
-  // system prompt，供模型选用模板填参数（而非从零写 SQL）。
+  // CodeAct 模板注入：注册了 code_act 工具时，将白名单模板描述注入 system prompt
   const templateSection = tools?.has("code_act")
     ? buildTemplatePromptSection()
     : "";
 
-  // ─── Pre-gate：构建 pinned region，注入系统提示词 ─────────────────
   const gateCtx =
     userContext && interactionStore
       ? await buildPreGateContext(userContext, interactionStore)

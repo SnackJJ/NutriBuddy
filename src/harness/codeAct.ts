@@ -1,15 +1,8 @@
 // CodeAct Executor（issue #11 / PRD v2 §3.2「CodeAct 批量数据查询」）。
 //
-// 白名单模式执行器：只允许跑预定义 SQL 模板，模型产出 { template_id, params }
-// → executor 填参执行 → 返回结构化结果。
-//
-// 安全约束（M1 硬执行）：
-//   - 白名单：仅 SQL_TEMPLATES 中的模板可执行
-//   - 只读：SELECT only，拒 INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE
-//   - 上限：所有查询自动追加 LIMIT 100
-//   - 超时：2s 硬限制
-//
-// 执行接口（QueryExecutor）可注入，单测不触网。
+// 白名单模式：模型产出 { template_id, params } → executor 填参执行 → 返回结构化结果。
+// 安全设计：仅白名单 SQL 模板可执行 + SELECT only + LIMIT 100 + 2s 超时。
+// QueryExecutor 可注入，单测不触网。
 
 import type { ToolHandler } from "./types";
 import {
@@ -31,37 +24,20 @@ export interface CodeActDeps {
   readonly timeout?: number;
 }
 
-/** 默认超时（2s 硬限制，PRD §3.2）。 */
 const DEFAULT_TIMEOUT_MS = 2000;
+const SELECT_LEN = "SELECT".length;
+
+/** 词边界匹配的危险 DML/DDL 关键字，用于防御性深度检查。 */
+const DANGEROUS_KEYWORDS_RE = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b/i;
 
 /**
  * 验证 SQL 文本为只读（SELECT only）。
  * 防御性深度校验 —— 即使模板目录已预验证，运行时再查一次。
  */
 export function validateSqlReadOnly(sql: string): boolean {
-  const trimmed = sql.trim();
-  const upper = trimmed.toUpperCase();
-
-  if (!upper.startsWith("SELECT")) {
-    return false;
-  }
-
-  // 在 SELECT 关键字之后的部分检查危险关键字
-  const afterSelect = upper.slice(6);
-  const dangerous = [
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "DROP",
-    "ALTER",
-    "TRUNCATE",
-    "CREATE",
-  ];
-  return !dangerous.some((kw) => {
-    // 使用词边界防止子串误判（如 "SELECT_DELETE" 不会误触发）
-    const re = new RegExp(`\\b${kw}\\b`);
-    return re.test(afterSelect);
-  });
+  const upper = sql.trim().toUpperCase();
+  if (!upper.startsWith("SELECT")) return false;
+  return !DANGEROUS_KEYWORDS_RE.test(upper.slice(SELECT_LEN));
 }
 
 /**
@@ -118,7 +94,6 @@ export function createCodeActHandler(deps: CodeActDeps): ToolHandler {
 
   return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
     try {
-      // 1. 解析输入 ────────────────────────────────────────────────
       const templateId = args.template_id;
       if (typeof templateId !== "string" || templateId.length === 0) {
         return JSON.stringify({
@@ -126,10 +101,6 @@ export function createCodeActHandler(deps: CodeActDeps): ToolHandler {
         });
       }
 
-      const params =
-        (args.params as Record<string, unknown> | undefined) ?? {};
-
-      // 2. 白名单检索 ──────────────────────────────────────────────
       const template = findTemplate(templateId);
       if (!template) {
         return JSON.stringify({
@@ -137,7 +108,9 @@ export function createCodeActHandler(deps: CodeActDeps): ToolHandler {
         });
       }
 
-      // 3. 参数校验 ────────────────────────────────────────────────
+      const params =
+        (args.params as Record<string, unknown> | undefined) ?? {};
+
       const paramErrors = validateParams(template, params);
       if (paramErrors.length > 0) {
         return JSON.stringify({
@@ -145,10 +118,8 @@ export function createCodeActHandler(deps: CodeActDeps): ToolHandler {
         });
       }
 
-      // 4. 构建 SQL（追加 LIMIT） ─────────────────────────────────
       const sql = ensureLimit(template.sql);
 
-      // 5. 只读校验（防御性深度检查） ────────────────────────────
       if (!validateSqlReadOnly(sql)) {
         return JSON.stringify({
           error:
@@ -156,18 +127,15 @@ export function createCodeActHandler(deps: CodeActDeps): ToolHandler {
         });
       }
 
-      // 6. 按模板形参顺序构建参数数组 ─────────────────────────────
       const paramValues: unknown[] = template.paramNames.map(
         (name) => params[name],
       );
 
-      // 7. 带超时的查询执行 ────────────────────────────────────────
       const rows = await withTimeout(
         deps.executeQuery(sql, paramValues),
         timeoutMs,
       );
 
-      // 8. 返回结构化结果 ──────────────────────────────────────────
       return JSON.stringify({
         rows,
         rowCount: rows.length,

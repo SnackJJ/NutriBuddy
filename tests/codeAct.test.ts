@@ -4,14 +4,73 @@ import {
   findTemplate,
   validateParams,
   buildTemplatePromptSection,
-  type SqlTemplate,
 } from "../src/harness/sqlTemplates";
 import {
   createCodeActHandler,
+  validateSqlReadOnly,
   type QueryExecutor,
 } from "../src/harness/codeAct";
+import { run } from "../src/harness/loop";
+import { Tracer } from "../src/harness/tracer";
+import type {
+  ModelAdapter,
+  ModelRequest,
+  ModelResponse,
+  AgentEvent,
+  TerminalResult,
+  ToolCall,
+} from "../src/harness/types";
 
-// ─── SQL Template Catalog ─────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function fakeQueryExecutor(
+  rows: Record<string, unknown>[] = [],
+): QueryExecutor {
+  return vi.fn(async (_sql: string, _params: unknown[]) => rows);
+}
+
+function delayedExecutor(
+  ms: number,
+  rows: Record<string, unknown>[] = [],
+): QueryExecutor {
+  return async (_sql: string, _params: unknown[]) => {
+    await new Promise((r) => setTimeout(r, ms));
+    return rows;
+  };
+}
+
+/** Build params for a template, filling each param with a test value. */
+function buildParams(template: {
+  readonly paramNames: readonly string[];
+  readonly paramTypes: readonly string[];
+}): Record<string, unknown> {
+  return Object.fromEntries(
+    template.paramNames.map((name, i) => [
+      name,
+      template.paramTypes[i] === "number" ? 42 : "test-value",
+    ]),
+  );
+}
+
+function stubAdapter(
+  impl: (req: ModelRequest) => ModelResponse | Promise<ModelResponse>,
+): ModelAdapter {
+  return { generate: async (req) => impl(req) };
+}
+
+async function collect(
+  gen: AsyncGenerator<AgentEvent, TerminalResult, undefined>,
+): Promise<{ events: AgentEvent[]; result: TerminalResult }> {
+  const events: AgentEvent[] = [];
+  let next = await gen.next();
+  while (!next.done) {
+    events.push(next.value);
+    next = await gen.next();
+  }
+  return { events, result: next.value };
+}
+
+// ─── SQL Template Catalog ───────────────────────────────────────────────────
 
 describe("SQL_TEMPLATES catalog", () => {
   it("contains 3-5 pre-validated templates", () => {
@@ -49,9 +108,7 @@ describe("SQL_TEMPLATES catalog", () => {
     }
   });
 
-  it("every template SQL contains LIMIT or the executor will add it", () => {
-    // Some templates may rely on the executor's auto-LIMIT; at least
-    // verify they don't have unbounded OFFSET or other dangerous clauses.
+  it("every template SQL has no dangerous DDL/DML clauses", () => {
     for (const t of SQL_TEMPLATES) {
       expect(t.sql).not.toMatch(/DROP\b/i);
       expect(t.sql).not.toMatch(/INSERT\b/i);
@@ -79,34 +136,28 @@ describe("findTemplate", () => {
 });
 
 describe("validateParams", () => {
-  let template: SqlTemplate;
-
-  // Use a consistent template for param validation tests
-  function findFirstWithParams(count: number): SqlTemplate {
-    const t = SQL_TEMPLATES.find((t) => t.paramNames.length === count);
+  function findFirstWithParams(count: number) {
+    const t = SQL_TEMPLATES.find((tmpl) => tmpl.paramNames.length === count);
     if (!t) throw new Error(`No template with ${count} params`);
     return t;
   }
 
   it("returns empty array when params match expected types", () => {
-    template = findFirstWithParams(1);
-    // All one-param templates take a uuid "user_id" or string "drug_name"
-    const params: Record<string, unknown> = {};
-    params[template.paramNames[0]] =
-      template.paramTypes[0] === "number" ? 42 : "test-value";
+    const template = findFirstWithParams(1);
+    const params = buildParams(template);
     const errors = validateParams(template, params);
     expect(errors).toEqual([]);
   });
 
   it("returns errors for missing required params", () => {
-    template = findFirstWithParams(1);
+    const template = findFirstWithParams(1);
     const errors = validateParams(template, {});
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toContain("missing");
   });
 
   it("returns errors for extra (unknown) params", () => {
-    template = findFirstWithParams(1);
+    const template = findFirstWithParams(1);
     const params: Record<string, unknown> = {
       [template.paramNames[0]]: "test-value",
       extra_unknown_param: "should not be here",
@@ -117,17 +168,12 @@ describe("validateParams", () => {
   });
 
   it("returns errors when a number param receives a non-number string", () => {
-    // Find a template with a number param, or test the type-check logic directly
     const numTemplate = SQL_TEMPLATES.find((t) =>
       t.paramTypes.includes("number"),
     );
-    if (!numTemplate) {
-      // Skip if no number-param templates exist yet
-      return;
-    }
-    const paramName = numTemplate.paramNames[
-      numTemplate.paramTypes.indexOf("number")
-    ];
+    if (!numTemplate) return;
+    const paramIdx = numTemplate.paramTypes.indexOf("number");
+    const paramName = numTemplate.paramNames[paramIdx];
     const params: Record<string, unknown> = { [paramName]: "not-a-number" };
     const errors = validateParams(numTemplate, params);
     expect(errors.length).toBeGreaterThan(0);
@@ -145,8 +191,6 @@ describe("buildTemplatePromptSection", () => {
     const section = buildTemplatePromptSection();
     for (const t of SQL_TEMPLATES) {
       expect(section).toContain(t.id);
-      // At minimum the id is findable; description may be truncated but
-      // at least the first word should be present.
       expect(section).toContain(t.description.split(" ")[0]);
     }
   });
@@ -162,23 +206,29 @@ describe("buildTemplatePromptSection", () => {
   });
 });
 
-// ─── CodeAct Executor ─────────────────────────────────────────────────────
+// ─── validateSqlReadOnly ────────────────────────────────────────────────────
 
-function fakeQueryExecutor(
-  rows: Record<string, unknown>[] = [],
-): QueryExecutor {
-  return vi.fn(async (_sql: string, _params: unknown[]) => rows);
-}
+describe("validateSqlReadOnly", () => {
+  it("accepts SELECT statements", () => {
+    expect(validateSqlReadOnly("SELECT * FROM t")).toBe(true);
+    expect(validateSqlReadOnly("  SELECT * FROM t  ")).toBe(true);
+    expect(validateSqlReadOnly("select * from t")).toBe(true);
+  });
 
-function delayedExecutor(
-  ms: number,
-  rows: Record<string, unknown>[] = [],
-): QueryExecutor {
-  return async (_sql: string, _params: unknown[]) => {
-    await new Promise((r) => setTimeout(r, ms));
-    return rows;
-  };
-}
+  it("rejects INSERT/UPDATE/DELETE/DROP statements", () => {
+    expect(validateSqlReadOnly("INSERT INTO t VALUES (1)")).toBe(false);
+    expect(validateSqlReadOnly("UPDATE t SET x=1")).toBe(false);
+    expect(validateSqlReadOnly("DELETE FROM t")).toBe(false);
+    expect(validateSqlReadOnly("DROP TABLE t")).toBe(false);
+  });
+
+  it("rejects SELECT containing dangerous keywords after the SELECT clause", () => {
+    // e.g. "SELECT 1; DROP TABLE users" — the DROP after SELECT should be caught
+    expect(validateSqlReadOnly("SELECT 1; DROP TABLE users")).toBe(false);
+  });
+});
+
+// ─── CodeAct Executor ───────────────────────────────────────────────────────
 
 describe("createCodeActHandler", () => {
   it("returns a function", () => {
@@ -219,10 +269,9 @@ describe("createCodeActHandler", () => {
       executeQuery: fakeQueryExecutor(),
     });
 
-    const templateId = SQL_TEMPLATES[0].id;
     const result = await handler({
-      template_id: templateId,
-      params: {}, // missing required params
+      template_id: SQL_TEMPLATES[0].id,
+      params: {},
     });
 
     const parsed = JSON.parse(result);
@@ -238,14 +287,7 @@ describe("createCodeActHandler", () => {
     const handler = createCodeActHandler({ executeQuery: exec });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = template.paramTypes[
-        template.paramNames.indexOf(name)
-      ] === "number"
-        ? 42
-        : "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
@@ -257,136 +299,91 @@ describe("createCodeActHandler", () => {
   });
 
   it("passes the parameterized SQL and params to executeQuery", async () => {
-    const exec = vi.fn(async (_sql: string, _params: unknown[]) => [] as Record<string, unknown>[]);
+    const exec = vi.fn(
+      async (_sql: string, _params: unknown[]) =>
+        [] as Record<string, unknown>[],
+    );
     const handler = createCodeActHandler({ executeQuery: exec });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = template.paramTypes[
-        template.paramNames.indexOf(name)
-      ] === "number"
-        ? 42
-        : "test-value";
-    }
+    const params = buildParams(template);
 
     await handler({ template_id: template.id, params });
     expect(exec).toHaveBeenCalledOnce();
 
     const [sqlArg, paramsArg] = exec.mock.calls[0];
-    // SQL should be the template's SQL
     expect(typeof sqlArg).toBe("string");
     expect(sqlArg).toContain("SELECT");
-    // Params should contain the values we passed
     expect(Array.isArray(paramsArg)).toBe(true);
     expect(paramsArg.length).toBe(template.paramNames.length);
   });
 
   it("auto-adds LIMIT 100 when the SQL does not have a LIMIT clause", async () => {
-    const exec = vi.fn(async (_sql: string, _params: unknown[]) => [] as Record<string, unknown>[]);
+    const exec = vi.fn(
+      async (_sql: string, _params: unknown[]) =>
+        [] as Record<string, unknown>[],
+    );
     const handler = createCodeActHandler({ executeQuery: exec });
 
-    // Use a template that does NOT already have LIMIT in its SQL
     const noLimitTemplate = SQL_TEMPLATES.find(
       (t) => !t.sql.toUpperCase().includes("LIMIT"),
     );
-    if (!noLimitTemplate) return; // All templates have LIMIT — skip
+    if (!noLimitTemplate) return;
 
-    const params: Record<string, unknown> = {};
-    for (const name of noLimitTemplate.paramNames) {
-      params[name] = "test-value";
-    }
-
+    const params = buildParams(noLimitTemplate);
     await handler({ template_id: noLimitTemplate.id, params });
 
     const [sqlArg] = exec.mock.calls[0];
-    // The SQL passed to the executor must contain LIMIT
     const upperSql = sqlArg.toUpperCase();
     expect(upperSql).toContain("LIMIT");
-    // The LIMIT value should be 100 (our default ceiling)
     expect(upperSql).toMatch(/LIMIT\s+100/);
   });
 
   it("does not double-add LIMIT if the template already has one", async () => {
-    const exec = vi.fn(async (_sql: string, _params: unknown[]) => [] as Record<string, unknown>[]);
+    const exec = vi.fn(
+      async (_sql: string, _params: unknown[]) =>
+        [] as Record<string, unknown>[],
+    );
     const handler = createCodeActHandler({ executeQuery: exec });
 
-    // Find a template that already has LIMIT in its SQL
     const limitedTemplate = SQL_TEMPLATES.find((t) =>
       t.sql.toUpperCase().includes("LIMIT"),
     );
-    if (!limitedTemplate) {
-      // All templates should have LIMIT per our schema; if not, skip
-      return;
-    }
+    if (!limitedTemplate) return;
 
-    const params: Record<string, unknown> = {};
-    for (const name of limitedTemplate.paramNames) {
-      params[name] = "test-value";
-    }
-
+    const params = buildParams(limitedTemplate);
     await handler({ template_id: limitedTemplate.id, params });
 
     const [sqlArg] = exec.mock.calls[0];
-    // Count LIMIT occurrences
     const limitCount = (sqlArg.toUpperCase().match(/LIMIT/g) || []).length;
     expect(limitCount).toBe(1);
   });
 
-  it("rejects SQL that contains INSERT/UPDATE/DELETE/DROP (defense in depth)", async () => {
-    // This test verifies the SELECT-only check.
-    // Since all templates are pre-validated to be SELECT, we test that
-    // the executor enforces this check on the built SQL.
-    const exec = vi.fn(async (_sql: string, _params: unknown[]) => [] as Record<string, unknown>[]);
+  it("executes valid templates successfully (defense-in-depth check passes)", async () => {
+    const exec = vi.fn(
+      async (_sql: string, _params: unknown[]) =>
+        [] as Record<string, unknown>[],
+    );
     const handler = createCodeActHandler({ executeQuery: exec });
 
-    // All our templates are SELECT; the enforcement is tested via the
-    // catalog validation (every SQL starts with SELECT).
-    // This test confirms the runtime check exists and passes for valid templates.
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
-    // Should NOT have error about non-SELECT
     if (parsed.error) {
       expect(parsed.error).not.toMatch(/SELECT|INSERT|non-SELECT/i);
     }
   });
 
-  it("rejects calls with non-SELECT SQL even if template lookup succeeds", async () => {
-    // Defense-in-depth: even if a template somehow contains non-SELECT SQL,
-    // the executor must catch it. We test this by temporarily overriding
-    // the template lookup behavior via an internal path, or by verifying
-    // the validation logic directly.
-    // Since templates are pre-validated and immutable, we test the
-    // validation function's behavior.
-    const { validateSqlReadOnly } = await import("../src/harness/codeAct");
-
-    expect(validateSqlReadOnly("SELECT * FROM t")).toBe(true);
-    expect(validateSqlReadOnly("INSERT INTO t VALUES (1)")).toBe(false);
-    expect(validateSqlReadOnly("UPDATE t SET x=1")).toBe(false);
-    expect(validateSqlReadOnly("DELETE FROM t")).toBe(false);
-    expect(validateSqlReadOnly("DROP TABLE t")).toBe(false);
-    expect(validateSqlReadOnly("  SELECT * FROM t  ")).toBe(true);
-    // Case insensitive
-    expect(validateSqlReadOnly("select * from t")).toBe(true);
-  });
-
-  it("enforces 2-second timeout on query execution", async () => {
+  it("enforces timeout on query execution", async () => {
     const handler = createCodeActHandler({
       executeQuery: delayedExecutor(3000, []),
-      timeout: 100, // Short timeout for test
+      timeout: 100,
     });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
@@ -400,14 +397,10 @@ describe("createCodeActHandler", () => {
     });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
-    // Fast enough — should succeed with default 2000ms timeout
     expect(parsed.rows).toEqual([{ x: 1 }]);
   });
 
@@ -419,10 +412,7 @@ describe("createCodeActHandler", () => {
     });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
@@ -436,10 +426,7 @@ describe("createCodeActHandler", () => {
     });
 
     const template = SQL_TEMPLATES[0];
-    const params: Record<string, unknown> = {};
-    for (const name of template.paramNames) {
-      params[name] = "test-value";
-    }
+    const params = buildParams(template);
 
     const result = await handler({ template_id: template.id, params });
     const parsed = JSON.parse(result);
@@ -447,12 +434,11 @@ describe("createCodeActHandler", () => {
     expect(parsed.rowCount).toBe(0);
   });
 
-  it("rejects string params for uuid-typed parameters if not UUID-like", async () => {
-    // Find a template with uuid param type
+  it("rejects empty string for uuid-typed parameters", async () => {
     const uuidTemplate = SQL_TEMPLATES.find((t) =>
       t.paramTypes.includes("uuid"),
     );
-    if (!uuidTemplate) return; // Skip if no uuid templates
+    if (!uuidTemplate) return;
 
     const handler = createCodeActHandler({
       executeQuery: fakeQueryExecutor(),
@@ -467,41 +453,11 @@ describe("createCodeActHandler", () => {
       params,
     });
     const parsed = JSON.parse(result);
-    // Empty string should fail uuid validation
     expect(parsed.error).toBeDefined();
   });
 });
 
-// ─── Integration: CodeAct handler as a loop tool ─────────────────────────
-
-import { run } from "../src/harness/loop";
-import { Tracer } from "../src/harness/tracer";
-import type {
-  ModelAdapter,
-  ModelRequest,
-  ModelResponse,
-  AgentEvent,
-  TerminalResult,
-  ToolCall,
-} from "../src/harness/types";
-
-function stubAdapter(
-  impl: (req: ModelRequest) => ModelResponse | Promise<ModelResponse>,
-): ModelAdapter {
-  return { generate: async (req) => impl(req) };
-}
-
-async function collect(
-  gen: AsyncGenerator<AgentEvent, TerminalResult, undefined>,
-): Promise<{ events: AgentEvent[]; result: TerminalResult }> {
-  const events: AgentEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return { events, result: next.value };
-}
+// ─── Integration: CodeAct handler in loop ───────────────────────────────────
 
 describe("CodeAct in loop", () => {
   it("auto-injects template prompt section when code_act tool is registered", async () => {
@@ -519,7 +475,6 @@ describe("CodeAct in loop", () => {
       run({ userInput: "what's in my profile?", adapter, tracer, tools }),
     );
 
-    // The system prompt should contain the template section
     const prompt = tracer.events().find((e) => e.type === "model_prompt");
     expect(prompt?.payload).toContain("code_act");
   });
@@ -528,7 +483,6 @@ describe("CodeAct in loop", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
 
-    // No tools at all
     await collect(run({ userInput: "hi", adapter, tracer }));
 
     const prompt = tracer.events().find((e) => e.type === "model_prompt");
@@ -562,9 +516,7 @@ describe("CodeAct in loop", () => {
               name: "code_act",
               args: {
                 template_id: SQL_TEMPLATES[0].id,
-                params: Object.fromEntries(
-                  SQL_TEMPLATES[0].paramNames.map((n) => [n, "test-value"]),
-                ),
+                params: buildParams(SQL_TEMPLATES[0]),
               },
             } satisfies ToolCall,
           ],
@@ -589,11 +541,9 @@ describe("CodeAct in loop", () => {
     expect(result.reply).toContain("peanut");
     expect(callCount).toBe(2);
 
-    // Should have act event for code_act
     const act = events.find((e) => e.type === "act");
     expect(act?.toolCall?.name).toBe("code_act");
 
-    // Should have observe event with the query result
     const observe = events.find(
       (e) => e.type === "observe" && e.toolResult?.name === "code_act",
     );

@@ -1,10 +1,8 @@
 // SQL Template Catalog（issue #11 / PRD v2 §3.2「CodeAct 批量数据查询」）。
 //
-// 高频查询提供预验证 SQL 模板，注入 system prompt 的 pinned region。
-// 模型不逐小步调用单个工具，而是选模板填参数，harness 一次性执行返回结果。
-//
-// 白名单模式：M1 只允许执行此目录中的预定义模板，禁止任意 SQL。
-// 所有模板均为 SELECT only，executor 自动追加 LIMIT 100。
+// 高频查询预验证为 SELECT-only SQL 模板，注入 system prompt。
+// 模型选模板填参数，harness 一次性执行返回结果，避免模型逐小步调用工具。
+// 白名单模式：仅此目录中的模板可执行。
 
 /** 模板参数类型。 */
 export type ParamType = "string" | "number" | "uuid";
@@ -30,13 +28,14 @@ export const SQL_TEMPLATES: readonly SqlTemplate[] = [
     description:
       "Get the current user profile: allergies, medications, goal type, " +
       "nutrition targets (protein/kcal/fat/carbs), and body metrics (height/weight).",
-    sql:
-      "SELECT user_id, allergies, medications, goal_type, " +
-      "protein_target_g, kcal_target, fat_target_g, carbs_target_g, " +
-      "height_cm, weight_kg " +
-      "FROM user_profile " +
-      "WHERE user_id = $1 AND valid_to IS NULL " +
+    sql: [
+      "SELECT user_id, allergies, medications, goal_type,",
+      "protein_target_g, kcal_target, fat_target_g, carbs_target_g,",
+      "height_cm, weight_kg",
+      "FROM user_profile",
+      "WHERE user_id = $1 AND valid_to IS NULL",
       "LIMIT 1",
+    ].join("\n"),
     paramNames: ["user_id"],
     paramTypes: ["uuid"],
   },
@@ -44,11 +43,12 @@ export const SQL_TEMPLATES: readonly SqlTemplate[] = [
     id: "profile_allergies",
     description:
       "Get the current user's food allergies and intolerances.",
-    sql:
-      "SELECT allergies " +
-      "FROM user_profile " +
-      "WHERE user_id = $1 AND valid_to IS NULL " +
+    sql: [
+      "SELECT allergies",
+      "FROM user_profile",
+      "WHERE user_id = $1 AND valid_to IS NULL",
       "LIMIT 1",
+    ].join("\n"),
     paramNames: ["user_id"],
     paramTypes: ["uuid"],
   },
@@ -57,12 +57,13 @@ export const SQL_TEMPLATES: readonly SqlTemplate[] = [
     description:
       "Get the user's nutrition targets (goal type, protein, kcal, fat, carbs) " +
       "and body metrics (height, weight).",
-    sql:
-      "SELECT goal_type, protein_target_g, kcal_target, fat_target_g, " +
-      "carbs_target_g, height_cm, weight_kg " +
-      "FROM user_profile " +
-      "WHERE user_id = $1 AND valid_to IS NULL " +
+    sql: [
+      "SELECT goal_type, protein_target_g, kcal_target, fat_target_g,",
+      "carbs_target_g, height_cm, weight_kg",
+      "FROM user_profile",
+      "WHERE user_id = $1 AND valid_to IS NULL",
       "LIMIT 1",
+    ].join("\n"),
     paramNames: ["user_id"],
     paramTypes: ["uuid"],
   },
@@ -72,10 +73,11 @@ export const SQL_TEMPLATES: readonly SqlTemplate[] = [
       "Get all known drug-nutrient interactions for a specific medication " +
       "(case-insensitive match). Returns nutrient conflicts, foods to avoid, " +
       "severity, and authoritative source.",
-    sql:
-      "SELECT drug_name, nutrient, food_examples, severity, source " +
-      "FROM drug_nutrient_interactions " +
+    sql: [
+      "SELECT drug_name, nutrient, food_examples, severity, source",
+      "FROM drug_nutrient_interactions",
       "WHERE LOWER(drug_name) = LOWER($1)",
+    ].join("\n"),
     paramNames: ["drug_name"],
     paramTypes: ["string"],
   },
@@ -85,10 +87,11 @@ export const SQL_TEMPLATES: readonly SqlTemplate[] = [
       "Get all known drug-nutrient interactions in the database. " +
       "Returns drug name, nutrient, food examples, severity, and source " +
       "for every recorded interaction.",
-    sql:
-      "SELECT drug_name, nutrient, food_examples, severity, source " +
-      "FROM drug_nutrient_interactions " +
+    sql: [
+      "SELECT drug_name, nutrient, food_examples, severity, source",
+      "FROM drug_nutrient_interactions",
       "ORDER BY drug_name",
+    ].join("\n"),
     paramNames: [],
     paramTypes: [],
   },
@@ -145,6 +148,8 @@ export function validateParams(
         }
         break;
       case "uuid":
+        // 当前与 string 校验相同（均为非空字符串）；UUID 类型区分保留以
+        // 便将来加入格式校验（如 /^[0-9a-f-]{36}$/）。
         if (typeof value !== "string" || value === "") {
           errors.push(
             `param "${name}" must be a non-empty UUID string`,
@@ -159,10 +164,11 @@ export function validateParams(
 
 /** 构建注入 system prompt 的模板描述段。供 ContextAssembler pinned region 使用。 */
 export function buildTemplatePromptSection(): string {
-  const header =
-    "[TOOL: code_act] You have access to a code_act tool that runs pre-validated SQL queries. " +
-    "Call it with { \"template_id\": \"<id>\", \"params\": { \"<name>\": <value>, ... } }. " +
-    "Available templates:\n";
+  const header = [
+    "[TOOL: code_act] You have access to a code_act tool that runs pre-validated SQL queries.",
+    'Call it with { "template_id": "<id>", "params": { "<name>": <value>, ... } }.',
+    "Available templates:\n",
+  ].join(" ");
 
   const entries = SQL_TEMPLATES.map((t) => {
     const paramsDesc =
