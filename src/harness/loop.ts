@@ -19,6 +19,7 @@ import type {
   ChatMessage,
   ModelAdapter,
   ModelTier,
+  StopReason,
   TerminalResult,
   ToolHandler,
 } from "./types";
@@ -59,6 +60,7 @@ export interface RunTurnInput {
 export interface TurnResult {
   readonly reply: string;
   readonly steps: number;
+  readonly stopReason: StopReason;
 }
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
@@ -296,5 +298,5 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   while (!next.done) {
     next = await gen.next();
   }
-  return { reply: next.value.reply, steps: next.value.steps };
+  return { reply: next.value.reply, steps: next.value.steps, stopReason: next.value.stopReason };
 }
