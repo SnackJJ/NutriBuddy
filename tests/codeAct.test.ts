@@ -12,14 +12,8 @@ import {
 } from "../src/harness/codeAct";
 import { run } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
-import type {
-  ModelAdapter,
-  ModelRequest,
-  ModelResponse,
-  AgentEvent,
-  TerminalResult,
-  ToolCall,
-} from "../src/harness/types";
+import type { ToolCall } from "../src/harness/types";
+import { stubAdapter, collect } from "./helpers/loop";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -50,24 +44,6 @@ function buildParams(template: {
       template.paramTypes[i] === "number" ? 42 : "test-value",
     ]),
   );
-}
-
-function stubAdapter(
-  impl: (req: ModelRequest) => ModelResponse | Promise<ModelResponse>,
-): ModelAdapter {
-  return { generate: async (req) => impl(req) };
-}
-
-async function collect(
-  gen: AsyncGenerator<AgentEvent, TerminalResult, undefined>,
-): Promise<{ events: AgentEvent[]; result: TerminalResult }> {
-  const events: AgentEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return { events, result: next.value };
 }
 
 // ─── SQL Template Catalog ───────────────────────────────────────────────────
