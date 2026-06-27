@@ -30,7 +30,9 @@ export interface DeepSeekAdapterOptions {
 }
 
 interface ChatCompletionResponse {
-  readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
+  readonly choices?: ReadonlyArray<{
+    readonly message?: { readonly content?: string };
+  }>;
 }
 
 export class DeepSeekAdapter implements ModelAdapter {
@@ -47,10 +49,11 @@ export class DeepSeekAdapter implements ModelAdapter {
       );
     }
     this.apiKey = apiKey;
-    this.baseUrl = (options.baseUrl ?? env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL).replace(
-      /\/+$/,
-      "",
-    );
+    this.baseUrl = (
+      options.baseUrl ??
+      env.DEEPSEEK_BASE_URL ??
+      DEFAULT_BASE_URL
+    ).replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? ((url, init) => fetch(url, init));
   }
 

@@ -14,7 +14,9 @@ function fakeGateway(): ProfileGateway & { rows: ProfileRow[] } {
   return {
     rows,
     async current(userId) {
-      return rows.find((r) => r.userId === userId && r.validTo === null) ?? null;
+      return (
+        rows.find((r) => r.userId === userId && r.validTo === null) ?? null
+      );
     },
     async close(userId, validTo) {
       const open = rows.find((r) => r.userId === userId && r.validTo === null);
@@ -45,7 +47,10 @@ describe("MemoryStore.getProfile", () => {
   it("returns the current effective profile via a deterministic query", async () => {
     const gateway = fakeGateway();
     const store = createMemoryStore({ gateway, now: fakeClock() });
-    await store.updateProfile("u1", { allergies: ["peanut"], proteinTargetG: 140 });
+    await store.updateProfile("u1", {
+      allergies: ["peanut"],
+      proteinTargetG: 140,
+    });
 
     const profile = await store.getProfile("u1");
     expect(profile?.userId).toBe("u1");
@@ -73,7 +78,10 @@ describe("MemoryStore.updateProfile", () => {
   it("merges a partial patch onto the current profile, leaving untouched fields intact", async () => {
     const gateway = fakeGateway();
     const store = createMemoryStore({ gateway, now: fakeClock() });
-    await store.updateProfile("u1", { allergies: ["peanut"], proteinTargetG: 140 });
+    await store.updateProfile("u1", {
+      allergies: ["peanut"],
+      proteinTargetG: 140,
+    });
 
     const updated = await store.updateProfile("u1", { weightKg: 70 });
 

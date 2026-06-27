@@ -53,10 +53,22 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
       throw new Error(`turn aborted before step ${step}`);
     }
 
-    const messages = assembleContext({ systemPrompt, history: working, userInput });
-    tracer.record({ step, type: "model_prompt", payload: renderPrompt(messages) });
+    const messages = assembleContext({
+      systemPrompt,
+      history: working,
+      userInput,
+    });
+    tracer.record({
+      step,
+      type: "model_prompt",
+      payload: renderPrompt(messages),
+    });
 
-    const response = await adapter.generate({ model: tier, thinking, messages });
+    const response = await adapter.generate({
+      model: tier,
+      thinking,
+      messages,
+    });
     tracer.record({ step, type: "model_return", payload: response.content });
 
     reply = response.content;

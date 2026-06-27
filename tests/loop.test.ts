@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { runTurn } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
-import type { ModelAdapter, ModelRequest, ModelResponse } from "../src/harness/types";
+import type {
+  ModelAdapter,
+  ModelRequest,
+  ModelResponse,
+} from "../src/harness/types";
 
 function stubAdapter(impl: (req: ModelRequest) => ModelResponse): ModelAdapter {
   return { generate: async (req) => impl(req) };
@@ -10,7 +14,10 @@ function stubAdapter(impl: (req: ModelRequest) => ModelResponse): ModelAdapter {
 describe("runTurn", () => {
   it("runs one turn: assembles context, calls the model, returns the reply", async () => {
     const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+    const adapter = stubAdapter(() => ({
+      content: "约 6 克蛋白质",
+      stop: true,
+    }));
 
     const result = await runTurn({
       userInput: "一个鸡蛋多少蛋白质？",
@@ -39,11 +46,12 @@ describe("runTurn", () => {
 
   it("passes the model+thinking knobs through to the adapter", async () => {
     const tracer = new Tracer();
-    const generate =
-      vi.fn<(req: ModelRequest) => Promise<ModelResponse>>(async () => ({
+    const generate = vi.fn<(req: ModelRequest) => Promise<ModelResponse>>(
+      async () => ({
         content: "x",
         stop: true,
-      }));
+      }),
+    );
 
     await runTurn({
       userInput: "q",
@@ -67,7 +75,12 @@ describe("runTurn", () => {
       return { content: `step ${calls}`, stop: false };
     });
 
-    const result = await runTurn({ userInput: "go", adapter, tracer, maxSteps: 3 });
+    const result = await runTurn({
+      userInput: "go",
+      adapter,
+      tracer,
+      maxSteps: 3,
+    });
 
     expect(calls).toBe(3);
     expect(result.steps).toBe(3);
@@ -84,7 +97,12 @@ describe("runTurn", () => {
         : { content: "final", stop: true };
     });
 
-    const result = await runTurn({ userInput: "go", adapter, tracer, maxSteps: 3 });
+    const result = await runTurn({
+      userInput: "go",
+      adapter,
+      tracer,
+      maxSteps: 3,
+    });
 
     expect(result.reply).toBe("final");
     expect(result.steps).toBe(2);
@@ -112,7 +130,8 @@ describe("runTurn", () => {
       ],
     });
 
-    const prompt = tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    const prompt =
+      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
     expect(prompt).toContain("PRIOR-Q-protein in one egg");
     expect(prompt).toContain("PRIOR-A-about 6 grams");
     // history precedes this turn's input
@@ -128,7 +147,12 @@ describe("runTurn", () => {
     controller.abort();
 
     await expect(
-      runTurn({ userInput: "q", adapter: { generate }, tracer, signal: controller.signal }),
+      runTurn({
+        userInput: "q",
+        adapter: { generate },
+        tracer,
+        signal: controller.signal,
+      }),
     ).rejects.toThrow(/abort/i);
     expect(generate).not.toHaveBeenCalled();
   });

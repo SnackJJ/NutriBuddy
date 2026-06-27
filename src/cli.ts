@@ -66,7 +66,9 @@ if (invokedDirectly) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err: unknown) => {
-      process.stderr.write(`错误: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(
+        `错误: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
       process.exit(1);
     });
 }

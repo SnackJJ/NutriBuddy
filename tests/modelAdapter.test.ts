@@ -36,7 +36,9 @@ describe("DeepSeekAdapter", () => {
     const body = JSON.parse(String(captured?.init.body));
     expect(body.model).toBe(TIER_TO_MODEL_ID.flash);
     expect(body.thinking).toBe(true);
-    expect(body.messages).toEqual([{ role: "user", content: "protein in an egg?" }]);
+    expect(body.messages).toEqual([
+      { role: "user", content: "protein in an egg?" },
+    ]);
   });
 
   it("reads the key from DEEPSEEK_API_KEY when none is passed", async () => {

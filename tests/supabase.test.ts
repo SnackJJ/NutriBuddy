@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { createServerSupabase, createBrowserSupabase } from "../src/lib/supabase";
+import {
+  createServerSupabase,
+  createBrowserSupabase,
+} from "../src/lib/supabase";
 
 type Captured = { url: string; key: string; options?: unknown };
 
@@ -61,8 +64,8 @@ describe("createBrowserSupabase", () => {
     const { impl } = spyCreateClient();
     const env = { NEXT_PUBLIC_SUPABASE_URL: "https://proj.supabase.co" };
 
-    expect(() => createBrowserSupabase({ env, createClientImpl: impl })).toThrow(
-      /NEXT_PUBLIC_SUPABASE_ANON_KEY/,
-    );
+    expect(() =>
+      createBrowserSupabase({ env, createClientImpl: impl }),
+    ).toThrow(/NEXT_PUBLIC_SUPABASE_ANON_KEY/);
   });
 });

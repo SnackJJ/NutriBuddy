@@ -14,7 +14,11 @@ describe("Tracer", () => {
 
   it("renders a human-readable line per event for CLI/log viewing", () => {
     const tracer = new Tracer();
-    tracer.record({ step: 2, type: "model_prompt", payload: "system + history" });
+    tracer.record({
+      step: 2,
+      type: "model_prompt",
+      payload: "system + history",
+    });
 
     const text = tracer.render();
     expect(text).toContain("step 2");

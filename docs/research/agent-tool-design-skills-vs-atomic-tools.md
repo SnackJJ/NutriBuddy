@@ -25,22 +25,22 @@ Every doubling of tool count reduces accuracy by 1.8-3.1 percentage points. This
 
 ### 1.2 Empirical Benchmarks
 
-| Tool Count | Approximate Accuracy | Source |
-|---|---|---|
-| ~5 | ~94% | Gantz.ai empirical |
-| ~20 | ~85% | Extrapolated |
-| ~50 | ~76% | Gantz.ai; BFCL data |
-| ~200 | 41-83% (model-dependent) | AI/TLDR |
-| ~740+ | Near zero | RAG-MCP project |
+| Tool Count | Approximate Accuracy     | Source              |
+| ---------- | ------------------------ | ------------------- |
+| ~5         | ~94%                     | Gantz.ai empirical  |
+| ~20        | ~85%                     | Extrapolated        |
+| ~50        | ~76%                     | Gantz.ai; BFCL data |
+| ~200       | 41-83% (model-dependent) | AI/TLDR             |
+| ~740+      | Near zero                | RAG-MCP project     |
 
 **BFCL V4 (late 2025) — model comparison on function calling:**
 
-| Model | Overall Accuracy |
-|---|---|
-| Claude Opus 4.5 | 77.47% |
-| Claude Sonnet 4.5 | 73.24% |
-| GPT-5.2 | 55.87% |
-| GPT-4.1 | 53.96% |
+| Model             | Overall Accuracy |
+| ----------------- | ---------------- |
+| Claude Opus 4.5   | 77.47%           |
+| Claude Sonnet 4.5 | 73.24%           |
+| GPT-5.2           | 55.87%           |
+| GPT-4.1           | 53.96%           |
 
 ### 1.3 "Looking Is Not Picking" (arXiv 2606.16364, 2026)
 
@@ -60,11 +60,11 @@ CompToolBench: 17/18 models scored **higher** on composed multi-tool tasks than 
 
 ### 2.1 Architecture
 
-| Layer | Count | What's Included |
-|---|---|---|
-| Core tools | 8 | Bash, Read, Edit, Write, Grep, Glob, Agent, TodoWrite |
-| User-facing named | ~23 | Full inventory |
-| Built-in implementations | ~36-40 | Source code analysis |
+| Layer                    | Count  | What's Included                                       |
+| ------------------------ | ------ | ----------------------------------------------------- |
+| Core tools               | 8      | Bash, Read, Edit, Write, Grep, Glob, Agent, TodoWrite |
+| User-facing named        | ~23    | Full inventory                                        |
+| Built-in implementations | ~36-40 | Source code analysis                                  |
 
 ### 2.2 Atomic Design Principle
 
@@ -74,19 +74,19 @@ Anthropic's Thariq Shihipar (Agent SDK Workshop):
 
 ### 2.3 Skill vs Tool vs Slash Command
 
-| Layer | Definition | Role |
-|---|---|---|
-| Tool | Atomic function exposed via JSON Schema | "Hands" — execute I/O |
-| Skill | SKILL.md package with instructions + scripts | "Manager" — decides which tools, what order |
-| Slash Command | `/name` shortcut | UI entry point for user intent |
+| Layer         | Definition                                   | Role                                        |
+| ------------- | -------------------------------------------- | ------------------------------------------- |
+| Tool          | Atomic function exposed via JSON Schema      | "Hands" — execute I/O                       |
+| Skill         | SKILL.md package with instructions + scripts | "Manager" — decides which tools, what order |
+| Slash Command | `/name` shortcut                             | UI entry point for user intent              |
 
 ### 2.4 Three-Stage Progressive Disclosure
 
-| Level | Content | Context Cost | When Loaded |
-|---|---|---|---|
-| Metadata | name + description (frontmatter only) | ~30-100 tokens/skill | Always in system prompt |
-| Instructions | Full SKILL.md body | < 2000 tokens | On trigger (intent match or `/name`) |
-| Resources | references/, scripts/, examples/ | On demand | Only when explicitly read/run |
+| Level        | Content                               | Context Cost         | When Loaded                          |
+| ------------ | ------------------------------------- | -------------------- | ------------------------------------ |
+| Metadata     | name + description (frontmatter only) | ~30-100 tokens/skill | Always in system prompt              |
+| Instructions | Full SKILL.md body                    | < 2000 tokens        | On trigger (intent match or `/name`) |
+| Resources    | references/, scripts/, examples/      | On demand            | Only when explicitly read/run        |
 
 No algorithmic routing — the model's forward pass determines relevance via semantic understanding of the description.
 
@@ -110,12 +110,12 @@ Single-agent ReAct loop: Think → Tool Call → Observe → Repeat. Shell-first
 
 ### 4.1 Thresholds
 
-| Tool Count | Action |
-|---|---|
-| 1-10 | Flat list. No progressive disclosure. Safe zone (~94% accuracy). |
-| 10-20 | Caution zone. Start considering namespacing. |
-| 20-50 | Implement skill-like progressive disclosure. Split into sub-agents by domain. |
-| 50-100+ | RAG-based tool retrieval. Hierarchical sub-agents. Full plugin ecosystem. |
+| Tool Count | Action                                                                        |
+| ---------- | ----------------------------------------------------------------------------- |
+| 1-10       | Flat list. No progressive disclosure. Safe zone (~94% accuracy).              |
+| 10-20      | Caution zone. Start considering namespacing.                                  |
+| 20-50      | Implement skill-like progressive disclosure. Split into sub-agents by domain. |
+| 50-100+    | RAG-based tool retrieval. Hierarchical sub-agents. Full plugin ecosystem.     |
 
 ### 4.2 What Skills Actually Are
 
