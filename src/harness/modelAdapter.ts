@@ -17,7 +17,7 @@ export const TIER_TO_MODEL_ID: Record<ModelTier, string> = {
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 
-type FetchImpl = (url: string, init: RequestInit) => Promise<Response>;
+type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface DeepSeekAdapterOptions {
   /** 显式 key；缺省时从 env.DEEPSEEK_API_KEY 读。 */

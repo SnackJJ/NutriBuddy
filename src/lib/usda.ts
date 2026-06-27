@@ -243,10 +243,11 @@ export function createGetFoodNutritionTool(client: UsdaClient): ToolHandler {
         portionG = p;
       }
 
+      const trimmedName = foodName.trim();
       try {
-        const result = await client.getFoodNutrition(foodName.trim(), portionG);
+        const result = await client.getFoodNutrition(trimmedName, portionG);
         if (!result) {
-          return `未找到匹配 "${foodName}" 的食物。请尝试更具体的名称。`;
+          return `未找到匹配 "${trimmedName}" 的食物。请尝试更具体的名称。`;
         }
         return JSON.stringify(result);
       } catch (e) {
