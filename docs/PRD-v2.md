@@ -8,6 +8,7 @@
 **一句话**：一个自建 agent harness 驱动的个人营养顾问，帮用户从海量权威营养数据中提取与个人情况相关的、有据可查的建议。
 
 **核心价值**：
+
 - 用户不用自己去翻 NIH ODS、USDA 数据库——agent 帮你查、帮你算、帮你对照
 - 用户有过敏/用药等约束——agent 记在心里，推荐时自动排除
 - 每个建议都有据可查——数字来自数据库，建议来自权威指南
@@ -51,27 +52,27 @@
 
 ### 2.3 八个模块（M1 实际搭建六块）
 
-| 模块 | M1 做什么 | 推迟的 |
-|------|---------|--------|
-| **Loop** | ReAct + CodeAct 混合循环，MAX_STEPS=5 | — |
-| **ContextAssembler** | pinned region（system prompt + user profile + SQL 模板）+ 当前轮 | compaction |
-| **ToolRegistry** | `execute_query`（CodeAct SQL 执行器，模板白名单）+ `log_meal` + `get_food_nutrition` | — |
-| **MemoryStore** | profile 层（过敏、用药、目标），确定性 SQL | 情景记忆 |
-| **Verifier** | pre-gate + post-gate（几行 `if`，不拆独立模块） | 独立 Verifier 模块、覆盖判停 |
-| **Tracer** | 不可变仅追加事件日志，结构化 trajectory | — |
-| **Retriever** | **全推迟**：M1 不需要语义 RAG，所有关键数据确定性查询 | 路 B 知识 RAG |
-| **ModelAdapter** | DeepSeek / 通义千问，OpenAI-compatible 接口 | 多模型路由 |
+| 模块                 | M1 做什么                                                                            | 推迟的                       |
+| -------------------- | ------------------------------------------------------------------------------------ | ---------------------------- |
+| **Loop**             | ReAct + CodeAct 混合循环，MAX_STEPS=5                                                | —                            |
+| **ContextAssembler** | pinned region（system prompt + user profile + SQL 模板）+ 当前轮                     | compaction                   |
+| **ToolRegistry**     | `execute_query`（CodeAct SQL 执行器，模板白名单）+ `log_meal` + `get_food_nutrition` | —                            |
+| **MemoryStore**      | profile 层（过敏、用药、目标），确定性 SQL                                           | 情景记忆                     |
+| **Verifier**         | pre-gate + post-gate（几行 `if`，不拆独立模块）                                      | 独立 Verifier 模块、覆盖判停 |
+| **Tracer**           | 不可变仅追加事件日志，结构化 trajectory                                              | —                            |
+| **Retriever**        | **全推迟**：M1 不需要语义 RAG，所有关键数据确定性查询                                | 路 B 知识 RAG                |
+| **ModelAdapter**     | DeepSeek / 通义千问，OpenAI-compatible 接口                                          | 多模型路由                   |
 
 ## 3. 数据策略
 
 ### 3.1 三层数据
 
-| 层 | 内容 | 存储 | M1？ |
-|---|------|------|------|
-| **硬约束规则** | 药物-营养素相互作用（warfarin+vitamin K 等），20-30 条 | SQL 表 | ✅ M1 建 |
-| **营养数据** | 基础食材营养值 | USDA FoodData Central API | ✅ M1 接 |
-| **权威知识** | NIH ODS / USDA 膳食指南全文 | 下载→chunk→embed→pgvector | ❌ M2 |
-| **个人数据** | 用户 profile（过敏/用药/目标/身体指标） | Supabase Postgres | ✅ M1 建 |
+| 层             | 内容                                                   | 存储                      | M1？     |
+| -------------- | ------------------------------------------------------ | ------------------------- | -------- |
+| **硬约束规则** | 药物-营养素相互作用（warfarin+vitamin K 等），20-30 条 | SQL 表                    | ✅ M1 建 |
+| **营养数据**   | 基础食材营养值                                         | USDA FoodData Central API | ✅ M1 接 |
+| **权威知识**   | NIH ODS / USDA 膳食指南全文                            | 下载→chunk→embed→pgvector | ❌ M2    |
+| **个人数据**   | 用户 profile（过敏/用药/目标/身体指标）                | Supabase Postgres         | ✅ M1 建 |
 
 ### 3.2 SQL 模板注入
 
@@ -85,11 +86,11 @@
 
 ### 4.1 三层评分
 
-| 层 | 评分方式 | 成本 | 触发 |
-|---|---------|------|------|
-| **代码评** | 约束违反率、工具调用率、数字来源合规率、越界转向率 | 零 | 每次 CI |
-| **LLM judge** | 个性化、合理性、完整性 | 中等 | PR 时 |
-| **人评** | 校准 LLM judge + 争议 case | 高（时间） | 每周 10-20% 样本 |
+| 层            | 评分方式                                           | 成本       | 触发             |
+| ------------- | -------------------------------------------------- | ---------- | ---------------- |
+| **代码评**    | 约束违反率、工具调用率、数字来源合规率、越界转向率 | 零         | 每次 CI          |
+| **LLM judge** | 个性化、合理性、完整性                             | 中等       | PR 时            |
+| **人评**      | 校准 LLM judge + 争议 case                         | 高（时间） | 每周 10-20% 样本 |
 
 ### 4.2 M1 eval 集
 
@@ -99,14 +100,14 @@
 
 ## 5. 技术栈
 
-| 层 | 选型 |
-|---|------|
-| 全栈 | TypeScript |
-| 前端 | Next.js（Web 应用，界面友好，开源） |
-| 后端/Agent | Next.js API route 内跑 harness |
-| 数据库 | Supabase（Postgres + pgvector） |
-| 模型 | v1: DeepSeek / 通义千问 API；后续可选 Claude/GPT |
-| 可观测 | 自建 Tracer + 结构化 event log |
+| 层         | 选型                                             |
+| ---------- | ------------------------------------------------ |
+| 全栈       | TypeScript                                       |
+| 前端       | Next.js（Web 应用，界面友好，开源）              |
+| 后端/Agent | Next.js API route 内跑 harness                   |
+| 数据库     | Supabase（Postgres + pgvector）                  |
+| 模型       | v1: DeepSeek / 通义千问 API；后续可选 Claude/GPT |
+| 可观测     | 自建 Tracer + 结构化 event log                   |
 
 ## 6. 里程碑
 
@@ -115,10 +116,12 @@
 **范围**：Loop + ContextAssembler + ToolRegistry + MemoryStore(profile) + Tracer + ModelAdapter
 
 **验收**：
+
 > "I ate 200g chicken breast and a bowl of rice for lunch. How much protein did I get, and what's a good snack to reach my protein target?"
 > 系统：查 USDA → 计算摄入 → 对比目标 → 推荐零食 → **不含过敏原 → 有据可查**
 
 **交付物**：
+
 - 可本地运行的 Next.js Web 应用
 - 20-30 条 eval 集 + baseline 数据
 - 代码评自动化（CI）
