@@ -24,6 +24,43 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
+import { execSync } from "node:child_process";
+import { rmSync } from "node:fs";
+
+// The branch the orchestrator lives on and merges into. The host working tree
+// must always be parked here between phases — see resetHostRepo() below.
+const BASE_BRANCH = "main";
+const repoRoot = process.cwd();
+
+// Restore the host repo to a clean baseline, undoing side effects left by a
+// previous run, a hard interrupt (kill -9), or an agent that bypassed its
+// worktree and operated on the host .git directly:
+//   - host HEAD drifted onto a sandcastle/* branch — this is what makes the
+//     next createSandbox({branch}) fail with "already checked out in worktree
+//     at <repoRoot>", because the host worktree isn't a managed worktree.
+//   - leftover git locks from a killed process.
+//   - dead worktree admin records under .git/worktrees.
+// Stash is intentionally NOT touched — it may hold unmerged work and needs a
+// human decision.
+function resetHostRepo(reason: string): void {
+  console.log(`[preflight] Resetting host repo to ${BASE_BRANCH} (${reason})`);
+  for (const lock of [".git/index.lock", ".git/HEAD.lock"]) {
+    rmSync(`${repoRoot}/${lock}`, { force: true });
+  }
+  try {
+    execSync(`git checkout ${BASE_BRANCH}`, { cwd: repoRoot, stdio: "inherit" });
+  } catch {
+    // Residual changes on a drifted branch can block a plain checkout; force
+    // back to the baseline (untracked files are preserved by checkout -f).
+    execSync(`git checkout -f ${BASE_BRANCH}`, {
+      cwd: repoRoot,
+      stdio: "inherit",
+    });
+  }
+  execSync("git worktree prune", { cwd: repoRoot, stdio: "inherit" });
+}
+
+resetHostRepo("startup");
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
 // and validates it against this schema. We use Zod here, but any Standard
@@ -79,6 +116,11 @@ const AGENT = {
 
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // Re-baseline before every iteration: even if an agent polluted the host
+  // working tree last round (e.g. left HEAD on a sandcastle/* branch), this
+  // self-heals so this iteration's createSandbox({branch}) won't collide.
+  resetHostRepo(`iteration ${iteration}`);
 
   // -------------------------------------------------------------------------
   // Phase 1: Plan
