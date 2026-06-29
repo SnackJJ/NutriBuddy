@@ -70,12 +70,12 @@ export function scoreCase(
   }
 
   if (exp.shouldBeBlocked) {
-    const blocked = trace.some((e) => e.type === "post_gate_blocked");
+    const blocked = trace.some((e) => e.type === "gate_block");
     if (!blocked) {
       failures.push({
         check: "shouldBeBlocked",
         detail:
-          "期望 post-gate 硬拦（post_gate_blocked 事件），但 trace 内未出现",
+          "期望 post-gate 硬拦（gate_block 事件），但 trace 内未出现",
       });
     }
   }

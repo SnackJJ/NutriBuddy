@@ -27,7 +27,7 @@ export interface EvalExpected {
   readonly maxTurns?: number;
   /** 最终答复应为一次澄清追问（含「?」）。 */
   readonly shouldAskClarification?: boolean;
-  /** trace 里必须出现 post_gate_blocked（跨域冲突硬拦）。 */
+  /** trace 里必须出现 gate_block（跨域冲突硬拦）。 */
   readonly shouldBeBlocked?: boolean;
 }
 
