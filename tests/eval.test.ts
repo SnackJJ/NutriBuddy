@@ -511,6 +511,64 @@ describe("runHarnessEval", () => {
     // Stub adapters can resolve instantly (0ms), especially in CI
     expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
   });
+
+  it("records adapter error with EVAL_ERROR_PREFIX when adapter throws", async () => {
+    const adapter = stubAdapter(() => {
+      throw new Error("network timeout");
+    });
+
+    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+
+    const cases: EvalCase[] = [
+      { id: "t1", query: "test", category: "simple", expected: {} },
+    ];
+
+    const results = await runHarnessEval(cases, adapter, tools);
+    expect(results).toHaveLength(1);
+    // stopReason stays at default when catch block runs — no crash marker needed;
+    // the EVAL_ERROR_PREFIX marks the response as an error for scoring
+    expect(results[0].stopReason).toBe("end_turn");
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].response).toContain("network timeout");
+  });
+
+  it("preserves tool calls collected before adapter throws mid-loop", async () => {
+    // Adapter that succeeds once (with a tool call so step 1 completes)
+    // and then throws on the next call.
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+        };
+      }
+      throw new Error("model offline at step 2");
+    });
+
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+
+    const cases: EvalCase[] = [
+      {
+        id: "t1",
+        query: "test",
+        category: "simple",
+        expected: {},
+      },
+    ];
+
+    const results = await runHarnessEval(cases, adapter, tools);
+    expect(results).toHaveLength(1);
+    // Tool calls made before the crash are preserved
+    expect(results[0].toolCalls).toContain("search_food");
+    // Error is recorded with EVAL_ERROR_PREFIX for scoring
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].response).toContain("model offline at step 2");
+  });
 });
 
 // ─── Reporter tests ──────────────────────────────────────────────────────
