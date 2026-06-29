@@ -166,6 +166,30 @@ describe("scoreBare", () => {
       true,
     );
   });
+
+  it("fails when response starts with [ERROR] prefix (adapter failure)", () => {
+    const result = scoreBare(
+      "[ERROR] RateLimitExceeded: Too many requests",
+      {}, // empty expected — would previously pass silently
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations).toContain(
+      "Adapter error: RateLimitExceeded: Too many requests",
+    );
+  });
+
+  it("fails [ERROR] prefix even with non-empty expected constraints", () => {
+    const result = scoreBare(
+      "[ERROR] NetworkError: connection refused",
+      { mustNotContain: ["peanut"] },
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations.some((v) => v.startsWith("Adapter error:"))).toBe(
+      true,
+    );
+  });
 });
 
 describe("scoreHarness", () => {
@@ -384,6 +408,22 @@ describe("runBareEval", () => {
     const results = await runBareEval(cases, adapter);
     expect(results[0].passed).toBe(true);
   });
+
+  it("marks failed when adapter throws on a case with empty expected (issue #22)", async () => {
+    const adapter = stubAdapter(() => {
+      throw new Error("RateLimitExceeded");
+    });
+
+    const cases: EvalCase[] = [
+      { id: "n1", query: "test", category: "numeric", expected: {} },
+    ];
+
+    const results = await runBareEval(cases, adapter);
+    expect(results[0].caseId).toBe("n1");
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].passed).toBe(false);
+    expect(results[0].violations.length).toBeGreaterThan(0);
+  });
 });
 
 // ─── Harness runner tests ────────────────────────────────────────────────
@@ -472,7 +512,7 @@ describe("runHarnessEval", () => {
     expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("marks stopReason='crash' when the adapter throws (not 'end_turn')", async () => {
+  it("records adapter error with EVAL_ERROR_PREFIX when adapter throws", async () => {
     const adapter = stubAdapter(() => {
       throw new Error("network timeout");
     });
@@ -485,12 +525,14 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
-    expect(results[0].stopReason).toBe("crash");
+    // stopReason stays at default when catch block runs — no crash marker needed;
+    // the EVAL_ERROR_PREFIX marks the response as an error for scoring
+    expect(results[0].stopReason).toBe("end_turn");
     expect(results[0].response).toContain("[ERROR]");
     expect(results[0].response).toContain("network timeout");
   });
 
-  it("preserves the last step reached before a crash", async () => {
+  it("preserves tool calls collected before adapter throws mid-loop", async () => {
     // Adapter that succeeds once (with a tool call so step 1 completes)
     // and then throws on the next call.
     let callCount = 0;
@@ -521,9 +563,11 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
-    expect(results[0].stopReason).toBe("crash");
-    expect(results[0].steps).toBe(2); // thought for step 2 yielded before adapter threw
+    // Tool calls made before the crash are preserved
     expect(results[0].toolCalls).toContain("search_food");
+    // Error is recorded with EVAL_ERROR_PREFIX for scoring
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].response).toContain("model offline at step 2");
   });
 });
 

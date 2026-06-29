@@ -11,6 +11,11 @@
 import type { BareResult, HarnessResult, EvalExpected, EvalSummary } from "./types";
 import { checkPostGate, type UserContext } from "../harness/gate";
 
+// ─── Constants ────────────────────────────────────────────────────────────
+
+/** 当 adapter 调用失败时，runner 将错误信息加此前缀传入 response。 */
+export const EVAL_ERROR_PREFIX = "[ERROR] ";
+
 // ─── Scoring ──────────────────────────────────────────────────────────────
 
 /** 评分 bare LLM 回复。 */
@@ -20,6 +25,12 @@ export function scoreBare(
   userContext: UserContext | undefined,
 ): { passed: boolean; violations: string[] } {
   const violations: string[] = [];
+
+  // 0. 错误响应检查：空 expected 的 case 会因 prefix 绕过所有后续约束（issue #22）。
+  if (response.startsWith(EVAL_ERROR_PREFIX)) {
+    violations.push(`Adapter error: ${response.slice(EVAL_ERROR_PREFIX.length)}`);
+    return { passed: false, violations };
+  }
 
   // 1. mustNotContain 检查（大小写不敏感）
   if (expected.mustNotContain) {
