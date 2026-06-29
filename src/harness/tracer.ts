@@ -8,7 +8,9 @@ export type TraceEventType =
   | "model_return"
   | "max_steps_reached"
   | "gate_block"
-  | "gate_exhausted";
+  | "gate_exhausted"
+  | "tool_call"
+  | "post_gate_blocked";
 
 export interface TraceInput {
   readonly step: number;

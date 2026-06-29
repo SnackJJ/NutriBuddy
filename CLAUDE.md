@@ -29,4 +29,9 @@
 - 项目骨架已就绪（issue #3）：Next.js 14 App Router + TS strict + Tailwind + ESLint/Prettier；
   Supabase 客户端 `src/lib/supabase.ts`（server service-role / browser anon，含单测）；
   环境变量见 `.env.local.example`。`npm run dev` 可启动（`next build` 已验证编译通过）。
+- Eval 代码评层已就绪（issue #6，PRD §4.1/§4.2）：`src/eval/` = 25 条手工 query（五类失败模式各 5 条）
+  + `CodeScorer`（纯 TS 断言，读 TraceEvent[]：must_call_tools / must_not_contain /
+  should_ask_clarification / should_be_blocked）+ runner + `npm run eval`（pending 模式打印
+  toolless baseline，`-- --strict` 接真实 producer 后做 CI 回归闸）。Tracer 词表新增
+  `tool_call` / `post_gate_blocked`（待 ToolRegistry/Verifier 切片产出）。
 - M1 Issues 待创建
