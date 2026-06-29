@@ -250,6 +250,113 @@ describe("scoreHarness", () => {
       true,
     );
   });
+
+  // ── mustCallTools ────────────────────────────────────────────────────
+
+  it("fails when an expected tool was not called", () => {
+    const result = scoreHarness(
+      "Here is the nutrition info.",
+      [], // no tools called
+      { mustCallTools: ["search_food"] },
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations).toContain(
+      'Expected tool "search_food" was not called',
+    );
+  });
+
+  it("passes when all expected tools were called", () => {
+    const result = scoreHarness(
+      "Here is the nutrition info.",
+      ["search_food", "log_meal"],
+      { mustCallTools: ["search_food"] },
+      undefined,
+    );
+    expect(result.passed).toBe(true);
+    expect(result.violations).toHaveLength(0);
+  });
+
+  // ── shouldAskClarification ───────────────────────────────────────────
+
+  it("passes when asked to clarify and reply contains a question mark", () => {
+    const result = scoreHarness(
+      "What kind of sandwich was it?",
+      [],
+      { shouldAskClarification: true },
+      undefined,
+    );
+    expect(result.passed).toBe(true);
+    expect(result.violations).toHaveLength(0);
+  });
+
+  it("fails when clarification is expected but reply does not ask a question", () => {
+    const result = scoreHarness(
+      "A sandwich has about 300 calories.",
+      [],
+      { shouldAskClarification: true },
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations).toContain(
+      'Expected clarification question but reply did not contain "?"',
+    );
+  });
+
+  // ── shouldBeBlocked ──────────────────────────────────────────────────
+
+  it("passes when a block was expected and gate did block", () => {
+    const result = scoreHarness(
+      "Blocked by gate.",
+      [],
+      { shouldBeBlocked: true },
+      undefined,
+      1, // gateBlocks > 0
+    );
+    expect(result.passed).toBe(true);
+    expect(result.violations).toHaveLength(0);
+  });
+
+  it("fails when a block was expected but gate did not block", () => {
+    const result = scoreHarness(
+      "Sure, eat lots of spinach!",
+      [],
+      { shouldBeBlocked: true },
+      undefined,
+      0, // gateBlocks === 0
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations).toContain(
+      "Expected gate to block but it did not",
+    );
+  });
+
+  // ── Multiple violations ──────────────────────────────────────────────
+
+  it("accumulates violations across mustNotContain, mustCallTools, and shouldBeBlocked", () => {
+    const result = scoreHarness(
+      "Try peanut butter.",
+      [], // search_food not called
+      {
+        mustNotContain: ["peanut"],
+        mustCallTools: ["search_food"],
+        shouldBeBlocked: true,
+      },
+      undefined,
+      0, // gate did not block
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations.length).toBeGreaterThanOrEqual(3);
+    expect(result.violations).toContain(
+      'Response contains forbidden term: "peanut"',
+    );
+    expect(result.violations).toContain(
+      'Expected tool "search_food" was not called',
+    );
+    expect(result.violations).toContain(
+      "Expected gate to block but it did not",
+    );
+  });
 });
 
 describe("computeMetrics", () => {
@@ -525,9 +632,8 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
-    // stopReason stays at default when catch block runs — no crash marker needed;
-    // the EVAL_ERROR_PREFIX marks the response as an error for scoring
-    expect(results[0].stopReason).toBe("end_turn");
+    // Crash must be distinguishable from normal zero-step completion (issue #21)
+    expect(results[0].stopReason).toBe("crash");
     expect(results[0].response).toContain("[ERROR]");
     expect(results[0].response).toContain("network timeout");
   });
@@ -563,6 +669,10 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
+    // Crash must be distinguishable from normal completion (issue #21)
+    expect(results[0].stopReason).toBe("crash");
+    // Last step reached before the crash should be preserved
+    expect(results[0].steps).toBe(2);
     // Tool calls made before the crash are preserved
     expect(results[0].toolCalls).toContain("search_food");
     // Error is recorded with EVAL_ERROR_PREFIX for scoring
