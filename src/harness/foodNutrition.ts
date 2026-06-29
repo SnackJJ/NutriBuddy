@@ -113,14 +113,15 @@ async function stubGetFoodNutrition(
   }
 
   const scale = portionG / 100;
+  const round = (v: number) => Math.round(v * scale * 10) / 10;
 
   return {
     foodName: key,
     portionG,
-    kcal: Math.round(per100.kcal * scale * 10) / 10,
-    proteinG: Math.round(per100.protein * scale * 10) / 10,
-    fatG: Math.round(per100.fat * scale * 10) / 10,
-    carbsG: Math.round(per100.carbs * scale * 10) / 10,
+    kcal: round(per100.kcal),
+    proteinG: round(per100.protein),
+    fatG: round(per100.fat),
+    carbsG: round(per100.carbs),
     source: "USDA FoodData Central (built-in stub)",
   };
 }

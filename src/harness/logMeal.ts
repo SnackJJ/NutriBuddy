@@ -146,8 +146,7 @@ export const LOG_MEAL_SCHEMA = {
         food_name: {
           type: "string",
           description:
-            "Food name in English, e.g. 'chicken breast', 'rice', 'apple'. " +
-            "For ambiguous food descriptions, call normalize_food first.",
+            "Food name in English, e.g. 'chicken breast', 'rice', 'apple'.",
         },
         portion_g: {
           type: "number",
@@ -170,15 +169,8 @@ export const LOG_MEAL_SCHEMA = {
 /**
  * 创建 log_meal 工具处理器。
  *
- * 返回的 ToolHandler 可注入 loop 的 tools Map：
- *   tools.set("log_meal", createLogMealHandler({ getFoodNutrition, mealLogStore, userId: "..." }))
- *
- * 模型调用格式：
- *   { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" }
- *
- * 返回 JSON 字符串（成功带营养摘要，失败带 error）。
- *
- * 对应的 function-calling schema 导出为 LOG_MEAL_SCHEMA。
+ * 依赖全部可注入以便单测不触网；对应的 function-calling schema 导出为
+ * LOG_MEAL_SCHEMA。
  */
 export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
   const { getFoodNutrition, mealLogStore, userId } = deps;

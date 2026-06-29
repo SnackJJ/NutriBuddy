@@ -293,7 +293,7 @@ describe("createLogMealHandler", () => {
     });
 
     it("trims whitespace from food_name", async () => {
-      const { store, state } = memMealLogStore();
+      const { store } = memMealLogStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
         mealLogStore: store,
