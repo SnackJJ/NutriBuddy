@@ -87,11 +87,43 @@ const MAX_ITERATIONS = 10;
 // Effort levels are set per-agent (not via global env) to avoid DeepSeek
 // thinking-mode interference with structured output on simple tasks.
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
+// Hooks run inside the sandbox once it is ready, before the agent starts.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: {
+    onSandboxReady: [
+      // The image ships without a git identity, so commits would otherwise die
+      // with "Author identity unknown".
+      {
+        command:
+          'git config --global user.email "sandcastle@local" && git config --global user.name "Sandcastle Agent"',
+      },
+      // Ensure deps are present (copyToWorktree seeds node_modules; this is the
+      // safety net for platform binaries / newly added packages).
+      { command: "npm install" },
+    ],
+  },
 };
+
+// NOTE: do NOT run `git worktree repair` in the sandbox. The bind-mount
+// provider remaps the worktree to /home/agent/workspace, so git's gitdir
+// pointer is technically "incorrect" — but git tolerates that for everyday
+// commands (status/log/commit/rev-parse all work). Running `repair` rewrites
+// the host-side .git/worktrees/<id>/gitdir to the in-container path, which then
+// makes the NEXT serialized createSandbox's `git worktree prune` (run on the
+// host) consider that worktree invalid and delete its admin dir — exactly the
+// "worktree administrative directory is missing" failure we are fixing.
+
+// Worktree create/teardown are NOT concurrency-safe: sandcastle's pruneStale
+// (which runs inside createSandbox) snapshots `git worktree list`, then
+// fs.removes any .sandcastle/worktrees dir absent from that snapshot. Running it
+// while a sibling worktree is live — being created OR running an agent — can
+// delete a still-in-use worktree, corrupting its git admin dir. That is the
+// root of the intermittent "worktree administrative directory is missing" /
+// "not a git repository: .git/worktrees/<id>" failures that stop implementers
+// from committing (confirmed: uid mapping is fine; pruneStale lives in
+// node_modules and can't be changed). Phase 2 below therefore creates and
+// closes all sandboxes serially and only runs the agents concurrently — the run
+// phase touches no worktree metadata, so nothing can corrupt a live worktree.
 
 // Copy node_modules from the host into the worktree before each sandbox
 // starts. Avoids a full npm install from scratch; the hook above handles
@@ -193,64 +225,88 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 2: Execute + Review
+  // Phase 2: Execute + Review (3 sub-phases — see the pruneStale note above)
   //
-  // For each issue, create a sandbox via createSandbox() so the implementer
-  // and reviewer share the same sandbox instance per branch. The implementer
-  // runs first; if it produces commits, the reviewer runs in the same sandbox.
+  //   2a. Create every sandbox SERIALLY. Each createSandbox's pruneStale then
+  //       sees the previously-created worktrees as registered/active and leaves
+  //       them alone, so no worktree's admin dir gets deleted mid-flight.
+  //   2b. Run implementers/reviewers CONCURRENTLY. No createSandbox runs here,
+  //       so no pruneStale runs, so nothing can corrupt a live worktree.
+  //   2c. Close every sandbox SERIALLY.
   //
-  // Promise.allSettled means one failing pipeline doesn't cancel the others.
+  // Promise.allSettled (2b) means one failing pipeline doesn't cancel others.
   // -------------------------------------------------------------------------
 
-  const settled = await Promise.allSettled(
-    issues.map(async (issue) => {
+  // 2a. Create all sandboxes serially.
+  const created: Array<{
+    issue: (typeof issues)[number];
+    sandbox?: Awaited<ReturnType<typeof sandcastle.createSandbox>>;
+    error?: unknown;
+  }> = [];
+  for (const issue of issues) {
+    try {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
         sandbox: docker(),
         hooks,
         copyToWorktree,
       });
+      created.push({ issue, sandbox });
+    } catch (error) {
+      created.push({ issue, error });
+    }
+  }
 
-      try {
-        // Run the implementer
-        const implement = await sandbox.run({
-          name: "implementer",
-          maxIterations: 100,
-          agent: AGENT.implementer,
-          promptFile: "./.sandcastle/implement-prompt.md",
+  // 2b. Run the agents concurrently (indices stay aligned with `issues`).
+  const settled = await Promise.allSettled(
+    created.map(async ({ issue, sandbox, error }) => {
+      if (!sandbox) {
+        throw error ?? new Error(`sandbox creation failed for ${issue.id}`);
+      }
+
+      // Run the implementer
+      const implement = await sandbox.run({
+        name: "implementer",
+        maxIterations: 100,
+        agent: AGENT.implementer,
+        promptFile: "./.sandcastle/implement-prompt.md",
+        promptArgs: {
+          TASK_ID: issue.id,
+          ISSUE_TITLE: issue.title,
+          BRANCH: issue.branch,
+        },
+      });
+
+      // Only review if the implementer produced commits
+      if (implement.commits.length > 0) {
+        const review = await sandbox.run({
+          name: "reviewer",
+          maxIterations: 1,
+          agent: AGENT.reviewer,
+          promptFile: "./.sandcastle/review-prompt.md",
           promptArgs: {
-            TASK_ID: issue.id,
-            ISSUE_TITLE: issue.title,
             BRANCH: issue.branch,
           },
         });
 
-        // Only review if the implementer produced commits
-        if (implement.commits.length > 0) {
-          const review = await sandbox.run({
-            name: "reviewer",
-            maxIterations: 1,
-            agent: AGENT.reviewer,
-            promptFile: "./.sandcastle/review-prompt.md",
-            promptArgs: {
-              BRANCH: issue.branch,
-            },
-          });
-
-          // Merge commits from both runs so the merge phase sees all of them.
-          // Each sandbox.run() only returns commits from its own run.
-          return {
-            ...review,
-            commits: [...implement.commits, ...review.commits],
-          };
-        }
-
-        return implement;
-      } finally {
-        await sandbox.close();
+        // Merge commits from both runs so the merge phase sees all of them.
+        // Each sandbox.run() only returns commits from its own run.
+        return {
+          ...review,
+          commits: [...implement.commits, ...review.commits],
+        };
       }
+
+      return implement;
     }),
   );
+
+  // 2c. Close all sandboxes serially (teardown also touches worktree metadata).
+  for (const { sandbox } of created) {
+    if (sandbox) {
+      await sandbox.close();
+    }
+  }
 
   // Log any agents that threw (network error, sandbox crash, etc.).
   for (const [i, outcome] of settled.entries()) {
