@@ -1,6 +1,5 @@
 // ⑦ Tracer：记录 turn 内每一步（模型看到什么 / 决定什么 / 返回什么）。
-// 早做可观测，debug 快十倍（PRD §10）。本切片记录三类事件：用户输入、
-// 发给模型的最终 prompt、模型返回；外加 loop 撞上限的标记。
+// 早做可观测，debug 快十倍（PRD §10）。
 
 export type TraceEventType =
   | "user_input"
@@ -9,8 +8,7 @@ export type TraceEventType =
   | "max_steps_reached"
   | "gate_block"
   | "gate_exhausted"
-  | "tool_call"
-  | "post_gate_blocked";
+  | "tool_call";
 
 export interface TraceInput {
   readonly step: number;

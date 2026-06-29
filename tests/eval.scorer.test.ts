@@ -128,13 +128,13 @@ describe("scoreCase", () => {
   });
 
   describe("shouldBeBlocked", () => {
-    it("passes when a post_gate_blocked event is present", () => {
+    it("passes when a gate_block event is present", () => {
       const c = { ...baseCase, expected: { shouldBeBlocked: true } };
       const r = scoreCase(
         c,
         trace({
           step: 1,
-          type: "post_gate_blocked",
+          type: "gate_block",
           payload: "warfarin ∩ vitamin K",
         }),
       );

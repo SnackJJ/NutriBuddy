@@ -51,7 +51,7 @@ describe("eval run (npm run eval entrypoint)", () => {
         events.push({ step: 1, type: "tool_call", payload: tool });
       }
       if (c.expected.shouldBeBlocked) {
-        events.push({ step: 1, type: "post_gate_blocked", payload: "blocked" });
+        events.push({ step: 1, type: "gate_block", payload: "blocked" });
       }
       events.push({
         step: 2,
