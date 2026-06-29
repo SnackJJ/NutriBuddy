@@ -128,6 +128,43 @@ function errorResponse(message: string): string {
   return JSON.stringify({ error: message });
 }
 
+// ─── OpenAI Function-Calling Schema ────────────────────────────────────────
+
+/** log_meal 的 OpenAI function-calling 工具定义。 */
+export const LOG_MEAL_SCHEMA = {
+  type: "function" as const,
+  function: {
+    name: "log_meal",
+    description:
+      "Log a meal to the user's food diary. Provide food name, portion in grams, " +
+      "and meal type (breakfast/lunch/dinner/snack). The tool automatically looks up " +
+      "USDA nutrition data and stores the entry. Returns a confirmation message with " +
+      "a nutrition summary (kcal, protein, fat, carbs).",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        food_name: {
+          type: "string",
+          description:
+            "Food name in English, e.g. 'chicken breast', 'rice', 'apple'. " +
+            "For ambiguous food descriptions, call normalize_food first.",
+        },
+        portion_g: {
+          type: "number",
+          description: "Portion size in grams, must be > 0. E.g. 200 for 200g.",
+        },
+        meal_type: {
+          type: "string",
+          enum: ["breakfast", "lunch", "dinner", "snack"],
+          description:
+            "Meal type. Defaults to 'snack' if omitted.",
+        },
+      },
+      required: ["food_name", "portion_g"],
+    },
+  },
+};
+
 // ─── 工具工厂 ─────────────────────────────────────────────────────────────
 
 /**
@@ -140,6 +177,8 @@ function errorResponse(message: string): string {
  *   { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" }
  *
  * 返回 JSON 字符串（成功带营养摘要，失败带 error）。
+ *
+ * 对应的 function-calling schema 导出为 LOG_MEAL_SCHEMA。
  */
 export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
   const { getFoodNutrition, mealLogStore, userId } = deps;

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { createLogMealHandler, type MealLogStore, type MealLogEntry } from "../src/harness/logMeal";
+import {
+  createLogMealHandler,
+  LOG_MEAL_SCHEMA,
+  type MealLogStore,
+  type MealLogEntry,
+} from "../src/harness/logMeal";
 import type { GetFoodNutrition, NutritionData } from "../src/harness/foodNutrition";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -446,6 +451,47 @@ describe("createLogMealHandler", () => {
       expect(typeof parsed.nutrition_summary.protein_g).toBe("number");
       expect(typeof parsed.nutrition_summary.fat_g).toBe("number");
       expect(typeof parsed.nutrition_summary.carbs_g).toBe("number");
+    });
+  });
+
+  // ─── Schema Export ────────────────────────────────────────────────────────
+
+  describe("LOG_MEAL_SCHEMA", () => {
+    it("is exported and in OpenAI function-calling format", () => {
+      expect(LOG_MEAL_SCHEMA).toBeDefined();
+      expect(LOG_MEAL_SCHEMA.type).toBe("function");
+      expect(LOG_MEAL_SCHEMA.function).toBeDefined();
+      expect(LOG_MEAL_SCHEMA.function.name).toBe("log_meal");
+      expect(typeof LOG_MEAL_SCHEMA.function.description).toBe("string");
+      expect(LOG_MEAL_SCHEMA.function.description.length).toBeGreaterThan(0);
+    });
+
+    it("declares food_name as a required string parameter", () => {
+      const params = LOG_MEAL_SCHEMA.function.parameters;
+      expect(params.type).toBe("object");
+      expect(params.properties.food_name).toBeDefined();
+      expect(params.properties.food_name.type).toBe("string");
+      expect(params.required).toContain("food_name");
+    });
+
+    it("declares portion_g as a required number parameter", () => {
+      const params = LOG_MEAL_SCHEMA.function.parameters;
+      expect(params.properties.portion_g).toBeDefined();
+      expect(params.properties.portion_g.type).toBe("number");
+      expect(params.required).toContain("portion_g");
+    });
+
+    it("declares meal_type as an optional enum parameter", () => {
+      const params = LOG_MEAL_SCHEMA.function.parameters;
+      expect(params.properties.meal_type).toBeDefined();
+      expect(params.properties.meal_type.type).toBe("string");
+      expect(params.properties.meal_type.enum).toEqual([
+        "breakfast",
+        "lunch",
+        "dinner",
+        "snack",
+      ]);
+      expect(params.required).not.toContain("meal_type");
     });
   });
 });
