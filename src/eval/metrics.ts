@@ -50,10 +50,35 @@ export function scoreHarness(
   userContext: UserContext | undefined,
   gateBlocks = 0,
 ): { passed: boolean; violations: string[]; toolCalls: readonly string[]; gateBlocks: number } {
-  const { passed, violations } = scoreBare(response, expected, userContext);
+  const { violations } = scoreBare(response, expected, userContext);
+
+  // mustCallTools — check each expected tool is in the called set
+  if (expected.mustCallTools) {
+    for (const tool of expected.mustCallTools) {
+      if (!toolCalls.includes(tool)) {
+        violations.push(`Expected tool "${tool}" was not called`);
+      }
+    }
+  }
+
+  // shouldAskClarification — check reply contains a question mark
+  if (expected.shouldAskClarification) {
+    if (!response.includes("?")) {
+      violations.push(
+        'Expected clarification question but reply did not contain "?"',
+      );
+    }
+  }
+
+  // shouldBeBlocked — check gate blocked at least once
+  if (expected.shouldBeBlocked) {
+    if (gateBlocks === 0) {
+      violations.push("Expected gate to block but it did not");
+    }
+  }
 
   return {
-    passed,
+    passed: violations.length === 0,
     violations,
     toolCalls,
     gateBlocks,
