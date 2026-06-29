@@ -71,6 +71,11 @@ export async function runHarnessEval(
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
+      // Count gate blocks that occurred before the crash (issue #26)
+      gateBlocks = tracer
+        .events()
+        .filter((e) => e.type === "gate_block")
+        .length;
     }
 
     const durationMs = Date.now() - start;

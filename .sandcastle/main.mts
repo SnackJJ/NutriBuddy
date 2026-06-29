@@ -238,6 +238,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
       // A markdown list of issue IDs and titles, one per line.
       ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
+      CLOSE_TASK_COMMAND:
+        'gh issue close <ID> --comment "Completed by Sandcastle"',
     },
   });
 

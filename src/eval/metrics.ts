@@ -68,6 +68,13 @@ export function scoreHarness(
   userContext: UserContext | undefined,
   gateBlocks = 0,
 ): { passed: boolean; violations: string[]; toolCalls: readonly string[]; gateBlocks: number } {
+  // Adapter error — short-circuit: further checks are noise against the
+  // error message (issue #25).
+  if (response.startsWith(EVAL_ERROR_PREFIX)) {
+    const { violations } = scoreBare(response, expected, userContext);
+    return { passed: false, violations, toolCalls, gateBlocks };
+  }
+
   const { violations } = scoreBare(response, expected, userContext);
 
   if (expected.mustCallTools) {
