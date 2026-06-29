@@ -3,8 +3,6 @@
 // scoreCase (scorer.ts) 和 scoreHarness (metrics.ts) 各自实现了三份并行的
 // mustCallTools / shouldAskClarification / shouldBeBlocked 检查，提取为纯函数
 // 使两个调用方共用同一份检查逻辑。
-//
-// 三个函数都是零副作用的纯函数：接受输入，返回布尔或字符串数组。
 
 /**
  * 检查必须调用的工具是否都被调用。

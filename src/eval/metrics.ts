@@ -85,7 +85,8 @@ export function scoreHarness(
     );
   }
 
-  if (expected.shouldBeBlocked && !checkShouldBeBlocked(gateBlocks > 0)) {
+  const wasBlocked = checkShouldBeBlocked(gateBlocks > 0);
+  if (expected.shouldBeBlocked && !wasBlocked) {
     violations.push("Expected gate to block but it did not");
   }
 

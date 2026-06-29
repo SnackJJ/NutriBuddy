@@ -73,10 +73,10 @@ export function scoreCase(
     });
   }
 
-  if (
-    exp.shouldBeBlocked &&
-    !checkShouldBeBlocked(trace.some((e) => e.type === "gate_block"))
-  ) {
+  const wasBlocked = checkShouldBeBlocked(
+    trace.some((e) => e.type === "gate_block"),
+  );
+  if (exp.shouldBeBlocked && !wasBlocked) {
     failures.push({
       check: "shouldBeBlocked",
       detail: "期望 post-gate 硬拦（gate_block 事件），但 trace 内未出现",
