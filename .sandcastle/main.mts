@@ -24,6 +24,16 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
+import { ensureHostOnBase } from "../src/lib/ensureHostOnBase";
+
+// The branch the orchestrator lives on and merges into. The host working tree
+// must be parked here before sandcastle operations begin — otherwise a host
+// HEAD left on a sandcastle/* branch from a prior run or interrupt blocks the
+// next createSandbox({branch}) with "already checked out in worktree".
+const BASE_BRANCH = "main";
+const repoRoot = process.cwd();
+
+ensureHostOnBase(repoRoot, BASE_BRANCH);
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
 // and validates it against this schema. We use Zod here, but any Standard
