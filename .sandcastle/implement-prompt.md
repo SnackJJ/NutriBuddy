@@ -57,25 +57,6 @@ Do not close the issue - this will be done later.
 
 Once complete, output <promise>COMPLETE</promise>.
 
-# GIT BOUNDARY — DO NOT CROSS
-
-You are already checked out on the correct branch `{{BRANCH}}` inside an
-isolated worktree. The repository's branch management is owned by the
-orchestrator, NOT by you. Therefore:
-
-- DO NOT run `git checkout`, `git switch`, `git branch`, `git reset`,
-  `git merge`, `git rebase`, `git stash`, or `git worktree` (add/remove/prune).
-- DO NOT set `GIT_DIR`, `GIT_WORK_TREE`, `--git-dir`, or `--work-tree`, and do
-  not write anything under `.git/` (including `.git/worktrees/...`).
-- The ONLY git commands you may run are read-only inspection (`git status`,
-  `git log`, `git diff`, `git show`) plus `git add` and `git commit` for your
-  own changes.
-- If git reports the worktree is broken or missing (e.g. "fatal: not a git
-  repository", "worktree administrative directory is missing"), STOP
-  immediately. Do not try to repair, rebuild, or work around it. Report the
-  failure on the issue and exit. Attempting to fix git state corrupts the
-  shared host repository and breaks other parallel agents.
-
 # FINAL RULES
 
 ONLY WORK ON A SINGLE TASK.

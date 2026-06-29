@@ -8,12 +8,19 @@
 // 工具调用检测：模型产出 toolCalls 时，loop 通过注入的 tools Map
 // dispatch 每条调用，将 tool_result 回灌为 user 消息后继续循环。
 
-import { assembleContext, DEFAULT_SYSTEM_PROMPT } from "./contextAssembler";
+import {
+  assembleContext,
+  assemblePinnedRegion,
+  buildTemplatePromptSection,
+  DEFAULT_SYSTEM_PROMPT,
+  type PinnedRegion,
+} from "./contextAssembler";
 import type {
   AgentEvent,
   ChatMessage,
   ModelAdapter,
   ModelTier,
+  StopReason,
   TerminalResult,
   ToolHandler,
 } from "./types";
@@ -53,6 +60,7 @@ export interface RunTurnInput {
 export interface TurnResult {
   readonly reply: string;
   readonly steps: number;
+  readonly stopReason: StopReason;
 }
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
@@ -99,15 +107,33 @@ export async function* run(
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
-  // ─── Pre-gate：构建 pinned region，注入系统提示词 ─────────────────
+  // CodeAct 模板注入：注册了 code_act 工具时，将白名单模板描述注入 system prompt
+  const templateSection = tools?.has("code_act")
+    ? buildTemplatePromptSection()
+    : undefined;
   const gateCtx =
     userContext && interactionStore
       ? await buildPreGateContext(userContext, interactionStore)
       : null;
-  const effectiveSystemPrompt = gateCtx?.pinnedRegion
-    ? `${systemPrompt}\n\n${gateCtx.pinnedRegion}`
-    : systemPrompt;
+
   const interactions = gateCtx?.interactions ?? [];
+
+  // 工具定义：从 tools Map 提取名称作为可用工具列表
+  const toolDefs =
+    tools && tools.size > 0
+      ? [...tools.keys()].map((name) => ({
+          name,
+          description: `Callable tool: ${name}`,
+        }))
+      : undefined;
+
+  // 构建 pinned region（AOT，跨轮字节稳定，最大化 prompt cache 命中）
+  const pinned: PinnedRegion = {
+    systemPrompt,
+    userProfile: gateCtx?.pinnedRegion || undefined,
+    sqlTemplates: templateSection,
+    toolDefs,
+  };
 
   // working set 随步骤增长：工具结果回灌为 user 消息，未交卷的模型产出
   // 回灌为 assistant 消息。
@@ -123,7 +149,7 @@ export async function* run(
 
     // ── Thought ──────────────────────────────────────────────────────
     const messages = assembleContext({
-      systemPrompt: effectiveSystemPrompt,
+      pinned,
       history: working,
       userInput,
     });
@@ -134,7 +160,7 @@ export async function* run(
     });
     eventLog?.record({
       type: "model_call",
-      data: { step, model: tier, thinking, systemPrompt: effectiveSystemPrompt },
+      data: { step, model: tier, thinking, systemPrompt: assemblePinnedRegion(pinned) },
     });
 
     yield { type: "thought", step };
@@ -271,5 +297,5 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   while (!next.done) {
     next = await gen.next();
   }
-  return { reply: next.value.reply, steps: next.value.steps };
+  return { reply: next.value.reply, steps: next.value.steps, stopReason: next.value.stopReason };
 }
