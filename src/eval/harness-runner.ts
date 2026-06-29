@@ -8,7 +8,7 @@ import { run } from "../harness/loop";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase, HarnessResult } from "./types";
-import { scoreHarness } from "./metrics";
+import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 
 /**
  * 对一批 eval case 执行完整 harness 运行。
@@ -68,7 +68,7 @@ export async function runHarnessEval(
         .filter((e) => e.type === "gate_block")
         .length;
     } catch (err) {
-      reply = `[ERROR] ${String(err)}`;
+      reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
     }
 
     const durationMs = Date.now() - start;

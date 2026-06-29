@@ -5,7 +5,7 @@
 
 import type { ModelAdapter } from "../harness/types";
 import type { EvalCase, BareResult } from "./types";
-import { scoreBare } from "./metrics";
+import { scoreBare, EVAL_ERROR_PREFIX } from "./metrics";
 
 /**
  * 对一批 eval case 执行裸 LLM 运行。
@@ -29,7 +29,7 @@ export async function runBareEval(
       });
       response = modelResp.content;
     } catch (err) {
-      response = `[ERROR] ${String(err)}`;
+      response = `${EVAL_ERROR_PREFIX}${String(err)}`;
     }
 
     const durationMs = Date.now() - start;
