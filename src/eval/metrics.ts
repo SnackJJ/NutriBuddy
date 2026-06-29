@@ -12,6 +12,11 @@
 
 import type { BareResult, HarnessResult, EvalExpected, EvalSummary } from "./types";
 import { checkPostGate, type UserContext } from "../harness/gate";
+import {
+  checkMustCallTools,
+  checkShouldAskClarification,
+  checkShouldBeBlocked,
+} from "./checks";
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -66,20 +71,21 @@ export function scoreHarness(
   const { violations } = scoreBare(response, expected, userContext);
 
   if (expected.mustCallTools) {
-    for (const tool of expected.mustCallTools) {
-      if (!toolCalls.includes(tool)) {
-        violations.push(`Expected tool "${tool}" was not called`);
-      }
+    for (const tool of checkMustCallTools(expected.mustCallTools, toolCalls)) {
+      violations.push(`Expected tool "${tool}" was not called`);
     }
   }
 
-  if (expected.shouldAskClarification && !response.includes("?")) {
+  if (
+    expected.shouldAskClarification &&
+    !checkShouldAskClarification(response)
+  ) {
     violations.push(
       'Expected clarification question but reply did not contain "?"',
     );
   }
 
-  if (expected.shouldBeBlocked && gateBlocks === 0) {
+  if (expected.shouldBeBlocked && !checkShouldBeBlocked(gateBlocks > 0)) {
     violations.push("Expected gate to block but it did not");
   }
 

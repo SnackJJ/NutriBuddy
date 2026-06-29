@@ -4,6 +4,11 @@
 
 import type { TraceEvent } from "../harness/tracer";
 import type { EvalCase, ScoreFailure, ScoreResult } from "./types";
+import {
+  checkMustCallTools,
+  checkShouldAskClarification,
+  checkShouldBeBlocked,
+} from "./checks";
 
 /** tool_call 的 payload 约定为工具名，或 JSON {name,args}；两种都解析出工具名。 */
 function extractToolName(payload: string): string {
@@ -39,13 +44,14 @@ export function scoreCase(
     .map((e) => extractToolName(e.payload));
   const reply = finalReply(trace);
 
-  for (const tool of exp.mustCallTools ?? []) {
-    if (!calledTools.includes(tool)) {
-      failures.push({
-        check: "mustCallTools",
-        detail: `期望调用工具 "${tool}"；实际调用 [${calledTools.join(", ")}]`,
-      });
-    }
+  for (const tool of checkMustCallTools(
+    exp.mustCallTools ?? [],
+    calledTools,
+  )) {
+    failures.push({
+      check: "mustCallTools",
+      detail: `期望调用工具 "${tool}"；实际调用 [${calledTools.join(", ")}]`,
+    });
   }
 
   for (const phrase of exp.mustNotContain ?? []) {
@@ -60,24 +66,21 @@ export function scoreCase(
     }
   }
 
-  if (exp.shouldAskClarification) {
-    if (reply === undefined || !reply.includes("?")) {
-      failures.push({
-        check: "shouldAskClarification",
-        detail: `期望一次澄清追问（含「?」），实际：${reply ?? "<无答复>"}`,
-      });
-    }
+  if (exp.shouldAskClarification && !checkShouldAskClarification(reply)) {
+    failures.push({
+      check: "shouldAskClarification",
+      detail: `期望一次澄清追问（含「?」），实际：${reply ?? "<无答复>"}`,
+    });
   }
 
-  if (exp.shouldBeBlocked) {
-    const blocked = trace.some((e) => e.type === "gate_block");
-    if (!blocked) {
-      failures.push({
-        check: "shouldBeBlocked",
-        detail:
-          "期望 post-gate 硬拦（gate_block 事件），但 trace 内未出现",
-      });
-    }
+  if (
+    exp.shouldBeBlocked &&
+    !checkShouldBeBlocked(trace.some((e) => e.type === "gate_block"))
+  ) {
+    failures.push({
+      check: "shouldBeBlocked",
+      detail: "期望 post-gate 硬拦（gate_block 事件），但 trace 内未出现",
+    });
   }
 
   return { caseId: evalCase.id, passed: failures.length === 0, failures };
