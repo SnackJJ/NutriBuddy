@@ -7,7 +7,7 @@
 // pendingProducer（空 trace）占位——此时凡需工具/拦截/追问的 case 都「失败」，是诚实的
 // 无 harness 基线，而非框架 bug，故默认（非 strict）不让它把 CI 染红。
 
-import { EVAL_CASES } from "./cases";
+import { loadEvalCases } from "./dataset";
 import { runEval } from "./runner";
 import type { EvalCategory, EvalReport, TraceProducer } from "./types";
 
@@ -15,16 +15,17 @@ import type { EvalCategory, EvalReport, TraceProducer } from "./types";
 export const pendingProducer: TraceProducer = async () => [];
 
 const CATEGORIES: readonly EvalCategory[] = [
-  "simple_query",
-  "constrained_query",
-  "number_hallucination",
-  "cross_domain_conflict",
-  "ambiguous_food",
+  "simple",
+  "constrained",
+  "numeric",
+  "cross_domain",
+  "edge_case",
 ];
 
 function formatReport(report: EvalReport, strict: boolean): string {
   const lines: string[] = [];
-  const byName = new Map(EVAL_CASES.map((c) => [c.name, c.category] as const));
+  const cases = loadEvalCases();
+  const byId = new Map(cases.map((c) => [c.id, c.category] as const));
 
   lines.push("=== NutriBuddy 代码评 (CodeScorer) ===");
   if (!strict) {
@@ -34,11 +35,11 @@ function formatReport(report: EvalReport, strict: boolean): string {
   }
 
   for (const cat of CATEGORIES) {
-    const inCat = report.results.filter((r) => byName.get(r.name) === cat);
+    const inCat = report.results.filter((r) => byId.get(r.caseId) === cat);
     const pass = inCat.filter((r) => r.passed).length;
     lines.push(`\n${cat}  (${pass}/${inCat.length})`);
     for (const r of inCat) {
-      lines.push(`  ${r.passed ? "PASS" : "FAIL"}  ${r.name}`);
+      lines.push(`  ${r.passed ? "PASS" : "FAIL"}  ${r.caseId}`);
       for (const f of r.failures) {
         lines.push(`        - [${f.check}] ${f.detail}`);
       }
@@ -64,7 +65,8 @@ export async function main(
   const produceTrace = deps.produceTrace ?? pendingProducer;
   const stdout = deps.stdout ?? ((s) => process.stdout.write(s));
 
-  const report = await runEval(EVAL_CASES, produceTrace);
+  const cases = loadEvalCases();
+  const report = await runEval(cases, produceTrace);
   stdout(formatReport(report, strict));
 
   // strict：有失败即非零（CI 回归闸）。非 strict（pending baseline）：恒 0，框架本身绿即可。

@@ -39,46 +39,46 @@ export function scoreCase(
     .map((e) => extractToolName(e.payload));
   const reply = finalReply(trace);
 
-  for (const tool of exp.must_call_tools ?? []) {
+  for (const tool of exp.mustCallTools ?? []) {
     if (!calledTools.includes(tool)) {
       failures.push({
-        check: "must_call_tools",
+        check: "mustCallTools",
         detail: `期望调用工具 "${tool}"；实际调用 [${calledTools.join(", ")}]`,
       });
     }
   }
 
-  for (const phrase of exp.must_not_contain ?? []) {
+  for (const phrase of exp.mustNotContain ?? []) {
     if (
       reply !== undefined &&
       reply.toLowerCase().includes(phrase.toLowerCase())
     ) {
       failures.push({
-        check: "must_not_contain",
+        check: "mustNotContain",
         detail: `最终答复含禁止子串 "${phrase}"`,
       });
     }
   }
 
-  if (exp.should_ask_clarification) {
+  if (exp.shouldAskClarification) {
     if (reply === undefined || !reply.includes("?")) {
       failures.push({
-        check: "should_ask_clarification",
+        check: "shouldAskClarification",
         detail: `期望一次澄清追问（含「?」），实际：${reply ?? "<无答复>"}`,
       });
     }
   }
 
-  if (exp.should_be_blocked) {
+  if (exp.shouldBeBlocked) {
     const blocked = trace.some((e) => e.type === "post_gate_blocked");
     if (!blocked) {
       failures.push({
-        check: "should_be_blocked",
+        check: "shouldBeBlocked",
         detail:
           "期望 post-gate 硬拦（post_gate_blocked 事件），但 trace 内未出现",
       });
     }
   }
 
-  return { name: evalCase.name, passed: failures.length === 0, failures };
+  return { caseId: evalCase.id, passed: failures.length === 0, failures };
 }

@@ -15,8 +15,8 @@ describe("eval run (npm run eval entrypoint)", () => {
       stdout: (s) => out.push(s),
     });
     const text = out.join("");
-    expect(text).toContain("simple_query");
-    expect(text).toContain("cross_domain_conflict");
+    expect(text).toContain("simple");
+    expect(text).toContain("cross_domain");
     // 全量 = 25 条
     expect(text).toMatch(/25/);
     // pending 模式：非 strict，返回 0（框架本身绿）
@@ -25,9 +25,8 @@ describe("eval run (npm run eval entrypoint)", () => {
 
   it("pendingProducer yields an empty trace (no live agent wired yet)", async () => {
     const t = await pendingProducer({
-      name: "x",
-      category: "simple_query",
-      userProfile: {},
+      id: "x",
+      category: "simple",
       query: "q",
       expected: {},
     });
@@ -48,16 +47,16 @@ describe("eval run (npm run eval entrypoint)", () => {
     // 一个理想 producer：按每条 case 的期望伪造一条全通过的 trace。
     const idealProducer: TraceProducer = async (c) => {
       const events: TraceInput[] = [];
-      for (const tool of c.expected.must_call_tools ?? []) {
+      for (const tool of c.expected.mustCallTools ?? []) {
         events.push({ step: 1, type: "tool_call", payload: tool });
       }
-      if (c.expected.should_be_blocked) {
+      if (c.expected.shouldBeBlocked) {
         events.push({ step: 1, type: "post_gate_blocked", payload: "blocked" });
       }
       events.push({
         step: 2,
         type: "model_return",
-        payload: c.expected.should_ask_clarification
+        payload: c.expected.shouldAskClarification
           ? "Which one did you mean?"
           : "ok",
       });

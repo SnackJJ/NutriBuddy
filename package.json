@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "npx tsx src/eval/run.ts"
+    "eval": "npx tsx src/eval/index.ts"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.10.0",

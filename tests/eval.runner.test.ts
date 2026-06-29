@@ -9,18 +9,17 @@ function trace(...events: TraceInput[]): TraceEvent[] {
 
 const cases: EvalCase[] = [
   {
-    name: "needs-tool",
-    category: "simple_query",
-    userProfile: {},
+    id: "needs-tool",
+    category: "simple",
     query: "q1",
-    expected: { must_call_tools: ["get_food_nutrition"] },
+    expected: { mustCallTools: ["get_food_nutrition"] },
   },
   {
-    name: "needs-block",
-    category: "cross_domain_conflict",
-    userProfile: { medications: ["warfarin"] },
+    id: "needs-block",
+    category: "cross_domain",
     query: "q2",
-    expected: { should_be_blocked: true },
+    expected: { shouldBeBlocked: true },
+    userContext: { allergies: [], medications: ["warfarin"] },
   },
 ];
 
@@ -28,7 +27,7 @@ describe("runEval", () => {
   it("scores each case via the injected producer and aggregates totals", async () => {
     // producer: first case calls the tool (pass), second never blocks (fail).
     const producer: TraceProducer = async (c) =>
-      c.name === "needs-tool"
+      c.id === "needs-tool"
         ? trace({ step: 1, type: "tool_call", payload: "get_food_nutrition" })
         : trace({
             step: 1,
@@ -41,14 +40,14 @@ describe("runEval", () => {
     expect(report.total).toBe(2);
     expect(report.passed).toBe(1);
     expect(report.failed).toBe(1);
-    expect(report.results.map((r) => r.name)).toEqual([
+    expect(report.results.map((r) => r.caseId)).toEqual([
       "needs-tool",
       "needs-block",
     ]);
-    expect(report.results.find((r) => r.name === "needs-tool")?.passed).toBe(
+    expect(report.results.find((r) => r.caseId === "needs-tool")?.passed).toBe(
       true,
     );
-    expect(report.results.find((r) => r.name === "needs-block")?.passed).toBe(
+    expect(report.results.find((r) => r.caseId === "needs-block")?.passed).toBe(
       false,
     );
   });

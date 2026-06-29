@@ -17,10 +17,10 @@ export async function runEval(
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       results.push({
-        name: evalCase.name,
+        caseId: evalCase.id,
         passed: false,
         failures: [
-          { check: "must_call_tools", detail: `trace 生产失败: ${detail}` },
+          { check: "trace_producer", detail: `trace 生产失败: ${detail}` },
         ],
       });
     }
@@ -29,8 +29,27 @@ export async function runEval(
   const passed = results.filter((r) => r.passed).length;
   return {
     results,
+    comparison: [],
+    summary: {
+      total: results.length,
+      barePassRate: 0,
+      harnessPassRate: 0,
+      constraintViolationRate: { bare: 0, harness: 0 },
+      toolCallRate: 0,
+      sourceComplianceRate: { bare: 0, harness: 0 },
+      gateTurnRate: 0,
+    },
     total: results.length,
     passed,
     failed: results.length - passed,
+    renderText() {
+      // 降级渲染：仅代码评分结果，不含 baseline 对比。
+      const lines = results.map(
+        (r) => `${r.passed ? "PASS" : "FAIL"} ${r.caseId}` +
+          r.failures.map((f) => `\n  - [${f.check}] ${f.detail}`).join(""),
+      );
+      lines.push(`\n总计 ${passed}/${results.length} 通过。`);
+      return lines.join("\n");
+    },
   };
 }

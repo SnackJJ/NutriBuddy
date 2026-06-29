@@ -9,9 +9,8 @@ function trace(...events: TraceInput[]): TraceEvent[] {
 }
 
 const baseCase: EvalCase = {
-  name: "x",
-  category: "simple_query",
-  userProfile: {},
+  id: "x",
+  category: "simple",
   query: "q",
   expected: {},
 };
@@ -21,14 +20,14 @@ describe("scoreCase", () => {
     const r = scoreCase(baseCase, trace());
     expect(r.passed).toBe(true);
     expect(r.failures).toEqual([]);
-    expect(r.name).toBe("x");
+    expect(r.caseId).toBe("x");
   });
 
-  describe("must_call_tools", () => {
+  describe("mustCallTools", () => {
     it("passes when the required tool was called", () => {
       const c = {
         ...baseCase,
-        expected: { must_call_tools: ["get_food_nutrition"] },
+        expected: { mustCallTools: ["get_food_nutrition"] },
       };
       const r = scoreCase(
         c,
@@ -40,20 +39,20 @@ describe("scoreCase", () => {
     it("fails when the required tool was not called", () => {
       const c = {
         ...baseCase,
-        expected: { must_call_tools: ["get_food_nutrition"] },
+        expected: { mustCallTools: ["get_food_nutrition"] },
       };
       const r = scoreCase(
         c,
         trace({ step: 1, type: "model_return", payload: "guessing" }),
       );
       expect(r.passed).toBe(false);
-      expect(r.failures[0].check).toBe("must_call_tools");
+      expect(r.failures[0].check).toBe("mustCallTools");
     });
 
     it("reads the tool name out of a JSON tool_call payload", () => {
       const c = {
         ...baseCase,
-        expected: { must_call_tools: ["normalize_food"] },
+        expected: { mustCallTools: ["normalize_food"] },
       };
       const r = scoreCase(
         c,
@@ -67,9 +66,9 @@ describe("scoreCase", () => {
     });
   });
 
-  describe("must_not_contain", () => {
+  describe("mustNotContain", () => {
     it("fails when the final reply contains a forbidden phrase (case-insensitive)", () => {
-      const c = { ...baseCase, expected: { must_not_contain: ["peanut"] } };
+      const c = { ...baseCase, expected: { mustNotContain: ["peanut"] } };
       const r = scoreCase(
         c,
         trace({
@@ -79,11 +78,11 @@ describe("scoreCase", () => {
         }),
       );
       expect(r.passed).toBe(false);
-      expect(r.failures[0].check).toBe("must_not_contain");
+      expect(r.failures[0].check).toBe("mustNotContain");
     });
 
     it("only checks the final model_return, not intermediate steps", () => {
-      const c = { ...baseCase, expected: { must_not_contain: ["peanut"] } };
+      const c = { ...baseCase, expected: { mustNotContain: ["peanut"] } };
       const r = scoreCase(
         c,
         trace(
@@ -99,9 +98,9 @@ describe("scoreCase", () => {
     });
   });
 
-  describe("should_ask_clarification", () => {
+  describe("shouldAskClarification", () => {
     it("passes when the final reply asks a question", () => {
-      const c = { ...baseCase, expected: { should_ask_clarification: true } };
+      const c = { ...baseCase, expected: { shouldAskClarification: true } };
       const r = scoreCase(
         c,
         trace({
@@ -114,7 +113,7 @@ describe("scoreCase", () => {
     });
 
     it("fails when the final reply just answers without asking", () => {
-      const c = { ...baseCase, expected: { should_ask_clarification: true } };
+      const c = { ...baseCase, expected: { shouldAskClarification: true } };
       const r = scoreCase(
         c,
         trace({
@@ -124,13 +123,13 @@ describe("scoreCase", () => {
         }),
       );
       expect(r.passed).toBe(false);
-      expect(r.failures[0].check).toBe("should_ask_clarification");
+      expect(r.failures[0].check).toBe("shouldAskClarification");
     });
   });
 
-  describe("should_be_blocked", () => {
+  describe("shouldBeBlocked", () => {
     it("passes when a post_gate_blocked event is present", () => {
-      const c = { ...baseCase, expected: { should_be_blocked: true } };
+      const c = { ...baseCase, expected: { shouldBeBlocked: true } };
       const r = scoreCase(
         c,
         trace({
@@ -143,7 +142,7 @@ describe("scoreCase", () => {
     });
 
     it("fails when nothing blocked the reply", () => {
-      const c = { ...baseCase, expected: { should_be_blocked: true } };
+      const c = { ...baseCase, expected: { shouldBeBlocked: true } };
       const r = scoreCase(
         c,
         trace({
@@ -153,7 +152,7 @@ describe("scoreCase", () => {
         }),
       );
       expect(r.passed).toBe(false);
-      expect(r.failures[0].check).toBe("should_be_blocked");
+      expect(r.failures[0].check).toBe("shouldBeBlocked");
     });
   });
 
@@ -161,8 +160,8 @@ describe("scoreCase", () => {
     const c: EvalCase = {
       ...baseCase,
       expected: {
-        must_call_tools: ["get_food_nutrition"],
-        should_be_blocked: true,
+        mustCallTools: ["get_food_nutrition"],
+        shouldBeBlocked: true,
       },
     };
     const r = scoreCase(
@@ -171,8 +170,8 @@ describe("scoreCase", () => {
     );
     expect(r.passed).toBe(false);
     expect(r.failures.map((f) => f.check).sort()).toEqual([
-      "must_call_tools",
-      "should_be_blocked",
+      "mustCallTools",
+      "shouldBeBlocked",
     ]);
   });
 });
