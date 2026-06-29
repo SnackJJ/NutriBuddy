@@ -471,6 +471,60 @@ describe("runHarnessEval", () => {
     // Stub adapters can resolve instantly (0ms), especially in CI
     expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
   });
+
+  it("marks stopReason='crash' when the adapter throws (not 'end_turn')", async () => {
+    const adapter = stubAdapter(() => {
+      throw new Error("network timeout");
+    });
+
+    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+
+    const cases: EvalCase[] = [
+      { id: "t1", query: "test", category: "simple", expected: {} },
+    ];
+
+    const results = await runHarnessEval(cases, adapter, tools);
+    expect(results).toHaveLength(1);
+    expect(results[0].stopReason).toBe("crash");
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].response).toContain("network timeout");
+  });
+
+  it("preserves the last step reached before a crash", async () => {
+    // Adapter that succeeds once (with a tool call so step 1 completes)
+    // and then throws on the next call.
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+        };
+      }
+      throw new Error("model offline at step 2");
+    });
+
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+
+    const cases: EvalCase[] = [
+      {
+        id: "t1",
+        query: "test",
+        category: "simple",
+        expected: {},
+      },
+    ];
+
+    const results = await runHarnessEval(cases, adapter, tools);
+    expect(results).toHaveLength(1);
+    expect(results[0].stopReason).toBe("crash");
+    expect(results[0].steps).toBe(2); // thought for step 2 yielded before adapter threw
+    expect(results[0].toolCalls).toContain("search_food");
+  });
 });
 
 // ─── Reporter tests ──────────────────────────────────────────────────────
