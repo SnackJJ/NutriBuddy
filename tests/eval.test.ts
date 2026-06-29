@@ -166,6 +166,30 @@ describe("scoreBare", () => {
       true,
     );
   });
+
+  it("fails when response starts with [ERROR] prefix (adapter failure)", () => {
+    const result = scoreBare(
+      "[ERROR] RateLimitExceeded: Too many requests",
+      {}, // empty expected — would previously pass silently
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations).toContain(
+      "Adapter error: RateLimitExceeded: Too many requests",
+    );
+  });
+
+  it("fails [ERROR] prefix even with non-empty expected constraints", () => {
+    const result = scoreBare(
+      "[ERROR] NetworkError: connection refused",
+      { mustNotContain: ["peanut"] },
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations.some((v) => v.startsWith("Adapter error:"))).toBe(
+      true,
+    );
+  });
 });
 
 describe("scoreHarness", () => {
@@ -383,6 +407,22 @@ describe("runBareEval", () => {
 
     const results = await runBareEval(cases, adapter);
     expect(results[0].passed).toBe(true);
+  });
+
+  it("marks failed when adapter throws on a case with empty expected (issue #22)", async () => {
+    const adapter = stubAdapter(() => {
+      throw new Error("RateLimitExceeded");
+    });
+
+    const cases: EvalCase[] = [
+      { id: "n1", query: "test", category: "numeric", expected: {} },
+    ];
+
+    const results = await runBareEval(cases, adapter);
+    expect(results[0].caseId).toBe("n1");
+    expect(results[0].response).toContain("[ERROR]");
+    expect(results[0].passed).toBe(false);
+    expect(results[0].violations.length).toBeGreaterThan(0);
   });
 });
 

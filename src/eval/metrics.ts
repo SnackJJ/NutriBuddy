@@ -21,6 +21,13 @@ export function scoreBare(
 ): { passed: boolean; violations: string[] } {
   const violations: string[] = [];
 
+  // 0. 检测 adapter 错误：避免 [ERROR] 前缀绕过空 expected 约束
+  //    （issue #22 — RateLimitExceeded 等错误静默通过 expected: {} 的 case）
+  if (response.startsWith("[ERROR]")) {
+    violations.push(`Adapter error: ${response.slice("[ERROR] ".length)}`);
+    return { passed: false, violations };
+  }
+
   // 1. mustNotContain 检查（大小写不敏感）
   if (expected.mustNotContain) {
     for (const term of expected.mustNotContain) {
