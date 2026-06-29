@@ -525,9 +525,8 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
-    // stopReason stays at default when catch block runs — no crash marker needed;
-    // the EVAL_ERROR_PREFIX marks the response as an error for scoring
-    expect(results[0].stopReason).toBe("end_turn");
+    // Crash must be distinguishable from normal zero-step completion (issue #21)
+    expect(results[0].stopReason).toBe("crash");
     expect(results[0].response).toContain("[ERROR]");
     expect(results[0].response).toContain("network timeout");
   });
@@ -563,6 +562,10 @@ describe("runHarnessEval", () => {
 
     const results = await runHarnessEval(cases, adapter, tools);
     expect(results).toHaveLength(1);
+    // Crash must be distinguishable from normal completion (issue #21)
+    expect(results[0].stopReason).toBe("crash");
+    // Last step reached before the crash should be preserved
+    expect(results[0].steps).toBe(2);
     // Tool calls made before the crash are preserved
     expect(results[0].toolCalls).toContain("search_food");
     // Error is recorded with EVAL_ERROR_PREFIX for scoring

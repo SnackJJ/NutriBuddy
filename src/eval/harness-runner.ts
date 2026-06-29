@@ -51,6 +51,7 @@ export async function runHarnessEval(
       let next = await gen.next();
       while (!next.done) {
         const event = next.value;
+        steps = event.step; // track last-seen step before potential crash (issue #21)
         if (event.type === "act" && event.toolCall) {
           toolCalls.push(event.toolCall.name);
         }
@@ -69,6 +70,7 @@ export async function runHarnessEval(
         .length;
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
+      stopReason = "crash";
     }
 
     const durationMs = Date.now() - start;
