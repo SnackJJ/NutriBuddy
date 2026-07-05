@@ -80,7 +80,11 @@ export interface TurnEndEvent extends TurnEvent {
   readonly result: TurnResult;
 }
 
-export type AnyTurnEvent = TurnStartEvent | TurnStepEvent | TurnGateVerdictEvent | TurnEndEvent;
+export type AnyTurnEvent =
+  | TurnStartEvent
+  | TurnStepEvent
+  | TurnGateVerdictEvent
+  | TurnEndEvent;
 
 /** Final result emitted in turn_end and returned by the turn generator. */
 export type TurnResult = TerminalResult;
@@ -89,6 +93,10 @@ export type TurnEventHandler = (event: AnyTurnEvent) => void;
 
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
+type GateVerdictEventDetails = Pick<
+  TurnGateVerdictEvent,
+  "checkpoint" | "verdict" | "checkName" | "evidence"
+>;
 
 function createEventMetadata(clock: Clock): NextEventMetadata {
   let seq = 0;
@@ -122,27 +130,24 @@ function createTurnEndEvent(
 }
 
 function createGateVerdictEvent(
-  checkpoint: GateCheckpoint,
-  verdict: GateVerdict,
-  checkName: string,
-  evidence: string,
+  details: GateVerdictEventDetails,
   nextMetadata: NextEventMetadata,
 ): TurnGateVerdictEvent {
   return {
     ...nextMetadata(),
     type: "gate_verdict",
-    checkpoint,
-    verdict,
-    checkName,
-    evidence,
+    ...details,
   };
 }
 
-/** Extract post-gate block evidence from the tracer for gate verdict events. */
-function extractGateEvidence(tracer: { events(): { type: string; payload: string }[] }): string {
-  const gateBlocks = tracer.events().filter((e) => e.type === "gate_block");
-  if (gateBlocks.length === 0) return "No safety violations detected";
-  // Use the last gate_block event (the one that exhausted retries)
+function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
+  const gateBlocks = tracer
+    .events()
+    .filter((event) => event.type === "gate_block");
+  if (gateBlocks.length === 0) {
+    return "No safety violations detected";
+  }
+
   const lastBlock = gateBlocks[gateBlocks.length - 1];
   return `Blocked: ${lastBlock.payload}`;
 }
@@ -161,10 +166,12 @@ async function* runUtteranceTurn(
     // Emit tool gate verdict after each tool observation
     if (next.value.type === "observe" && next.value.toolResult) {
       yield createGateVerdictEvent(
-        "tool",
-        "pass",
-        "tool_gate_check",
-        `Tool ${next.value.toolResult.name} executed successfully`,
+        {
+          checkpoint: "tool",
+          verdict: "pass",
+          checkName: "tool_gate_check",
+          evidence: `Tool ${next.value.toolResult.name} executed successfully`,
+        },
         nextMetadata,
       );
     }
@@ -236,12 +243,13 @@ export async function* turn(
 
   yield createTurnStartEvent(input, nextMetadata);
 
-  // Input gate verdict: always passes in minimal slice (checkpoint established)
   yield createGateVerdictEvent(
-    "input",
-    "pass",
-    "pre_gate_input_check",
-    "Input accepted for processing",
+    {
+      checkpoint: "input",
+      verdict: "pass",
+      checkName: "pre_gate_input_check",
+      evidence: "Input accepted for processing",
+    },
     nextMetadata,
   );
 
@@ -256,29 +264,32 @@ export async function* turn(
       break;
   }
 
-  // Output gate verdict: reflects post-gate result
-  const blocked = result.stopReason === "gate_blocked";
-  const outputEvidence = blocked
+  const isGateBlocked = result.stopReason === "gate_blocked";
+  const outputEvidence = isGateBlocked
     ? extractGateEvidence(ports.tracer)
     : "Output passed safety checks";
 
-  // Only emit output gate for utterance turns (proposal_confirm has no model call)
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
-      "output",
-      blocked ? "block" : "pass",
-      "post_gate_output_check",
-      outputEvidence,
+      {
+        checkpoint: "output",
+        verdict: isGateBlocked ? "block" : "pass",
+        checkName: "post_gate_output_check",
+        evidence: outputEvidence,
+      },
       nextMetadata,
     );
   }
 
-  // Commit gate verdict: final word on whether response is safe to commit
   yield createGateVerdictEvent(
-    "commit",
-    blocked ? "block" : "pass",
-    "commit_gate_check",
-    blocked ? outputEvidence : "Response committed successfully",
+    {
+      checkpoint: "commit",
+      verdict: isGateBlocked ? "block" : "pass",
+      checkName: "commit_gate_check",
+      evidence: isGateBlocked
+        ? outputEvidence
+        : "Response committed successfully",
+    },
     nextMetadata,
   );
 

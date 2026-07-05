@@ -5,6 +5,7 @@ import {
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
+  type TurnGateVerdictEvent,
   type TurnInput,
   type TurnPorts,
   type TurnResult,
@@ -71,6 +72,31 @@ function eventsOfType<T extends AnyTurnEvent["type"]>(
   type: T,
 ): TurnEventOf<T>[] {
   return events.filter((event): event is TurnEventOf<T> => event.type === type);
+}
+
+function gateVerdicts(events: readonly AnyTurnEvent[]): TurnGateVerdictEvent[] {
+  return eventsOfType(events, "gate_verdict");
+}
+
+function expectGateVerdict(
+  events: readonly AnyTurnEvent[],
+  checkpoint: TurnGateVerdictEvent["checkpoint"],
+): TurnGateVerdictEvent {
+  const verdict = gateVerdicts(events).find(
+    (event) => event.checkpoint === checkpoint,
+  );
+
+  expect(verdict).toBeDefined();
+  if (!verdict) {
+    throw new Error(`expected ${checkpoint} gate verdict`);
+  }
+
+  return verdict;
+}
+
+function countBlockedGateVerdicts(events: readonly AnyTurnEvent[]): number {
+  return gateVerdicts(events).filter((event) => event.verdict === "block")
+    .length;
 }
 
 function expectStartEvent(events: readonly AnyTurnEvent[]): TurnStartEvent {
@@ -778,28 +804,12 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    const inputVerdict = gateVerdicts.find((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "input";
-    });
+    const inputVerdict = expectGateVerdict(events, "input");
 
-    expect(inputVerdict).toBeDefined();
-
-    const gv = inputVerdict as {
-      type: "gate_verdict";
-      checkpoint: string;
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-
-    expect(gv.checkpoint).toBe("input");
-    expect(gv.verdict).toBe("pass");
-    expect(gv.checkName).toBe("pre_gate_input_check");
-    expect(gv.evidence.length).toBeGreaterThan(0);
-    // Sequence: input gate verdict comes after turn_start
-    expect(events.indexOf(gv as AnyTurnEvent)).toBeGreaterThan(
+    expect(inputVerdict.verdict).toBe("pass");
+    expect(inputVerdict.checkName).toBe("pre_gate_input_check");
+    expect(inputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(events.indexOf(inputVerdict)).toBeGreaterThan(
       events.findIndex((e) => e.type === "turn_start"),
     );
   });
@@ -825,26 +835,11 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    const toolVerdicts = gateVerdicts.filter((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "tool";
-    });
+    const toolVerdict = expectGateVerdict(events, "tool");
 
-    expect(toolVerdicts.length).toBeGreaterThanOrEqual(1);
-
-    const tv = toolVerdicts[0] as {
-      type: "gate_verdict";
-      checkpoint: string;
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-
-    expect(tv.checkpoint).toBe("tool");
-    expect(tv.verdict).toBe("pass");
-    expect(tv.checkName).toBe("tool_gate_check");
-    expect(tv.evidence).toContain("search_food");
+    expect(toolVerdict.verdict).toBe("pass");
+    expect(toolVerdict.checkName).toBe("tool_gate_check");
+    expect(toolVerdict.evidence).toContain("search_food");
   });
 
   it("emits output and commit gate verdicts with pass on clean turns", async () => {
@@ -853,37 +848,15 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    const outputVerdict = gateVerdicts.find((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "output";
-    });
-    const commitVerdict = gateVerdicts.find((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "commit";
-    });
+    const outputVerdict = expectGateVerdict(events, "output");
+    const commitVerdict = expectGateVerdict(events, "commit");
 
-    expect(outputVerdict).toBeDefined();
-    const ov = outputVerdict as {
-      type: "gate_verdict";
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-    expect(ov.verdict).toBe("pass");
-    expect(ov.checkName).toBe("post_gate_output_check");
-    expect(ov.evidence.length).toBeGreaterThan(0);
-
-    expect(commitVerdict).toBeDefined();
-    const cv = commitVerdict as {
-      type: "gate_verdict";
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-    expect(cv.verdict).toBe("pass");
-    expect(cv.checkName).toBe("commit_gate_check");
-    expect(cv.evidence.length).toBeGreaterThan(0);
+    expect(outputVerdict.verdict).toBe("pass");
+    expect(outputVerdict.checkName).toBe("post_gate_output_check");
+    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(commitVerdict.verdict).toBe("pass");
+    expect(commitVerdict.checkName).toBe("commit_gate_check");
+    expect(commitVerdict.evidence.length).toBeGreaterThan(0);
   });
 
   it("emits blocking output and commit gate verdicts when post-gate blocks", async () => {
@@ -902,41 +875,16 @@ describe("gate verdict events", () => {
 
     expect(result.stopReason).toBe("gate_blocked");
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    const outputVerdict = gateVerdicts.find((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "output";
-    });
-    const commitVerdict = gateVerdicts.find((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint === "commit";
-    });
+    const outputVerdict = expectGateVerdict(events, "output");
+    const commitVerdict = expectGateVerdict(events, "commit");
 
-    // Output gate verdict: blocked
-    expect(outputVerdict).toBeDefined();
-    const ov = outputVerdict as {
-      type: "gate_verdict";
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-    expect(ov.verdict).toBe("block");
-    expect(ov.checkName).toBe("post_gate_output_check");
-    expect(ov.evidence.length).toBeGreaterThan(0);
-    // Evidence mentions the block without needing to match exact prose
-    expect(ov.evidence.toLowerCase()).toContain("block");
-
-    // Commit gate verdict: blocked
-    expect(commitVerdict).toBeDefined();
-    const cv = commitVerdict as {
-      type: "gate_verdict";
-      verdict: string;
-      checkName: string;
-      evidence: string;
-    };
-    expect(cv.verdict).toBe("block");
-    expect(cv.checkName).toBe("commit_gate_check");
-    expect(cv.evidence.length).toBeGreaterThan(0);
+    expect(outputVerdict.verdict).toBe("block");
+    expect(outputVerdict.checkName).toBe("post_gate_output_check");
+    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(outputVerdict.evidence.toLowerCase()).toContain("block");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.checkName).toBe("commit_gate_check");
+    expect(commitVerdict.evidence.length).toBeGreaterThan(0);
   });
 
   it("gate verdict events carry valid schema and metadata", async () => {
@@ -945,16 +893,16 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    expect(gateVerdicts.length).toBeGreaterThanOrEqual(3); // input, output, commit (no tool gate on turn without tools)
+    const gateEvents = gateVerdicts(events);
+    expect(gateEvents.length).toBeGreaterThanOrEqual(3); // input, output, commit (no tool gate on turn without tools)
 
-    for (const gv of gateVerdicts) {
+    for (const gv of gateEvents) {
       expect(gv.schema).toBe(SCHEMA_VERSION);
       expect(typeof gv.seq).toBe("number");
-      expect(typeof (gv as { checkpoint: string }).checkpoint).toBe("string");
-      expect(typeof (gv as { verdict: string }).verdict).toBe("string");
-      expect(typeof (gv as { checkName: string }).checkName).toBe("string");
-      expect(typeof (gv as { evidence: string }).evidence).toBe("string");
+      expect(typeof gv.checkpoint).toBe("string");
+      expect(typeof gv.verdict).toBe("string");
+      expect(typeof gv.checkName).toBe("string");
+      expect(typeof gv.evidence).toBe("string");
     }
   });
 
@@ -968,11 +916,7 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const gateVerdicts = events.filter((e) => e.type === "gate_verdict");
-    const checkpoints = gateVerdicts.map((e) => {
-      const gv = e as { checkpoint: string };
-      return gv.checkpoint;
-    });
+    const checkpoints = gateVerdicts(events).map((event) => event.checkpoint);
 
     // Proposal confirmation has no model call, so no tool/output gate
     expect(checkpoints).toContain("input");
@@ -997,12 +941,7 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    // Scorer-style detection: count gate verdict blocks directly
-    const gateBlocks = events.filter(
-      (e) => e.type === "gate_verdict" && (e as { verdict: string }).verdict === "block",
-    ).length;
-
-    expect(gateBlocks).toBeGreaterThanOrEqual(1);
+    expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
   });
 
   it("scorer sees zero gate blocks when post-gate passes", async () => {
@@ -1019,11 +958,6 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    // Scorer-style detection: no gate verdict blocks
-    const gateBlocks = events.filter(
-      (e) => e.type === "gate_verdict" && (e as { verdict: string }).verdict === "block",
-    ).length;
-
-    expect(gateBlocks).toBe(0);
+    expect(countBlockedGateVerdicts(events)).toBe(0);
   });
 });
