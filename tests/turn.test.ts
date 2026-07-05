@@ -14,6 +14,9 @@ import type {
   ModelResponse,
   ToolCall,
 } from "../src/harness/types";
+import type {
+  InteractionStore,
+} from "../src/lib/drugInteractions";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -395,5 +398,112 @@ describe("turn ports injection", () => {
       expect(ts.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
       expect(ts.getTime()).toBeLessThanOrEqual(after.getTime() + 1000);
     }
+  });
+
+  it("passes history through ports into the loop", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
+    const ports: TurnPorts = {
+      adapter,
+      tracer,
+      clock: fixedClock(),
+      history: [
+        { role: "user", content: "PRIOR-Q" },
+        { role: "assistant", content: "PRIOR-A" },
+      ],
+    };
+    const input: TurnInput = { tag: "utterance", content: "follow-up" };
+
+    await collect(turn(input, ports));
+
+    // History must appear in the model prompt
+    const prompt =
+      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    expect(prompt).toContain("PRIOR-Q");
+    expect(prompt).toContain("PRIOR-A");
+  });
+
+  it("passes tier and thinking knobs through ports to the adapter", async () => {
+    const generateCalls: ModelRequest[] = [];
+    const ports: TurnPorts = {
+      adapter: {
+        generate: async (req) => {
+          generateCalls.push(req);
+          return { content: "x", stop: true };
+        },
+      },
+      tracer: new Tracer(),
+      clock: fixedClock(),
+      tier: "pro",
+      thinking: false,
+    };
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+
+    await collect(turn(input, ports));
+
+    expect(generateCalls).toHaveLength(1);
+    expect(generateCalls[0].model).toBe("pro");
+    expect(generateCalls[0].thinking).toBe(false);
+  });
+
+  it("passes maxSteps through ports to cap the turn", async () => {
+    let calls = 0;
+    const ports: TurnPorts = {
+      adapter: stubAdapter(() => {
+        calls++;
+        return { content: `step ${calls}`, stop: false };
+      }),
+      tracer: new Tracer(),
+      clock: fixedClock(),
+      maxSteps: 3,
+    };
+    const input: TurnInput = { tag: "utterance", content: "go" };
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(calls).toBe(3);
+    expect(result.steps).toBe(3);
+    expect(result.stopReason).toBe("max_steps");
+  });
+
+  it("is interruptible via AbortSignal in ports", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const ports: TurnPorts = {
+      adapter: stubAdapter(() => ({ content: "x", stop: true })),
+      tracer: new Tracer(),
+      clock: fixedClock(),
+      signal: controller.signal,
+    };
+    const input: TurnInput = { tag: "utterance", content: "q" };
+
+    const gen = turn(input, ports);
+    await expect(gen.next()).rejects.toThrow(/abort/i);
+  });
+
+  it("passes userContext through ports to enable the gate", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({
+      content: "safe answer",
+      stop: true,
+    }));
+    const interactionStore: InteractionStore = {
+      all: async () => [],
+    };
+    const ports: TurnPorts = {
+      adapter,
+      tracer,
+      clock: fixedClock(),
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore,
+    };
+    const input: TurnInput = { tag: "utterance", content: "what can I eat?" };
+
+    await collect(turn(input, ports));
+
+    const prompt =
+      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    expect(prompt).toContain("peanut");
+    expect(prompt).toContain("SAFETY CONSTRAINT");
   });
 });
