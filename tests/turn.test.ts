@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  turn,
   SCHEMA_VERSION,
+  turn,
+  type AnyTurnEvent,
+  type TurnEndEvent,
   type TurnInput,
   type TurnPorts,
-  type AnyTurnEvent,
   type TurnResult,
+  type TurnStartEvent,
 } from "../src/harness/turn";
 import { Tracer } from "../src/harness/tracer";
 import type {
@@ -14,261 +16,246 @@ import type {
   ModelResponse,
   ToolCall,
 } from "../src/harness/types";
-import type {
-  InteractionStore,
-} from "../src/lib/drugInteractions";
+import type { InteractionStore } from "../src/lib/drugInteractions";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+const FIXED_TIMESTAMP = "2026-07-05T12:00:00.000Z";
 
-function stubAdapter(
-  impl: (req: ModelRequest) => ModelResponse | Promise<ModelResponse>,
-): ModelAdapter {
+type AdapterImpl = (
+  req: ModelRequest,
+) => ModelResponse | Promise<ModelResponse>;
+
+type TurnEventOf<T extends AnyTurnEvent["type"]> = Extract<
+  AnyTurnEvent,
+  { type: T }
+>;
+
+function stubAdapter(impl: AdapterImpl): ModelAdapter {
   return { generate: async (req) => impl(req) };
 }
 
-/** Collect all events from the async generator and return them along with the result. */
+function createPorts(
+  impl: AdapterImpl = () => ({ content: "OK", stop: true }),
+  overrides: Partial<TurnPorts> = {},
+): TurnPorts {
+  return {
+    adapter: stubAdapter(impl),
+    tracer: new Tracer(),
+    clock: fixedClock(),
+    ...overrides,
+  };
+}
+
 async function collect(
   gen: AsyncGenerator<AnyTurnEvent, TurnResult, undefined>,
 ): Promise<{ events: AnyTurnEvent[]; result: TurnResult }> {
   const events: AnyTurnEvent[] = [];
   let next = await gen.next();
+
   while (!next.done) {
     events.push(next.value);
     next = await gen.next();
   }
+
   return { events, result: next.value };
 }
 
-function fixedClock(): () => Date {
-  return () => new Date("2026-07-05T12:00:00.000Z");
+function fixedClock(timestamp = FIXED_TIMESTAMP): () => Date {
+  return () => new Date(timestamp);
 }
 
-// ─── Utterance Turn Tests ─────────────────────────────────────────────────
+function eventsOfType<T extends AnyTurnEvent["type"]>(
+  events: readonly AnyTurnEvent[],
+  type: T,
+): TurnEventOf<T>[] {
+  return events.filter((event): event is TurnEventOf<T> => event.type === type);
+}
+
+function expectStartEvent(events: readonly AnyTurnEvent[]): TurnStartEvent {
+  const firstEvent = events[0];
+
+  expect(firstEvent?.type).toBe("turn_start");
+  if (!firstEvent || firstEvent.type !== "turn_start") {
+    throw new Error("expected first event to be turn_start");
+  }
+
+  return firstEvent;
+}
+
+function expectTerminalEvent(events: readonly AnyTurnEvent[]): TurnEndEvent {
+  const turnEnds = eventsOfType(events, "turn_end");
+  const lastEvent = events[events.length - 1];
+
+  expect(turnEnds).toHaveLength(1);
+  expect(lastEvent?.type).toBe("turn_end");
+  if (!lastEvent || lastEvent.type !== "turn_end") {
+    throw new Error("expected last event to be turn_end");
+  }
+
+  expect(lastEvent).toBe(turnEnds[0]);
+  return lastEvent;
+}
+
+function expectEventMetadata(
+  events: readonly AnyTurnEvent[],
+  timestamp: string,
+): void {
+  for (const event of events) {
+    expect(event.schema).toBe(SCHEMA_VERSION);
+    expect(typeof event.seq).toBe("number");
+    expect(event.timestamp).toBe(timestamp);
+  }
+
+  const seqs = events.map((event) => event.seq);
+  for (let index = 1; index < seqs.length; index++) {
+    expect(seqs[index]).toBeGreaterThan(seqs[index - 1]);
+  }
+}
 
 describe("turn (utterance)", () => {
-  it("emits turn_start → steps → turn_end for a single-step utterance", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({
-      content: "Eggs have about 6g of protein per large egg.",
-      stop: true,
-    }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
+  it("emits start, loop steps, and terminal result for a single-step utterance", async () => {
     const input: TurnInput = {
       tag: "utterance",
       content: "How much protein in an egg?",
     };
+    const ports = createPorts(() => ({
+      content: "Eggs have about 6g of protein per large egg.",
+      stop: true,
+    }));
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Event sequence: turn_start → step(thought) → step(observe) → turn_end
-    expect(events.length).toBeGreaterThanOrEqual(2);
-    expect(events[0].type).toBe("turn_start");
-    expect(events[events.length - 1].type).toBe("turn_end");
-
-    // Terminal result
-    expect(result.reply).toBe("Eggs have about 6g of protein per large egg.");
-    expect(result.steps).toBe(1);
-    expect(result.stopReason).toBe("end_turn");
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_start",
+      "step",
+      "step",
+      "turn_end",
+    ]);
+    expect(expectStartEvent(events).input).toEqual(input);
+    expect(
+      eventsOfType(events, "step").map((event) => event.agentEvent.type),
+    ).toEqual(["thought", "observe"]);
+    expect(expectTerminalEvent(events).result).toEqual(result);
+    expect(result).toEqual({
+      reply: "Eggs have about 6g of protein per large egg.",
+      steps: 1,
+      stopReason: "end_turn",
+    });
   });
 
-  it("carries tagged input in the turn_start event", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
-    const input: TurnInput = {
-      tag: "utterance",
-      content: "What should I eat?",
-    };
-
-    const { events } = await collect(turn(input, ports));
-
-    const start = events[0];
-    expect(start.type).toBe("turn_start");
-    // The turn_start event carries the input
-    expect(start).toHaveProperty("input");
-    const startWithInput = start as { input: TurnInput };
-    expect(startWithInput.input).toEqual(input);
-  });
-
-  it("emits schema-versioned events with monotonic seq and timestamps", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
+  it("emits schema-versioned events with monotonic seq and injected timestamps", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
+    const { events } = await collect(turn(input, createPorts()));
 
-    const { events } = await collect(turn(input, ports));
-
-    for (const event of events) {
-      expect(event.schema).toBe(SCHEMA_VERSION);
-      expect(typeof event.seq).toBe("number");
-      expect(typeof event.timestamp).toBe("string");
-    }
-
-    // Monotonic seq
-    const seqs = events.map((e) => e.seq);
-    for (let i = 1; i < seqs.length; i++) {
-      expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
-    }
-
-    // Fixed clock timestamp
-    for (const event of events) {
-      expect(event.timestamp).toBe("2026-07-05T12:00:00.000Z");
-    }
+    expectEventMetadata(events, FIXED_TIMESTAMP);
   });
 
-  it("exactly one terminal event: turn_end is always last", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "final", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
-    const input: TurnInput = { tag: "utterance", content: "test" };
-
-    const { events } = await collect(turn(input, ports));
-
-    // Exactly one turn_end event
-    const turnEnds = events.filter((e) => e.type === "turn_end");
-    expect(turnEnds).toHaveLength(1);
-
-    // It is the last event
-    const lastEvent = events[events.length - 1];
-    expect(lastEvent.type).toBe("turn_end");
-
-    // turn_end carries the result
-    expect(lastEvent).toHaveProperty("result");
-    const endWithResult = lastEvent as { result: TurnResult };
-    expect(endWithResult.result.reply).toBe("final");
-    expect(endWithResult.result.stopReason).toBe("end_turn");
-  });
-
-  it("runs multiple steps and emits step events for each", async () => {
-    const tracer = new Tracer();
+  it("wraps all loop events from a multi-step tool turn", async () => {
     let callCount = 0;
     const adapter = stubAdapter(() => {
       callCount++;
+
       if (callCount === 1) {
         return {
           content: "Looking up nutrition data...",
           stop: false,
           toolCalls: [
-            { name: "search_food", args: { food: "chicken" } } satisfies ToolCall,
+            {
+              name: "search_food",
+              args: { food: "chicken" },
+            } satisfies ToolCall,
           ],
         };
       }
+
       return {
         content: "Chicken breast has 31g protein per 100g.",
         stop: true,
       };
     });
-
     const tools = new Map([
       ["search_food", async () => "chicken: 31g protein/100g"],
     ]);
-
-    const ports: TurnPorts = {
-      adapter,
-      tracer,
-      tools,
-      clock: fixedClock(),
-    };
     const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
 
     const { events, result } = await collect(turn(input, ports));
 
-    expect(result.steps).toBe(2);
-    expect(result.stopReason).toBe("end_turn");
-
-    // At least some step events
-    const stepEvents = events.filter((e) => e.type === "step");
-    expect(stepEvents.length).toBeGreaterThanOrEqual(3); // thought + act + observe
-
-    // Exactly one turn_end
-    const turnEnds = events.filter((e) => e.type === "turn_end");
-    expect(turnEnds).toHaveLength(1);
+    expect(result).toEqual({
+      reply: "Chicken breast has 31g protein per 100g.",
+      steps: 2,
+      stopReason: "end_turn",
+    });
+    expect(
+      eventsOfType(events, "step").map((event) => event.agentEvent.type),
+    ).toEqual(["thought", "act", "observe", "thought", "observe"]);
+    expectTerminalEvent(events);
   });
 
-  it("zero network access — stub adapter is used, no real fetch", async () => {
-    // The entire test suite uses stub adapters. This test explicitly
-    // documents that the turn seam does not initiate network calls.
-    const tracer = new Tracer();
+  it("uses the injected adapter for model generation", async () => {
     let generateCalled = false;
-    const adapter = stubAdapter(() => {
+    const ports = createPorts(() => {
       generateCalled = true;
       return { content: "Safe reply.", stop: true };
     });
-
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
     const input: TurnInput = { tag: "utterance", content: "testing" };
 
     const { events } = await collect(turn(input, ports));
 
-    // The stub was called (not real network)
     expect(generateCalled).toBe(true);
-    // Events emitted without network
-    expect(events.length).toBeGreaterThan(0);
-    expect(events[events.length - 1].type).toBe("turn_end");
+    expectTerminalEvent(events);
   });
 
-  it("uses injected clock for all timestamps", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const clock = () => new Date("2026-01-01T00:00:00.000Z");
-    const ports: TurnPorts = { adapter, tracer, clock };
+  it("uses custom injected clocks for timestamps", async () => {
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    const ports = createPorts(undefined, { clock: fixedClock(timestamp) });
     const input: TurnInput = { tag: "utterance", content: "hi" };
 
     const { events } = await collect(turn(input, ports));
 
-    for (const event of events) {
-      expect(event.timestamp).toBe("2026-01-01T00:00:00.000Z");
-    }
+    expectEventMetadata(events, timestamp);
   });
 });
 
-// ─── Proposal Confirmation Turn Tests ─────────────────────────────────────
-
 describe("turn (proposal_confirm)", () => {
-  it("emits turn_start → turn_end for a confirmed proposal", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
+  it("emits start and end events for a confirmed proposal", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
       confirmed: true,
     };
 
-    const { events, result } = await collect(turn(input, ports));
+    const { events, result } = await collect(turn(input, createPorts()));
 
-    // At minimum: turn_start → turn_end
-    expect(events.length).toBeGreaterThanOrEqual(2);
-    expect(events[0].type).toBe("turn_start");
-    expect(events[events.length - 1].type).toBe("turn_end");
-
-    // Result reflects the confirmation
-    expect(result.reply).toContain("confirmed");
-    expect(result.reply).toContain("meal-log-42");
-    expect(result.stopReason).toBe("end_turn");
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_start",
+      "turn_end",
+    ]);
+    expect(expectStartEvent(events).input).toEqual(input);
+    expect(expectTerminalEvent(events).result).toEqual(result);
+    expect(result).toEqual({
+      reply: "Proposal meal-log-42 confirmed.",
+      steps: 0,
+      stopReason: "end_turn",
+    });
   });
 
-  it("produces a rejection reply when confirmed=false", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
+  it("produces a rejection reply when confirmed is false", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
       confirmed: false,
     };
 
-    const { result } = await collect(turn(input, ports));
+    const { result } = await collect(turn(input, createPorts()));
 
-    expect(result.reply).toContain("rejected");
-    expect(result.reply).toContain("meal-log-42");
-    expect(result.stopReason).toBe("end_turn");
+    expect(result).toEqual({
+      reply: "Proposal meal-log-42 rejected.",
+      steps: 0,
+      stopReason: "end_turn",
+    });
   });
 
-  it("includes optional feedback in the reply when provided", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
+  it("includes optional feedback in confirmed proposal replies", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
@@ -276,81 +263,33 @@ describe("turn (proposal_confirm)", () => {
       feedback: "Please reduce the portion size.",
     };
 
-    const { result } = await collect(turn(input, ports));
+    const { result } = await collect(turn(input, createPorts()));
 
-    expect(result.reply).toContain("confirmed");
-    expect(result.reply).toContain("reduce the portion size");
-  });
-
-  it("carries tagged input in the turn_start event", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "meal-log-7",
-      confirmed: true,
-    };
-
-    const { events } = await collect(turn(input, ports));
-
-    const start = events[0];
-    expect(start.type).toBe("turn_start");
-    const startWithInput = start as { input: TurnInput };
-    expect(startWithInput.input).toEqual(input);
-  });
-
-  it("exactly one terminal event: turn_end is always last", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "p1",
-      confirmed: false,
-    };
-
-    const { events } = await collect(turn(input, ports));
-
-    const turnEnds = events.filter((e) => e.type === "turn_end");
-    expect(turnEnds).toHaveLength(1);
-    expect(events[events.length - 1].type).toBe("turn_end");
-
-    const endWithResult = turnEnds[0] as { result: TurnResult };
-    expect(endWithResult.result.stopReason).toBe("end_turn");
+    expect(result).toEqual({
+      reply: "Proposal meal-log-42 confirmed. Please reduce the portion size.",
+      steps: 0,
+      stopReason: "end_turn",
+    });
   });
 
   it("emits schema-versioned events with monotonic seq", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "unused", stop: true }));
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "p1",
       confirmed: true,
     };
 
-    const { events } = await collect(turn(input, ports));
+    const { events } = await collect(turn(input, createPorts()));
 
-    for (const event of events) {
-      expect(event.schema).toBe(SCHEMA_VERSION);
-    }
-
-    const seqs = events.map((e) => e.seq);
-    for (let i = 1; i < seqs.length; i++) {
-      expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
-    }
+    expectEventMetadata(events, FIXED_TIMESTAMP);
   });
 
-  it("zero network access — adapter is not called for proposal confirm", async () => {
-    const tracer = new Tracer();
+  it("does not call the adapter for proposal confirmations", async () => {
     let generateCalled = false;
-    const adapter = stubAdapter(() => {
+    const ports = createPorts(() => {
       generateCalled = true;
       return { content: "should not be used", stop: true };
     });
-
-    const ports: TurnPorts = { adapter, tracer, clock: fixedClock() };
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "p1",
@@ -359,85 +298,94 @@ describe("turn (proposal_confirm)", () => {
 
     await collect(turn(input, ports));
 
-    // Proposal confirmation should not call the model adapter
     expect(generateCalled).toBe(false);
   });
 });
 
-// ─── Ports injection ──────────────────────────────────────────────────────
-
 describe("turn ports injection", () => {
-  it("accepts all optional ports without throwing", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const ports: TurnPorts = {
-      adapter,
-      tracer,
-      clock: fixedClock(),
-      // eventLog and interactionStore are optional
-    };
+  it("accepts omitted optional ports", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
 
-    const { events } = await collect(turn(input, ports));
-    expect(events[events.length - 1].type).toBe("turn_end");
+    const { events } = await collect(
+      turn(input, {
+        adapter: stubAdapter(() => ({ content: "OK", stop: true })),
+        tracer: new Tracer(),
+      }),
+    );
+
+    expectTerminalEvent(events);
   });
 
   it("defaults clock to system time when not injected", async () => {
-    const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const ports: TurnPorts = { adapter, tracer };
     const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports: TurnPorts = {
+      adapter: stubAdapter(() => ({ content: "OK", stop: true })),
+      tracer: new Tracer(),
+    };
 
     const before = new Date();
     const { events } = await collect(turn(input, ports));
     const after = new Date();
 
-    // Timestamps should be valid ISO strings within the expected range
     for (const event of events) {
-      const ts = new Date(event.timestamp);
-      expect(ts.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
-      expect(ts.getTime()).toBeLessThanOrEqual(after.getTime() + 1000);
+      const timestamp = new Date(event.timestamp);
+      expect(timestamp.getTime()).toBeGreaterThanOrEqual(
+        before.getTime() - 1000,
+      );
+      expect(timestamp.getTime()).toBeLessThanOrEqual(after.getTime() + 1000);
     }
   });
 
   it("passes history through ports into the loop", async () => {
     const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
-    const ports: TurnPorts = {
-      adapter,
+    const input: TurnInput = { tag: "utterance", content: "follow-up" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
       tracer,
-      clock: fixedClock(),
       history: [
         { role: "user", content: "PRIOR-Q" },
         { role: "assistant", content: "PRIOR-A" },
       ],
-    };
-    const input: TurnInput = { tag: "utterance", content: "follow-up" };
+    });
 
     await collect(turn(input, ports));
 
-    // History must appear in the model prompt
     const prompt =
-      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+      tracer.events().find((event) => event.type === "model_prompt")?.payload ??
+      "";
     expect(prompt).toContain("PRIOR-Q");
     expect(prompt).toContain("PRIOR-A");
   });
 
+  it("passes system prompts through ports into the loop", async () => {
+    const tracer = new Tracer();
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      tracer,
+      systemPrompt: "CUSTOM-SYSTEM-PROMPT",
+    });
+
+    await collect(turn(input, ports));
+
+    const prompt =
+      tracer.events().find((event) => event.type === "model_prompt")?.payload ??
+      "";
+    expect(prompt).toContain("CUSTOM-SYSTEM-PROMPT");
+  });
+
   it("passes tier and thinking knobs through ports to the adapter", async () => {
     const generateCalls: ModelRequest[] = [];
-    const ports: TurnPorts = {
-      adapter: {
-        generate: async (req) => {
-          generateCalls.push(req);
-          return { content: "x", stop: true };
-        },
+    const adapter: ModelAdapter = {
+      generate: async (req) => {
+        generateCalls.push(req);
+        return { content: "x", stop: true };
       },
-      tracer: new Tracer(),
-      clock: fixedClock(),
-      tier: "pro",
-      thinking: false,
     };
     const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(undefined, {
+      adapter,
+      tier: "pro",
+      thinking: false,
+    });
 
     await collect(turn(input, ports));
 
@@ -448,16 +396,14 @@ describe("turn ports injection", () => {
 
   it("passes maxSteps through ports to cap the turn", async () => {
     let calls = 0;
-    const ports: TurnPorts = {
-      adapter: stubAdapter(() => {
+    const input: TurnInput = { tag: "utterance", content: "go" };
+    const ports = createPorts(
+      () => {
         calls++;
         return { content: `step ${calls}`, stop: false };
-      }),
-      tracer: new Tracer(),
-      clock: fixedClock(),
-      maxSteps: 3,
-    };
-    const input: TurnInput = { tag: "utterance", content: "go" };
+      },
+      { maxSteps: 3 },
+    );
 
     const { result } = await collect(turn(input, ports));
 
@@ -469,40 +415,32 @@ describe("turn ports injection", () => {
   it("is interruptible via AbortSignal in ports", async () => {
     const controller = new AbortController();
     controller.abort();
-    const ports: TurnPorts = {
-      adapter: stubAdapter(() => ({ content: "x", stop: true })),
-      tracer: new Tracer(),
-      clock: fixedClock(),
-      signal: controller.signal,
-    };
     const input: TurnInput = { tag: "utterance", content: "q" };
+    const gen = turn(
+      input,
+      createPorts(undefined, { signal: controller.signal }),
+    );
 
-    const gen = turn(input, ports);
     await expect(gen.next()).rejects.toThrow(/abort/i);
   });
 
   it("passes userContext through ports to enable the gate", async () => {
     const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({
-      content: "safe answer",
-      stop: true,
-    }));
     const interactionStore: InteractionStore = {
       all: async () => [],
     };
-    const ports: TurnPorts = {
-      adapter,
+    const input: TurnInput = { tag: "utterance", content: "what can I eat?" };
+    const ports = createPorts(() => ({ content: "safe answer", stop: true }), {
       tracer,
-      clock: fixedClock(),
       userContext: { allergies: ["peanut"], medications: [] },
       interactionStore,
-    };
-    const input: TurnInput = { tag: "utterance", content: "what can I eat?" };
+    });
 
     await collect(turn(input, ports));
 
     const prompt =
-      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+      tracer.events().find((event) => event.type === "model_prompt")?.payload ??
+      "";
     expect(prompt).toContain("peanut");
     expect(prompt).toContain("SAFETY CONSTRAINT");
   });

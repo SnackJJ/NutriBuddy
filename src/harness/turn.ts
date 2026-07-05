@@ -1,16 +1,8 @@
 // Turn Seam: the single harness entry point (issue #29 / PRD v2 section 4).
 // Schema version is bumped only for breaking event-shape changes.
 
-import { run } from "./loop";
-import type { Tracer } from "./tracer";
-import type { EventLog } from "./eventLog";
-import type { InteractionStore } from "../lib/drugInteractions";
-import type {
-  AgentEvent,
-  ModelAdapter,
-  StopReason,
-  ToolHandler,
-} from "./types";
+import { run, type RunTurnInput } from "./loop";
+import type { AgentEvent, StopReason } from "./types";
 
 /** Bump on breaking changes to event shape (add/remove/rename fields). */
 export const SCHEMA_VERSION = "1.0.0";
@@ -29,17 +21,14 @@ export interface ProposalConfirmInput {
   readonly feedback?: string;
 }
 
+type Clock = () => Date;
+
 /**
  * All external dependencies enter through injected ports.
  * Every field is injectable for deterministic scripted testing.
  */
-export interface TurnPorts {
-  readonly adapter: ModelAdapter;
-  readonly tracer: Tracer;
-  readonly eventLog?: EventLog;
-  readonly interactionStore?: InteractionStore;
-  readonly tools?: ReadonlyMap<string, ToolHandler>;
-  readonly clock?: () => Date;
+export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
+  readonly clock?: Clock;
 }
 
 /**
@@ -77,7 +66,6 @@ export interface TurnResult {
   readonly stopReason: StopReason;
 }
 
-type Clock = () => Date;
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
 
@@ -117,14 +105,7 @@ async function* runUtteranceTurn(
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
 ): AsyncGenerator<TurnStepEvent, TurnResult, undefined> {
-  const gen = run({
-    userInput: input.content,
-    adapter: ports.adapter,
-    tracer: ports.tracer,
-    eventLog: ports.eventLog,
-    interactionStore: ports.interactionStore,
-    tools: ports.tools,
-  });
+  const gen = run(createRunTurnInput(input, ports));
 
   let next = await gen.next();
   while (!next.done) {
@@ -133,6 +114,27 @@ async function* runUtteranceTurn(
   }
 
   return next.value;
+}
+
+function createRunTurnInput(
+  input: UtteranceInput,
+  ports: TurnPorts,
+): RunTurnInput {
+  return {
+    userInput: input.content,
+    adapter: ports.adapter,
+    tracer: ports.tracer,
+    eventLog: ports.eventLog,
+    history: ports.history,
+    systemPrompt: ports.systemPrompt,
+    tier: ports.tier,
+    thinking: ports.thinking,
+    maxSteps: ports.maxSteps,
+    signal: ports.signal,
+    tools: ports.tools,
+    userContext: ports.userContext,
+    interactionStore: ports.interactionStore,
+  };
 }
 
 function createProposalConfirmResult(input: ProposalConfirmInput): TurnResult {
@@ -167,6 +169,10 @@ export async function* turn(
   input: TurnInput,
   ports: TurnPorts,
 ): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
+  if (ports.signal?.aborted) {
+    throw new Error("turn aborted before start");
+  }
+
   const nextMetadata = createEventMetadata(ports.clock ?? (() => new Date()));
 
   yield createTurnStartEvent(input, nextMetadata);
