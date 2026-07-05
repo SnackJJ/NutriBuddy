@@ -51,6 +51,11 @@ export async function runHarnessEval(
           },
         ),
         (event) => {
+          // Detect blocked turns by reading gate verdict events directly (issue #34)
+          if (event.type === "gate_verdict" && event.verdict === "block") {
+            gateBlocks++;
+          }
+
           if (event.type !== "step") {
             return;
           }
