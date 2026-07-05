@@ -2,7 +2,10 @@
 // Schema version follows SemVer for event-shape changes.
 
 import { run, type RunTurnInput } from "./loop";
-import type { AgentEvent, TerminalResult } from "./types";
+import type { AgentEvent, ChatMessage, TerminalResult, TypedOutput } from "./types";
+import { checkNumericProvenance } from "./numericProvenanceGate";
+import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
+import type { Observation } from "../catalog/queryCatalog";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -31,6 +34,10 @@ type Clock = () => Date;
  */
 export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly clock?: Clock;
+  /** Observations from query catalog executions, collected during the turn. */
+  readonly observations?: readonly Observation[];
+  /** Conflicts detected at the input gate for advisory structure checking. */
+  readonly conflicts?: readonly Conflict[];
 }
 
 /**
@@ -152,34 +159,155 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
   return `Blocked: ${lastBlock.payload}`;
 }
 
+/** Max retry attempts for output gate sub-checks (numeric provenance + advisory). */
+const MAX_OUTPUT_GATE_RETRIES = 2;
+
+function buildOutputGateFeedback(
+  reasons: readonly string[],
+): string {
+  return (
+    `Your response was BLOCKED by safety checks:\n${reasons.map((r) => `  - ${r}`).join("\n")}\n\n` +
+    `Please regenerate your response. Make absolutely sure all numeric facts ` +
+    `come from tool results and all safety advisories are cited.`
+  );
+}
+
+function outputGateRefusalReply(reasons: readonly string[]): string {
+  const list = reasons.map((r) => `  - ${r}`).join("\n");
+  return (
+    `I cannot safely answer your question. My responses were blocked ` +
+    `after ${MAX_OUTPUT_GATE_RETRIES} retries due to output gate violations:\n${list}\n\n` +
+    `Please consult a doctor or registered dietitian for personalized advice.`
+  );
+}
+
 async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
 ): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
-  const gen = run(createRunTurnInput(input, ports));
+  const observations = ports.observations ?? [];
+  const conflicts = ports.conflicts ?? [];
+  let result: TurnResult | undefined;
+  let outputGateFailReasons: string[] = [];
 
-  let next = await gen.next();
-  while (!next.done) {
-    yield createTurnStepEvent(next.value, nextMetadata);
+  for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
+    const history: ChatMessage[] = [...(ports.history ?? [])];
 
-    // Emit tool gate verdict after each tool observation
-    if (next.value.type === "observe" && next.value.toolResult) {
-      yield createGateVerdictEvent(
+    // On retry, inject the blocked response and feedback as history
+    if (attempt > 0 && result) {
+      history.push(
+        { role: "assistant", content: result.reply },
         {
-          checkpoint: "tool",
-          verdict: "pass",
-          checkName: "tool_gate_check",
-          evidence: `Tool ${next.value.toolResult.name} executed successfully`,
+          role: "user",
+          content: buildOutputGateFeedback(outputGateFailReasons),
         },
-        nextMetadata,
       );
     }
 
-    next = await gen.next();
+    const gen = run({
+      ...createRunTurnInput(input, ports),
+      history,
+    });
+
+    let next = await gen.next();
+    while (!next.done) {
+      yield createTurnStepEvent(next.value, nextMetadata);
+
+      // Emit tool gate verdict after each tool observation
+      if (next.value.type === "observe" && next.value.toolResult) {
+        yield createGateVerdictEvent(
+          {
+            checkpoint: "tool",
+            verdict: "pass",
+            checkName: "tool_gate_check",
+            evidence: `Tool ${next.value.toolResult.name} executed successfully`,
+          },
+          nextMetadata,
+        );
+      }
+
+      next = await gen.next();
+    }
+
+    result = next.value;
+
+    // If already blocked by lexical backstop, don't bother with numeric/advisory
+    if (result.stopReason === "gate_blocked") {
+      break;
+    }
+
+    // No typed output to check — pass through
+    if (!result.output) {
+      break;
+    }
+
+    // Run numeric provenance check (only when observations were collected)
+    const numericResult =
+      observations.length > 0
+        ? checkNumericProvenance({
+            output: result.output,
+            observations,
+          })
+        : { passed: true, reasons: [] as readonly string[] };
+
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "output",
+        verdict: numericResult.passed ? "pass" : "block",
+        checkName: "output_numeric_provenance",
+        evidence:
+          numericResult.reasons.join("; ") ||
+          (observations.length > 0
+            ? "All numeric facts trace to observations"
+            : "No observations to check — numeric gate skipped"),
+      },
+      nextMetadata,
+    );
+
+    // Run advisory structure check
+    const advisoryResult = checkAdvisoryStructure({
+      output: result.output,
+      conflicts,
+    });
+
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "output",
+        verdict: advisoryResult.passed ? "pass" : "block",
+        checkName: "output_advisory_structure",
+        evidence:
+          advisoryResult.reasons.join("; ") ||
+          "Advisory structure valid",
+      },
+      nextMetadata,
+    );
+
+    // Both passed — release
+    if (numericResult.passed && advisoryResult.passed) {
+      break;
+    }
+
+    // Collect reasons for feedback on retry
+    outputGateFailReasons = [
+      ...numericResult.reasons,
+      ...advisoryResult.reasons,
+    ];
+
+    if (attempt >= MAX_OUTPUT_GATE_RETRIES) {
+      // Retries exhausted — refuse
+      result = {
+        reply: outputGateRefusalReply(outputGateFailReasons),
+        steps: result.steps,
+        stopReason: "gate_blocked",
+      };
+      break;
+    }
+
+    // Will retry — feedback injected at top of next iteration
   }
 
-  return next.value;
+  return result!;
 }
 
 function createRunTurnInput(
