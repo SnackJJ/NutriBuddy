@@ -1,15 +1,16 @@
-// Parallel Planner with Review — four-phase orchestration loop
+// Parallel Planner with Codex Review — four-phase orchestration loop
 //
 // This template drives a multi-phase workflow:
 //   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
 //                               dependency graph, and outputs a <plan> JSON
 //                               listing unblocked issues with branch names.
-//   Phase 2 (Execute + Review): For each issue, a sandbox is created via
+//   Phase 2 (Execute + Codex Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
 //                               (100 iterations). If it produces commits, a
-//                               reviewer runs in the same sandbox on the same
-//                               branch (1 iteration). All issue pipelines run
-//                               concurrently via Promise.allSettled().
+//                               Codex reviewer runs in the same sandbox on
+//                               the same branch (1 iteration). All issue
+//                               pipelines run concurrently via
+//                               Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
 //                               into the current branch.
 //
@@ -23,6 +24,8 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { ensureHostOnBase } from "../src/lib/ensureHostOnBase";
 
@@ -75,6 +78,18 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
+const codexHome = process.env.CODEX_HOME;
+const codexMounts = codexHome
+  ? [
+      { hostPath: join(codexHome, "auth.json"), sandboxPath: "/home/agent/.codex/auth.json", readonly: true },
+      { hostPath: join(codexHome, "config.toml"), sandboxPath: "/home/agent/.codex/config.toml", readonly: true },
+    ].filter((mount) => existsSync(mount.hostPath))
+  : [];
+
+const codexReviewSandbox = docker({
+  mounts: codexMounts,
+});
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -123,11 +138,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 2: Execute + Review
+  // Phase 2: Execute + Codex Review
   //
   // For each issue, create a sandbox via createSandbox() so the implementer
-  // and reviewer share the same sandbox instance per branch. The implementer
-  // runs first; if it produces commits, the reviewer runs in the same sandbox.
+  // and Codex reviewer share the same sandbox instance per branch. The
+  // implementer runs first; if it produces commits, Codex reviews in the same
+  // sandbox.
   //
   // Promise.allSettled means one failing pipeline doesn't cancel the others.
   // -------------------------------------------------------------------------
@@ -136,7 +152,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        sandbox: docker(),
+        sandbox: codexReviewSandbox,
         hooks,
         copyToWorktree,
       });
@@ -158,9 +174,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         // Only review if the implementer produced commits
         if (implement.commits.length > 0) {
           const review = await sandbox.run({
-            name: "reviewer",
+            name: "codex-reviewer",
             maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-opus-4-8"),
+            agent: sandcastle.codex("gpt-5.5", { effort: "xhigh" }),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
