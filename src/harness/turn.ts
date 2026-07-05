@@ -65,6 +65,8 @@ export type AnyTurnEvent = TurnStartEvent | TurnStepEvent | TurnEndEvent;
 /** Final result emitted in turn_end and returned by the turn generator. */
 export type TurnResult = TerminalResult;
 
+export type TurnEventHandler = (event: AnyTurnEvent) => void;
+
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
 
@@ -189,4 +191,18 @@ export async function* turn(
   yield createTurnEndEvent(result, nextMetadata);
 
   return result;
+}
+
+export async function consumeTurn(
+  stream: AsyncGenerator<AnyTurnEvent, TurnResult, undefined>,
+  onEvent?: TurnEventHandler,
+): Promise<TurnResult> {
+  let next = await stream.next();
+
+  while (!next.done) {
+    onEvent?.(next.value);
+    next = await stream.next();
+  }
+
+  return next.value;
 }

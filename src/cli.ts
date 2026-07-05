@@ -6,7 +6,7 @@
 //
 // API key 从环境变量 DEEPSEEK_API_KEY 读取（对齐 .sandcastle/.env）。
 
-import { runTurn } from "./harness/loop";
+import { consumeTurn, turn } from "./harness/turn";
 import { Tracer } from "./harness/tracer";
 import type { EventLog } from "./harness/eventLog";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
@@ -51,12 +51,12 @@ export async function main(
   // adapter 延迟到确有输入时才构造：缺 key 时真实 adapter 会抛，空输入路径不应触发。
   const adapter = deps.adapter ?? new DeepSeekAdapter();
 
-  const result = await runTurn({
-    userInput,
-    adapter,
-    tracer,
-    eventLog: deps.eventLog,
-  });
+  const result = await consumeTurn(
+    turn(
+      { tag: "utterance", content: userInput },
+      { adapter, tracer, eventLog: deps.eventLog },
+    ),
+  );
 
   stdout(`${result.reply}\n`);
 

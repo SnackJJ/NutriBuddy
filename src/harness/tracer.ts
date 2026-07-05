@@ -1,14 +1,17 @@
 // ⑦ Tracer：记录 turn 内每一步（模型看到什么 / 决定什么 / 返回什么）。
 // 早做可观测，debug 快十倍（PRD §10）。
 
-export type TraceEventType =
-  | "user_input"
-  | "model_prompt"
-  | "model_return"
-  | "max_steps_reached"
-  | "gate_block"
-  | "gate_exhausted"
-  | "tool_call";
+export const TRACE_EVENT_TYPES = [
+  "user_input",
+  "model_prompt",
+  "model_return",
+  "max_steps_reached",
+  "gate_block",
+  "gate_exhausted",
+  "tool_call",
+] as const;
+
+export type TraceEventType = (typeof TRACE_EVENT_TYPES)[number];
 
 export interface TraceInput {
   readonly step: number;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SCHEMA_VERSION,
+  consumeTurn,
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
@@ -10,12 +11,13 @@ import {
   type TurnStartEvent,
   type TypedOutput,
 } from "../src/harness/turn";
-import { Tracer } from "../src/harness/tracer";
-import type {
-  ModelAdapter,
-  ModelRequest,
-  ModelResponse,
-  ToolCall,
+import { TRACE_EVENT_TYPES, Tracer } from "../src/harness/tracer";
+import {
+  STOP_REASONS,
+  type ModelAdapter,
+  type ModelRequest,
+  type ModelResponse,
+  type ToolCall,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
 
@@ -661,5 +663,100 @@ describe("typed final output contract", () => {
     expect(result.output).toEqual(CHICKEN_PROTEIN_OUTPUT);
     const endEvent = expectTerminalEvent(events);
     expect(endEvent.result.output).toEqual(CHICKEN_PROTEIN_OUTPUT);
+  });
+});
+
+describe("turn cross-vocabulary (CLI + eval share)", () => {
+  it("consumeTurn drains the stream and returns the terminal result", async () => {
+    const input: TurnInput = { tag: "utterance", content: "protein?" };
+    const ports = createPorts(() => ({
+      content: "6g protein per egg.",
+      stop: true,
+    }));
+    const events: AnyTurnEvent[] = [];
+
+    const result = await consumeTurn(turn(input, ports), (event) => {
+      events.push(event);
+    });
+    const endEvent = expectTerminalEvent(events);
+
+    expect(result).toEqual(endEvent.result);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_start",
+      "step",
+      "step",
+      "turn_end",
+    ]);
+  });
+
+  it("terminal TurnEndEvent shape is compatible with CLI display and eval scoring", async () => {
+    const input: TurnInput = { tag: "utterance", content: "protein?" };
+    const ports = createPorts(() => ({
+      content: "6g protein per egg.",
+      stop: true,
+    }));
+
+    const { events, result } = await collect(turn(input, ports));
+    const endEvent = expectTerminalEvent(events);
+
+    expect(typeof result.reply).toBe("string");
+    expect(result.reply).toBe(endEvent.result.reply);
+
+    expect(typeof result.steps).toBe("number");
+    expect(result.steps).toBeGreaterThanOrEqual(0);
+    expect(result.stopReason).toBe(endEvent.result.stopReason);
+    expect(STOP_REASONS).toContain(result.stopReason);
+  });
+
+  it("tracer events use the shared vocabulary both CLI and eval consume", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "egg" } }],
+        };
+      }
+      return { content: "6g protein per egg.", stop: true };
+    });
+    const tools = new Map([["search_food", async () => "egg: 6g protein"]]);
+    const tracer = new Tracer();
+    const input: TurnInput = { tag: "utterance", content: "egg protein?" };
+    const ports = createPorts(undefined, { adapter, tools, tracer });
+
+    const { result } = await collect(turn(input, ports));
+
+    const traceEvents = tracer.events();
+    const types = traceEvents.map((e) => e.type);
+
+    // Loop always records these core vocabulary types:
+    expect(types).toContain("user_input");
+    expect(types).toContain("model_prompt");
+    expect(types).toContain("model_return");
+
+    const validTypes = new Set(TRACE_EVENT_TYPES);
+    for (const type of types) {
+      expect(validTypes.has(type)).toBe(true);
+    }
+
+    expect(result.reply).toBe("6g protein per egg.");
+    expect(result.steps).toBe(2);
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("event stream always starts with turn_start and ends with turn_end (shared by CLI + eval)", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    expect(events.length).toBeGreaterThanOrEqual(2); // at least start + end
+    expect(events[0].type).toBe("turn_start");
+    expect(events[events.length - 1].type).toBe("turn_end");
+    for (const event of events) {
+      expect(event.schema).toBe(SCHEMA_VERSION);
+    }
   });
 });

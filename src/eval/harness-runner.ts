@@ -3,8 +3,8 @@
 // 通过完整 Loop（pre-gate + post-gate + 工具）回答 eval query。
 // 记录每条 case 的响应、步数、工具调用、gate block 次数、违规、耗时。
 
-import type { ModelAdapter, AgentEvent, TerminalResult, ToolHandler } from "../harness/types";
-import { run } from "../harness/loop";
+import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
+import { consumeTurn, turn } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase, HarnessResult } from "./types";
@@ -31,51 +31,47 @@ export async function runHarnessEval(
 
     let reply = "";
     let steps = 0;
-    let stopReason: TerminalResult["stopReason"] = "end_turn";
+    let stopReason: StopReason = "end_turn";
     const toolCalls: string[] = [];
     let gateBlocks = 0;
 
-    // 仅 constrained / cross_domain 类别的 case 启用 gate
-    const hasGate = c.userContext && interactionStore;
+    const shouldRunGate =
+      c.userContext !== undefined && interactionStore !== undefined;
 
     try {
-      const gen = run({
-        userInput: c.query,
-        adapter,
-        tracer,
-        tools,
-        userContext: hasGate ? c.userContext : undefined,
-        interactionStore: hasGate ? interactionStore : undefined,
-      });
+      const result = await consumeTurn(
+        turn(
+          { tag: "utterance", content: c.query },
+          {
+            adapter,
+            tracer,
+            tools,
+            userContext: shouldRunGate ? c.userContext : undefined,
+            interactionStore: shouldRunGate ? interactionStore : undefined,
+          },
+        ),
+        (event) => {
+          if (event.type !== "step") {
+            return;
+          }
 
-      let next = await gen.next();
-      while (!next.done) {
-        const event = next.value;
-        steps = event.step; // track last-seen step before potential crash (issue #21)
-        if (event.type === "act" && event.toolCall) {
-          toolCalls.push(event.toolCall.name);
-        }
-        // Track gate blocks via tracer
-        next = await gen.next();
-      }
+          const { agentEvent } = event;
+          steps = agentEvent.step; // track last-seen step before potential crash (issue #21)
+          if (agentEvent.type === "act" && agentEvent.toolCall) {
+            toolCalls.push(agentEvent.toolCall.name);
+          }
+        },
+      );
 
-      reply = next.value.reply;
-      steps = next.value.steps;
-      stopReason = next.value.stopReason;
+      reply = result.reply;
+      steps = result.steps;
+      stopReason = result.stopReason;
 
-      // Count gate blocks from tracer
-      gateBlocks = tracer
-        .events()
-        .filter((e) => e.type === "gate_block")
-        .length;
+      gateBlocks = countGateBlocks(tracer);
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
-      // Count gate blocks that occurred before the crash (issue #26)
-      gateBlocks = tracer
-        .events()
-        .filter((e) => e.type === "gate_block")
-        .length;
+      gateBlocks = countGateBlocks(tracer);
     }
 
     const durationMs = Date.now() - start;
@@ -101,4 +97,8 @@ export async function runHarnessEval(
   }
 
   return results;
+}
+
+function countGateBlocks(tracer: Tracer): number {
+  return tracer.events().filter((event) => event.type === "gate_block").length;
 }
