@@ -66,7 +66,15 @@ export interface AgentEvent {
 }
 
 /** ReAct 循环终止原因。 */
-export type StopReason = "end_turn" | "max_steps" | "aborted" | "gate_blocked" | "crash";
+export const STOP_REASONS = [
+  "end_turn",
+  "max_steps",
+  "aborted",
+  "gate_blocked",
+  "crash",
+] as const;
+
+export type StopReason = (typeof STOP_REASONS)[number];
 
 /** Async generator 的最终返回。 */
 export interface TerminalResult {

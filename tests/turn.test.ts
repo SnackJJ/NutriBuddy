@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SCHEMA_VERSION,
+  consumeTurn,
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
@@ -9,12 +10,13 @@ import {
   type TurnResult,
   type TurnStartEvent,
 } from "../src/harness/turn";
-import { Tracer } from "../src/harness/tracer";
-import type {
-  ModelAdapter,
-  ModelRequest,
-  ModelResponse,
-  ToolCall,
+import { TRACE_EVENT_TYPES, Tracer } from "../src/harness/tracer";
+import {
+  STOP_REASONS,
+  type ModelAdapter,
+  type ModelRequest,
+  type ModelResponse,
+  type ToolCall,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
 
@@ -447,6 +449,28 @@ describe("turn ports injection", () => {
 });
 
 describe("turn cross-vocabulary (CLI + eval share)", () => {
+  it("consumeTurn drains the stream and returns the terminal result", async () => {
+    const input: TurnInput = { tag: "utterance", content: "protein?" };
+    const ports = createPorts(() => ({
+      content: "6g protein per egg.",
+      stop: true,
+    }));
+    const events: AnyTurnEvent[] = [];
+
+    const result = await consumeTurn(turn(input, ports), (event) => {
+      events.push(event);
+    });
+    const endEvent = expectTerminalEvent(events);
+
+    expect(result).toEqual(endEvent.result);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_start",
+      "step",
+      "step",
+      "turn_end",
+    ]);
+  });
+
   it("terminal TurnEndEvent shape is compatible with CLI display and eval scoring", async () => {
     const input: TurnInput = { tag: "utterance", content: "protein?" };
     const ports = createPorts(() => ({
@@ -457,21 +481,13 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     const { events, result } = await collect(turn(input, ports));
     const endEvent = expectTerminalEvent(events);
 
-    // CLI needs: reply string to write to stdout
     expect(typeof result.reply).toBe("string");
     expect(result.reply).toBe(endEvent.result.reply);
 
-    // Eval needs: steps, stopReason for HarnessResult
     expect(typeof result.steps).toBe("number");
     expect(result.steps).toBeGreaterThanOrEqual(0);
     expect(result.stopReason).toBe(endEvent.result.stopReason);
-    expect([
-      "end_turn",
-      "max_steps",
-      "aborted",
-      "gate_blocked",
-      "crash",
-    ]).toContain(result.stopReason);
+    expect(STOP_REASONS).toContain(result.stopReason);
   });
 
   it("tracer events use the shared vocabulary both CLI and eval consume", async () => {
@@ -487,9 +503,7 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
       }
       return { content: "6g protein per egg.", stop: true };
     });
-    const tools = new Map([
-      ["search_food", async () => "egg: 6g protein"],
-    ]);
+    const tools = new Map([["search_food", async () => "egg: 6g protein"]]);
     const tracer = new Tracer();
     const input: TurnInput = { tag: "utterance", content: "egg protein?" };
     const ports = createPorts(undefined, { adapter, tools, tracer });
@@ -504,23 +518,11 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     expect(types).toContain("model_prompt");
     expect(types).toContain("model_return");
 
-    // All recorded types are valid TraceEventType values from the shared
-    // vocabulary (tool_call, gate_block, gate_exhausted, and
-    // max_steps_reached are valid but only appear in specific scenarios).
-    const validTypes = new Set([
-      "user_input",
-      "model_prompt",
-      "model_return",
-      "max_steps_reached",
-      "gate_block",
-      "gate_exhausted",
-      "tool_call",
-    ]);
-    for (const t of types) {
-      expect(validTypes.has(t)).toBe(true);
+    const validTypes = new Set(TRACE_EVENT_TYPES);
+    for (const type of types) {
+      expect(validTypes.has(type)).toBe(true);
     }
 
-    // Result is well-formed for both CLI display and eval scoring
     expect(result.reply).toBe("6g protein per egg.");
     expect(result.steps).toBe(2);
     expect(result.stopReason).toBe("end_turn");
@@ -535,9 +537,8 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     expect(events.length).toBeGreaterThanOrEqual(2); // at least start + end
     expect(events[0].type).toBe("turn_start");
     expect(events[events.length - 1].type).toBe("turn_end");
-    // All events carry the same schema version
-    for (const e of events) {
-      expect(e.schema).toBe(SCHEMA_VERSION);
+    for (const event of events) {
+      expect(event.schema).toBe(SCHEMA_VERSION);
     }
   });
 });
