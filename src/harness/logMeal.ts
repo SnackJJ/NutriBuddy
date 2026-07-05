@@ -152,6 +152,7 @@ function proposalResponse(proposal: Proposal): string {
         fat_g: proposal.fatG,
         carbs_g: proposal.carbsG,
       },
+      nutrition_source: proposal.nutritionSource,
     },
     nutrition_summary: {
       kcal: proposal.kcal,

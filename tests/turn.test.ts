@@ -963,6 +963,7 @@ describe("gate verdict events", () => {
             fat_g: 7.2,
             carbs_g: 0,
           },
+          nutrition_source: "USDA FoodData Central",
         },
         nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
         ...overrides,
@@ -1110,6 +1111,7 @@ describe("parseWriteProposalData (issue #36)", () => {
           fat_g: 7.2,
           carbs_g: 0,
         },
+        nutrition_source: "USDA FoodData Central",
       },
       nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
       ...overrides,
@@ -1130,7 +1132,7 @@ describe("parseWriteProposalData (issue #36)", () => {
     expect(data.proteinG).toBe(62);
     expect(data.fatG).toBe(7.2);
     expect(data.carbsG).toBe(0);
-    expect(data.nutritionSource).toBe("");
+    expect(data.nutritionSource).toBe("USDA FoodData Central");
     expect(data.createdAt).toBe("2026-07-05T12:00:00.000Z");
   });
 
@@ -1230,6 +1232,7 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           fat_g: 7.2,
           carbs_g: 0,
         },
+        nutrition_source: "USDA FoodData Central",
       },
       nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
       ...overrides,

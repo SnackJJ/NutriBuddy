@@ -166,7 +166,7 @@ export function parseWriteProposalData(toolResult: string): WriteProposalData | 
       proteinG: p.nutrition?.protein_g,
       fatG: p.nutrition?.fat_g,
       carbsG: p.nutrition?.carbs_g,
-      nutritionSource: "",
+      nutritionSource: p.nutrition_source ?? "",
       createdAt: p.created_at ?? "",
     };
   } catch {

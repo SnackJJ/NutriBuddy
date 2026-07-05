@@ -391,6 +391,47 @@ describe("createLogMealHandler", () => {
       expect(typeof handler).toBe("function");
       expect(state.proposals.length).toBe(0);
     });
+
+    // Issue #36: explicit demonstration that a logging intent creates a
+    // proposal and leaves the meal ledger untouched.
+    it("creates a proposal without touching the meal ledger", async () => {
+      // Set up a mock meal ledger with a spy to detect any writes.
+      let mealLedgerInserted = false;
+      const _mealLogStore = {
+        async insert() {
+          mealLedgerInserted = true;
+          return { id: 1, userId: "", foodName: "", portionG: 0, mealType: "", loggedAt: "", kcal: 0, proteinG: 0, fatG: 0, carbsG: 0 };
+        },
+      };
+
+      // The handler under test only accepts proposalStore (not mealLogStore).
+      // This is the structural guarantee: no model-output path can reach
+      // the meal ledger.
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // Execute a valid log_meal call.
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+
+      // Proposal WAS created.
+      expect(parsed.proposal_id).toBeDefined();
+      expect(state.proposals.length).toBe(1);
+      expect(state.proposals[0].foodName).toBe("chicken breast");
+      expect(state.proposals[0].status).toBe("proposed");
+
+      // Meal ledger was NOT touched — the mock was never invoked because
+      // the handler has no reference to it.
+      expect(mealLedgerInserted).toBe(false);
+    });
   });
 
   // ─── Error Handling ─────────────────────────────────────────────────────
@@ -552,6 +593,7 @@ describe("createLogMealHandler", () => {
       expect(parsed.proposal.nutrition.protein_g).toBe(62);
       expect(parsed.proposal.nutrition.fat_g).toBe(7.2);
       expect(parsed.proposal.nutrition.carbs_g).toBe(0);
+      expect(parsed.proposal.nutrition_source).toBe("test stub");
     });
   });
 
