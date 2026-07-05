@@ -5,21 +5,39 @@ import {
   CATALOG_SNAPSHOT_VERSION,
   type Catalog,
   type CatalogFood,
-  type FoodRef,
   type ResolveResult,
 } from "../src/catalog/catalog";
-import {
-  resolveFood,
-  DEFAULT_FUZZY_HIGH,
-  DEFAULT_FUZZY_MEDIUM,
-  DEFAULT_AMBIGUITY_MARGIN,
-  type ResolverConfig,
-} from "../src/catalog/resolver";
+import { resolveFood, DEFAULT_AMBIGUITY_MARGIN } from "../src/catalog/resolver";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
 function seedCatalog(): Catalog {
   return createCatalog(SEED_FOODS);
+}
+
+const PROTEIN_SHAKE_FOODS: readonly CatalogFood[] = [
+  {
+    id: "ps-vanilla",
+    canonicalName: "protein shake vanilla",
+    aliases: [],
+    per100g: { kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 },
+    allergenTags: [],
+    portionAliases: { serving: 300 },
+    category: "beverage",
+  },
+  {
+    id: "ps-chocolate",
+    canonicalName: "protein shake chocolate",
+    aliases: [],
+    per100g: { kcal: 130, proteinG: 25, fatG: 3, carbsG: 6 },
+    allergenTags: [],
+    portionAliases: { serving: 300 },
+    category: "beverage",
+  },
+];
+
+function proteinShakeCatalog(): Catalog {
+  return createCatalog(PROTEIN_SHAKE_FOODS);
 }
 
 function expectMatched(
@@ -265,29 +283,7 @@ describe("resolveFood — miss_ambiguous", () => {
   it("returns miss_ambiguous when multiple foods are close matches", () => {
     // Two foods sharing "protein shake" prefix. The query "protein shake"
     // matches both with similar bigram scores → ambiguous.
-    const foods: CatalogFood[] = [
-      {
-        id: "ps-vanilla",
-        canonicalName: "protein shake vanilla",
-        aliases: [],
-        per100g: { kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 },
-        allergenTags: [],
-        portionAliases: { serving: 300 },
-        category: "beverage",
-      },
-      {
-        id: "ps-chocolate",
-        canonicalName: "protein shake chocolate",
-        aliases: [],
-        per100g: { kcal: 130, proteinG: 25, fatG: 3, carbsG: 6 },
-        allergenTags: [],
-        portionAliases: { serving: 300 },
-        category: "beverage",
-      },
-    ];
-    const smallCatalog = createCatalog(foods);
-
-    const result = resolveFood(smallCatalog, "protein shake");
+    const result = resolveFood(proteinShakeCatalog(), "protein shake");
 
     expectMiss(result, "miss_ambiguous");
     expect(result.candidates).toBeDefined();
@@ -300,29 +296,7 @@ describe("resolveFood — miss_ambiguous", () => {
   });
 
   it("includes candidate FoodRefs with scores for clarification context", () => {
-    const foods: CatalogFood[] = [
-      {
-        id: "ps-vanilla",
-        canonicalName: "protein shake vanilla",
-        aliases: [],
-        per100g: { kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 },
-        allergenTags: [],
-        portionAliases: { serving: 300 },
-        category: "beverage",
-      },
-      {
-        id: "ps-chocolate",
-        canonicalName: "protein shake chocolate",
-        aliases: [],
-        per100g: { kcal: 130, proteinG: 25, fatG: 3, carbsG: 6 },
-        allergenTags: [],
-        portionAliases: { serving: 300 },
-        category: "beverage",
-      },
-    ];
-    const smallCatalog = createCatalog(foods);
-
-    const result = resolveFood(smallCatalog, "protein shake");
+    const result = resolveFood(proteinShakeCatalog(), "protein shake");
 
     expect(result.candidates).toBeDefined();
     for (const candidate of result.candidates!) {
@@ -333,36 +307,9 @@ describe("resolveFood — miss_ambiguous", () => {
   });
 
   it("returns miss_ambiguous when gap between 1st and 2nd is below ambiguity margin", () => {
-    // "chicken breast" and "chicken thigh" both match "chicken breast grilled" closely.
-    // Query: "chicken" (but this is exact on whole chicken — so use "chickn")
-    // Actually, let's use the shared-prefix case: "protein shake" against
-    // "protein shake vanilla" and "protein shake chocolate".
-    const foods: CatalogFood[] = [
-      {
-        id: "r-001",
-        canonicalName: "protein shake vanilla",
-        aliases: [],
-        per100g: { kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 },
-        allergenTags: [],
-        portionAliases: {},
-        category: "beverage",
-      },
-      {
-        id: "r-002",
-        canonicalName: "protein shake chocolate",
-        aliases: [],
-        per100g: { kcal: 130, proteinG: 25, fatG: 3, carbsG: 6 },
-        allergenTags: [],
-        portionAliases: {},
-        category: "beverage",
-      },
-    ];
-    const cat = createCatalog(foods);
+    const result = resolveFood(proteinShakeCatalog(), "protein shake");
 
-    const result = resolveFood(cat, "protein shake");
-
-    expect(result.matchType).toMatch(/^miss_/);
-    expect(result.foodRef).toBeNull();
+    expectMiss(result, "miss_ambiguous");
     expect(result.candidates).toBeDefined();
     expect(result.candidates!.length).toBeGreaterThanOrEqual(2);
   });

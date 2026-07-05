@@ -1,4 +1,4 @@
-// Local Food Catalog — currated seed from USDA FoodData Central (SR Legacy).
+// Local Food Catalog - curated seed from USDA FoodData Central (SR Legacy).
 // Phase 1 tracer bullet: exact/alias/fuzzy resolver for ~40 common foods.
 //
 // The catalog is the gate: only the resolver can mint FoodRefs. Model-provided
@@ -135,7 +135,11 @@ export const SEED_FOODS: readonly CatalogFood[] = [
   {
     id: "food-chicken-breast-001",
     canonicalName: "chicken breast",
-    aliases: ["boneless chicken breast", "skinless chicken breast", "hen breast"],
+    aliases: [
+      "boneless chicken breast",
+      "skinless chicken breast",
+      "hen breast",
+    ],
     per100g: { kcal: 165, proteinG: 31, fatG: 3.6, carbsG: 0 },
     allergenTags: [],
     portionAliases: { piece: 150, breast: 200, oz: 28, serving: 100 },
@@ -366,7 +370,12 @@ export const SEED_FOODS: readonly CatalogFood[] = [
   {
     id: "food-lettuce-001",
     canonicalName: "lettuce",
-    aliases: ["iceberg lettuce", "romaine lettuce", "green lettuce", "salad leaves"],
+    aliases: [
+      "iceberg lettuce",
+      "romaine lettuce",
+      "green lettuce",
+      "salad leaves",
+    ],
     per100g: { kcal: 15, proteinG: 1.4, fatG: 0.2, carbsG: 2.9 },
     allergenTags: [],
     portionAliases: { cup: 36, serving: 100, bowl: 85 },
@@ -386,7 +395,13 @@ export const SEED_FOODS: readonly CatalogFood[] = [
   {
     id: "food-milk-whole-001",
     canonicalName: "whole milk",
-    aliases: ["milk", "cow milk", "full fat milk", "full cream milk", "dairy milk"],
+    aliases: [
+      "milk",
+      "cow milk",
+      "full fat milk",
+      "full cream milk",
+      "dairy milk",
+    ],
     per100g: { kcal: 61, proteinG: 3.2, fatG: 3.3, carbsG: 4.8 },
     allergenTags: ["milk"],
     portionAliases: { cup: 244, glass: 244, serving: 244, ml: 1 },

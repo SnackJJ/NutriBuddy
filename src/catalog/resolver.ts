@@ -1,27 +1,25 @@
-// Deterministic Food Resolver — exact → alias → fuzzy cascade.
+// Deterministic Food Resolver - exact -> alias -> fuzzy cascade.
 //
 // Pure function: accepts a Catalog + input string, returns a typed
 // ResolveResult. The model proposes strings; the resolver mints FoodRefs.
-// The model cannot invent food ids — only the resolver can produce a FoodRef.
+// The model cannot invent food ids; only the resolver can produce a FoodRef.
 //
 // Fuzzy matching uses bigram Jaccard similarity for typo-tolerant lookup.
 // Configurable thresholds allow tuning the match/miss boundary.
 
-import type {
-  Catalog,
-  CatalogFood,
-  FoodRef,
-  MatchType,
-  ResolveResult,
+import {
+  CATALOG_SNAPSHOT_VERSION,
+  type Catalog,
+  type CatalogFood,
+  type FoodRef,
+  type MatchType,
+  type ResolveResult,
 } from "./catalog";
-import { CATALOG_SNAPSHOT_VERSION } from "./catalog";
-
-// ─── config ────────────────────────────────────────────────────────────────
 
 export interface ResolverConfig {
-  /** Score ≥ this → proceed as fuzzy match (if single dominant). */
+  /** Score at or above this value can resolve as a fuzzy match. */
   readonly fuzzyHighThreshold: number;
-  /** Score ≥ this → candidates exist but not confident enough. */
+  /** Score at or above this value can return candidates for clarification. */
   readonly fuzzyMediumThreshold: number;
   /** Gap between 1st and 2nd best must exceed this for "single dominant". */
   readonly ambiguityMargin: number;
@@ -34,20 +32,18 @@ export const DEFAULT_FUZZY_MEDIUM = 0.45;
 export const DEFAULT_AMBIGUITY_MARGIN = 0.12;
 export const DEFAULT_MAX_CANDIDATES = 5;
 
-const DEFAULTS: ResolverConfig = {
+const DEFAULT_RESOLVER_CONFIG: ResolverConfig = {
   fuzzyHighThreshold: DEFAULT_FUZZY_HIGH,
   fuzzyMediumThreshold: DEFAULT_FUZZY_MEDIUM,
   ambiguityMargin: DEFAULT_AMBIGUITY_MARGIN,
   maxCandidates: DEFAULT_MAX_CANDIDATES,
 };
 
-// ─── bigram Jaccard similarity ─────────────────────────────────────────────
-
 /**
  * Extract adjacent-character bigrams from a string.
  * Returns an empty set for strings shorter than 2 characters (no bigrams).
  *
- * Example: "ab" → {"ab"}, "abc" → {"ab","bc"}, "a" → {}.
+ * Example: "ab" -> {"ab"}, "abc" -> {"ab","bc"}, "a" -> {}.
  */
 function bigrams(s: string): Set<string> {
   const result = new Set<string>();
@@ -58,7 +54,7 @@ function bigrams(s: string): Set<string> {
 }
 
 /**
- * Bigram Jaccard similarity: |A ∩ B| / |A ∪ B|.
+ * Bigram Jaccard similarity: size(intersection) / size(union).
  *
  * Returns 0 when either string produces no bigrams (length < 2).
  * Returns 1.0 for identical strings.
@@ -67,17 +63,19 @@ function bigramJaccard(a: string, b: string): number {
   const bgA = bigrams(a);
   const bgB = bigrams(b);
 
-  if (bgA.size === 0 || bgB.size === 0) return 0;
+  if (bgA.size === 0 || bgB.size === 0) {
+    return 0;
+  }
 
   let intersection = 0;
   for (const bg of bgA) {
-    if (bgB.has(bg)) intersection++;
+    if (bgB.has(bg)) {
+      intersection++;
+    }
   }
 
   return intersection / (bgA.size + bgB.size - intersection);
 }
-
-// ─── FoodRef factory ───────────────────────────────────────────────────────
 
 function makeFoodRef(
   food: CatalogFood,
@@ -94,70 +92,114 @@ function makeFoodRef(
   };
 }
 
-// ─── classification ────────────────────────────────────────────────────────
+type FoodRefMatchType = FoodRef["matchType"];
+type MissMatchType = Exclude<MatchType, FoodRefMatchType>;
 
 interface ScoredCandidate {
   readonly food: CatalogFood;
   readonly score: number;
 }
 
-function classifyByScore(
-  scored: readonly ScoredCandidate[],
-  config: ResolverConfig,
-): { matchType: MatchType; candidates: FoodRef[] } {
-  if (scored.length === 0) {
-    return { matchType: "miss_unknown", candidates: [] };
-  }
+type ScoreClassification =
+  | { readonly matchType: "fuzzy"; readonly foodRef: FoodRef }
+  | {
+      readonly matchType: MissMatchType;
+      readonly candidates: readonly FoodRef[];
+    };
 
-  const best = scored[0];
-  const secondBest = scored[1];
+function makeFoodRefResult(input: string, foodRef: FoodRef): ResolveResult {
+  return {
+    matchType: foodRef.matchType,
+    foodRef,
+    catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+    input,
+  };
+}
 
-  const gap = secondBest !== undefined ? best.score - secondBest.score : 1.0;
+function makeMatchedResult(
+  input: string,
+  food: CatalogFood,
+  matchType: FoodRefMatchType,
+  matchScore: number,
+): ResolveResult {
+  return makeFoodRefResult(input, makeFoodRef(food, matchType, matchScore));
+}
 
-  // Single dominant candidate at high confidence → fuzzy match, proceed.
-  if (best.score >= config.fuzzyHighThreshold && gap >= config.ambiguityMargin) {
+function makeMissResult(
+  input: string,
+  matchType: MissMatchType,
+  candidates?: readonly FoodRef[],
+): ResolveResult {
+  if (candidates === undefined) {
     return {
-      matchType: "fuzzy",
-      candidates: [makeFoodRef(best.food, "fuzzy", best.score)],
+      matchType,
+      foodRef: null,
+      catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+      input,
     };
   }
 
-  // Best score in medium range → candidates exist but not confident.
-  if (best.score >= config.fuzzyMediumThreshold) {
-    // Within ambiguity margin of second best → ambiguous.
-    if (gap < config.ambiguityMargin) {
-      const refs = scored
-        .slice(0, config.maxCandidates)
-        .map((c) => makeFoodRef(c.food, "fuzzy", c.score));
-      return { matchType: "miss_ambiguous", candidates: refs };
-    }
-
-    // Single but below high threshold → low confidence.
-    const refs = scored
-      .slice(0, config.maxCandidates)
-      .map((c) => makeFoodRef(c.food, "fuzzy", c.score));
-    return { matchType: "miss_low_confidence", candidates: refs };
-  }
-
-  // Below medium threshold → unknown.
-  return { matchType: "miss_unknown", candidates: [] };
+  return {
+    matchType,
+    foodRef: null,
+    catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+    candidates: candidates.length > 0 ? candidates : undefined,
+    input,
+  };
 }
 
-// ─── fuzzy scan ────────────────────────────────────────────────────────────
+function makeCandidateRefs(
+  scored: readonly ScoredCandidate[],
+  maxCandidates: number,
+): FoodRef[] {
+  return scored
+    .slice(0, maxCandidates)
+    .map((candidate) => makeFoodRef(candidate.food, "fuzzy", candidate.score));
+}
+
+function classifyByScore(
+  scored: readonly ScoredCandidate[],
+  config: ResolverConfig,
+): ScoreClassification {
+  const [best, secondBest] = scored;
+
+  if (best === undefined) {
+    return { matchType: "miss_unknown", candidates: [] };
+  }
+
+  const gap = secondBest !== undefined ? best.score - secondBest.score : 1.0;
+
+  if (
+    best.score >= config.fuzzyHighThreshold &&
+    gap >= config.ambiguityMargin
+  ) {
+    return {
+      matchType: "fuzzy",
+      foodRef: makeFoodRef(best.food, "fuzzy", best.score),
+    };
+  }
+
+  if (best.score < config.fuzzyMediumThreshold) {
+    return { matchType: "miss_unknown", candidates: [] };
+  }
+
+  const candidates = makeCandidateRefs(scored, config.maxCandidates);
+  if (gap < config.ambiguityMargin) {
+    return { matchType: "miss_ambiguous", candidates };
+  }
+
+  return { matchType: "miss_low_confidence", candidates };
+}
 
 /**
  * Score every food in the catalog against the input using bigram Jaccard
  * on the canonical name. Sort descending by score.
  */
-function fuzzyScan(
-  catalog: Catalog,
-  normalized: string,
-  config: ResolverConfig,
-): ScoredCandidate[] {
+function fuzzyScan(catalog: Catalog, query: string): ScoredCandidate[] {
   const results: ScoredCandidate[] = [];
 
   for (const food of catalog.allFoods) {
-    const score = bigramJaccard(normalized, food.canonicalName);
+    const score = bigramJaccard(query, food.canonicalName);
     if (score > 0) {
       results.push({ food, score });
     }
@@ -166,8 +208,6 @@ function fuzzyScan(
   results.sort((a, b) => b.score - a.score);
   return results;
 }
-
-// ─── resolve ───────────────────────────────────────────────────────────────
 
 /**
  * Resolve a food string against the catalog using the deterministic cascade:
@@ -183,76 +223,47 @@ function fuzzyScan(
  * The model proposes strings; the resolver mints FoodRefs. The model cannot
  * invent or bypass the catalog id namespace.
  *
- * @param catalog — the catalog to resolve against (from createCatalog())
- * @param input   — the raw food string (e.g. user utterance or model output)
- * @param config  — optional tuning overrides for fuzzy thresholds
+ * @param catalog - the catalog to resolve against (from createCatalog())
+ * @param input - the raw food string (e.g. user utterance or model output)
+ * @param config - optional tuning overrides for fuzzy thresholds
  */
 export function resolveFood(
   catalog: Catalog,
   input: string,
   config?: Partial<ResolverConfig>,
 ): ResolveResult {
-  const cfg: ResolverConfig = { ...DEFAULTS, ...config };
-  // Collapse whitespace: trim + normalize internal runs to single spaces.
+  const cfg: ResolverConfig = { ...DEFAULT_RESOLVER_CONFIG, ...config };
   const normalized = input.trim().replace(/\s+/g, " ");
 
-  // Empty / whitespace-only — no match possible.
   if (normalized.length === 0) {
-    return {
-      matchType: "miss_unknown",
-      foodRef: null,
-      catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
-      input,
-    };
+    return makeMissResult(input, "miss_unknown");
   }
 
   const lower = normalized.toLowerCase();
 
-  // 1. Exact match on canonical name.
   const exact = catalog.foods.get(lower);
   if (exact) {
-    return {
-      matchType: "exact",
-      foodRef: makeFoodRef(exact, "exact", 1.0),
-      catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
-      input,
-    };
+    return makeMatchedResult(input, exact, "exact", 1.0);
   }
 
-  // 2. Alias table lookup.
   const aliasTarget = catalog.aliasIndex.get(lower);
   if (aliasTarget) {
     const food = catalog.foods.get(aliasTarget);
     if (food) {
-      return {
-        matchType: "alias",
-        foodRef: makeFoodRef(food, "alias", 1.0),
-        catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
-        input,
-      };
+      return makeMatchedResult(input, food, "alias", 1.0);
     }
   }
 
-  // 3. Fuzzy scan — score every food, classify the result.
-  const scored = fuzzyScan(catalog, lower, cfg);
-  const { matchType, candidates } = classifyByScore(scored, cfg);
+  const scored = fuzzyScan(catalog, lower);
+  const classification = classifyByScore(scored, cfg);
 
-  // Fuzzy match → return the FoodRef directly.
-  if (matchType === "fuzzy" && candidates.length > 0) {
-    return {
-      matchType: "fuzzy",
-      foodRef: candidates[0],
-      catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
-      input,
-    };
+  if (classification.matchType === "fuzzy") {
+    return makeFoodRefResult(input, classification.foodRef);
   }
 
-  // Any miss type — return null FoodRef with optional candidates.
-  return {
-    matchType,
-    foodRef: null,
-    catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
-    candidates: candidates.length > 0 ? candidates : undefined,
+  return makeMissResult(
     input,
-  };
+    classification.matchType,
+    classification.candidates,
+  );
 }
