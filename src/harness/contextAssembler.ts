@@ -13,6 +13,7 @@
 // pinned 跨轮不变 → system message 字节一致 → prompt cache 命中。
 
 import type { ChatMessage } from "./types";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 
 export const DEFAULT_SYSTEM_PROMPT =
   "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。";
@@ -98,14 +99,60 @@ export function assembleContext(input: AssembleInput): ChatMessage[] {
   ];
 }
 
-// ─── CodeAct Template Injection ─────────────────────────────────────────
+// ─── Query Catalog Template Injection ──────────────────────────────────────
 
 /**
- * 构建 SQL 模板 prompt section（来自 CodeAct 白名单模板 catalog）。
+ * Build a prompt section exposing reviewed query template signatures.
  *
- * M1 阶段：code_act 工具尚未注册，返回 undefined（无模板注入）。
- * 后续切片产出模板 catalog 后，在此函数内拼装为 prompt section。
+ * When a {@link QueryCatalog} is provided, each template's id, description,
+ * typed parameters, and result schema are rendered as a stable prompt section
+ * for model consumption. The model selects templates by id and provides typed
+ * parameters; deterministic code validates, executes, and returns observations.
+ *
+ * Returns undefined when no catalog is provided (backward compat: no templates
+ * exposed = model cannot invoke query_catalog).
  */
-export function buildTemplatePromptSection(): string | undefined {
-  return undefined;
+export function buildTemplatePromptSection(
+  catalog?: QueryCatalog,
+): string | undefined {
+  if (!catalog || catalog.templateList.length === 0) {
+    return undefined;
+  }
+
+  const lines: string[] = [
+    "[QUERY TEMPLATE CATALOG]",
+    "You have access to the following reviewed query templates. To use one, call the",
+    "query_catalog tool with a template_id and typed parameters. You may NOT invent",
+    "template IDs or parameters — only the ones listed below are valid.",
+    "",
+  ];
+
+  for (const t of catalog.templateList) {
+    lines.push(`Template: ${t.id}`);
+    lines.push(`  Description: ${t.description}`);
+
+    if (t.parameters.length > 0) {
+      lines.push("  Parameters:");
+      for (const p of t.parameters) {
+        const required = p.required ? "(required)" : "(optional)";
+        const enumHint =
+          p.enumValues && p.enumValues.length > 0
+            ? ` [${p.enumValues.join(" | ")}]`
+            : "";
+        lines.push(
+          `    - ${p.name}: ${p.type} ${required}${enumHint} — ${p.description}`,
+        );
+      }
+    }
+
+    lines.push("  Result columns:");
+    for (const c of t.resultSchema) {
+      const unit = c.unit ? ` (${c.unit})` : "";
+      lines.push(`    - ${c.name}: ${c.type}${unit} — ${c.description}`);
+    }
+
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }

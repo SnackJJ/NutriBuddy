@@ -2,10 +2,17 @@ import { describe, it, expect } from "vitest";
 import {
   assembleContext,
   assemblePinnedRegion,
+  buildTemplatePromptSection,
   DEFAULT_SYSTEM_PROMPT,
   type PinnedRegion,
   type ToolDef,
 } from "../src/harness/contextAssembler";
+import {
+  createQueryCatalog,
+  FOOD_LOOKUP_TEMPLATE,
+  type QueryCatalog,
+  type QueryTemplate,
+} from "../src/catalog/queryCatalog";
 
 // ─── assemblePinnedRegion ──────────────────────────────────────────────
 
@@ -225,5 +232,124 @@ describe("assembleContext", () => {
     expect(DEFAULT_SYSTEM_PROMPT).toBe(
       "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。",
     );
+  });
+});
+
+// ─── buildTemplatePromptSection (Query Catalog integration) ───────────────
+
+describe("buildTemplatePromptSection", () => {
+  function seedQueryCatalog(): QueryCatalog {
+    return createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
+  }
+
+  it("returns undefined when no catalog is provided (backward compat)", () => {
+    expect(buildTemplatePromptSection()).toBeUndefined();
+  });
+
+  it("returns undefined for empty catalog", () => {
+    const empty = createQueryCatalog([]);
+    expect(buildTemplatePromptSection(empty)).toBeUndefined();
+  });
+
+  it("builds a prompt section with template signatures", () => {
+    const catalog = seedQueryCatalog();
+    const section = buildTemplatePromptSection(catalog);
+
+    expect(section).toBeDefined();
+    expect(section!).toContain("[QUERY TEMPLATE CATALOG]");
+    expect(section!).toContain("food_lookup");
+    expect(section!).toContain(FOOD_LOOKUP_TEMPLATE.description);
+  });
+
+  it("includes parameter descriptions with types and required/optional markers", () => {
+    const catalog = seedQueryCatalog();
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("food_id");
+    expect(section).toContain("string");
+    expect(section).toContain("(required)");
+    expect(section).toContain("portion_g");
+    expect(section).toContain("number");
+    expect(section).toContain("(optional)");
+  });
+
+  it("includes result schema columns with units", () => {
+    const catalog = seedQueryCatalog();
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("kcal");
+    expect(section).toContain("(kcal)");
+    expect(section).toContain("protein_g");
+    expect(section).toContain("(g)");
+    expect(section).toContain("fat_g");
+    expect(section).toContain("(g)");
+    expect(section).toContain("carbs_g");
+    expect(section).toContain("(g)");
+    expect(section).toContain("portion_g");
+    expect(section).toContain("(g)");
+  });
+
+  it("includes enum values in parameter descriptions", () => {
+    const template: QueryTemplate = {
+      id: "top_k_by_nutrient",
+      description: "Top-k foods by nutrient from the local catalog.",
+      parameters: [
+        {
+          name: "nutrient",
+          type: "enum",
+          required: true,
+          description: "Nutrient to rank by.",
+          enumValues: ["kcal", "protein_g", "fat_g", "carbs_g"],
+        },
+        {
+          name: "k",
+          type: "number",
+          required: false,
+          description: "Number of results (default 5, max 20).",
+        },
+      ],
+      resultSchema: [],
+    };
+    const catalog = createQueryCatalog([template]);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("[kcal | protein_g | fat_g | carbs_g]");
+  });
+
+  it("byte-stable: same catalog produces identical output", () => {
+    const catalog = seedQueryCatalog();
+    const a = buildTemplatePromptSection(catalog);
+    const b = buildTemplatePromptSection(catalog);
+
+    expect(a).toBe(b);
+  });
+
+  it("includes all templates in the catalog", () => {
+    const template2: QueryTemplate = {
+      id: "test_template",
+      description: "Another test template.",
+      parameters: [],
+      resultSchema: [],
+    };
+    const catalog = createQueryCatalog([FOOD_LOOKUP_TEMPLATE, template2]);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("food_lookup");
+    expect(section).toContain("test_template");
+  });
+
+  it("section is usable as sqlTemplates in PinnedRegion for prompt assembly", () => {
+    const catalog = seedQueryCatalog();
+    const section = buildTemplatePromptSection(catalog)!;
+
+    const pinned: PinnedRegion = {
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      sqlTemplates: section,
+    };
+    const result = assemblePinnedRegion(pinned);
+
+    expect(result).toContain(DEFAULT_SYSTEM_PROMPT);
+    expect(result).toContain("[QUERY TEMPLATE CATALOG]");
+    expect(result).toContain("food_lookup");
   });
 });

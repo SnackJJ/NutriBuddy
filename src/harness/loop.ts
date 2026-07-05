@@ -27,6 +27,7 @@ import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
 import { buildPreGateContext, checkPostGate, type UserContext } from "./gate";
 import type { InteractionStore } from "../lib/drugInteractions";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -50,6 +51,8 @@ export interface RunTurnInput {
   readonly userContext?: UserContext;
   /** Pre/post-gate：药物-营养素相互作用数据源。userContext 存在时需传入。 */
   readonly interactionStore?: InteractionStore;
+  /** Typed query catalog：reviewed template signatures for prompt injection. */
+  readonly queryCatalog?: QueryCatalog;
 }
 
 export type TurnResult = TerminalResult;
@@ -98,9 +101,14 @@ export async function* run(
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
-  // CodeAct 模板注入：注册了 code_act 工具时，将白名单模板描述注入 system prompt
-  const templateSection = tools?.has("code_act")
-    ? buildTemplatePromptSection()
+  // Query catalog 模板注入：注册了 query_catalog 或 code_act 工具时，
+  // 将 reviewed template signatures 注入 system prompt。
+  // queryCatalog 提供时优先使用 typed query catalog；否则回退到旧 code_act 路径。
+  const QUERY_CATALOG_TOOL = "query_catalog";
+  const CODE_ACT_TOOL = "code_act";
+  const hasQueryCatalog = tools?.has(QUERY_CATALOG_TOOL) || tools?.has(CODE_ACT_TOOL);
+  const templateSection = hasQueryCatalog
+    ? buildTemplatePromptSection(input.queryCatalog)
     : undefined;
   const gateCtx =
     userContext && interactionStore

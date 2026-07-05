@@ -3,6 +3,7 @@
 
 import { run, type RunTurnInput } from "./loop";
 import type { AgentEvent, TerminalResult } from "./types";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -31,6 +32,8 @@ type Clock = () => Date;
  */
 export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly clock?: Clock;
+  /** Typed query catalog for template signature injection and query_catalog tool. */
+  readonly queryCatalog?: QueryCatalog;
 }
 
 /**
@@ -135,6 +138,7 @@ function createRunTurnInput(
     tools: ports.tools,
     userContext: ports.userContext,
     interactionStore: ports.interactionStore,
+    queryCatalog: ports.queryCatalog,
   };
 }
 
