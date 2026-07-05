@@ -45,6 +45,10 @@ export interface ModelResponse {
   readonly stop: boolean;
   /** 模型发出的工具调用列表；M1 adapter 暂不产出，由 loop 的测试 stub 驱动。 */
   readonly toolCalls?: readonly ToolCall[];
+  /** Typed final output contract (issue #30 / ADD §Loop). When present,
+   *  carries structured FoodRefs and RuleRefs alongside prose for gateable,
+   *  auditable final answers. */
+  readonly output?: TypedOutput;
 }
 
 export interface ModelAdapter {
@@ -73,9 +77,40 @@ export interface TerminalResult {
   readonly reply: string;
   readonly steps: number;
   readonly stopReason: StopReason;
+  /** Typed final output contract (issue #30 / ADD §Loop). Present when
+   *  the model returned structured FoodRefs and RuleRefs. */
+  readonly output?: TypedOutput;
 }
 
 /** 工具处理器：接收 args 返回字符串结果。 */
 export type ToolHandler = (
   args: Readonly<Record<string, unknown>>,
 ) => Promise<string>;
+
+// ── Typed Final Output Contract (issue #30 / ADD §Loop / §Output gate) ──
+
+/** A catalog-validated food reference included in a recommendation. */
+export interface FoodRef {
+  readonly foodId: string;
+  readonly foodName: string;
+  readonly matchType: "exact" | "alias" | "fuzzy";
+  /** FDA big-9 allergen tags; undefined means tags not yet reviewed (loggable, not recommendable). */
+  readonly allergens?: readonly string[];
+}
+
+/** An advisory rule reference citing the matched safety rule. */
+export interface RuleRef {
+  readonly ruleId: string;
+  readonly summary: string;
+}
+
+/**
+ * Typed final output contract: prose plus structured recommendation
+ * FoodRefs and advisory RuleRefs. Free prose is unauditable; typed
+ * fields are gateable (ADD §Loop line 35, §Output gate line 67).
+ */
+export interface TypedOutput {
+  readonly prose: string;
+  readonly foodRefs: readonly FoodRef[];
+  readonly ruleRefs: readonly RuleRef[];
+}

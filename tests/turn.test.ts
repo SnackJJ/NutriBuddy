@@ -445,3 +445,225 @@ describe("turn ports injection", () => {
     expect(prompt).toContain("SAFETY CONSTRAINT");
   });
 });
+
+describe("typed final output contract", () => {
+  it("terminal event carries typed output when model returns it", async () => {
+    const typedOutput = {
+      prose: "I recommend eggs for breakfast.",
+      foodRefs: [
+        {
+          foodId: "egg-whole-raw",
+          foodName: "Eggs, whole, raw",
+          matchType: "exact" as const,
+          allergens: ["egg"],
+        },
+      ],
+      ruleRefs: [
+        {
+          ruleId: "R001",
+          summary: "High protein food suitable for your goals",
+        },
+      ],
+    };
+    const ports = createPorts(() => ({
+      content: typedOutput.prose,
+      stop: true,
+      output: typedOutput,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "breakfast ideas?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.output).toEqual(typedOutput);
+    const endEvent = expectTerminalEvent(events);
+    expect(endEvent.result.output).toEqual(typedOutput);
+  });
+
+  it("typed output fields are inspectable without prose parsing", async () => {
+    const ports = createPorts(() => ({
+      content: "Based on your profile, I recommend salmon.",
+      stop: true,
+      output: {
+        prose: "Based on your profile, I recommend salmon.",
+        foodRefs: [
+          {
+            foodId: "salmon-atlantic-raw",
+            foodName: "Salmon, Atlantic, raw",
+            matchType: "exact" as const,
+            allergens: ["fish"],
+          },
+        ],
+        ruleRefs: [
+          {
+            ruleId: "R003",
+            summary: "Omega-3 rich food for anti-inflammatory benefit",
+          },
+        ],
+      },
+    }));
+    const input: TurnInput = { tag: "utterance", content: "healthy dinner?" };
+
+    const { events } = await collect(turn(input, ports));
+    const endEvent = expectTerminalEvent(events);
+    const output = endEvent.result.output!;
+
+    // Inspect structured fields directly — no string parsing of prose
+    expect(output.foodRefs).toHaveLength(1);
+    expect(output.foodRefs[0].foodId).toBe("salmon-atlantic-raw");
+    expect(output.foodRefs[0].foodName).toBe("Salmon, Atlantic, raw");
+    expect(output.foodRefs[0].matchType).toBe("exact");
+    expect(output.foodRefs[0].allergens).toEqual(["fish"]);
+
+    expect(output.ruleRefs).toHaveLength(1);
+    expect(output.ruleRefs[0].ruleId).toBe("R003");
+    expect(output.ruleRefs[0].summary).toBe(
+      "Omega-3 rich food for anti-inflammatory benefit",
+    );
+  });
+
+  it("adapter without typed output produces no output field on result", async () => {
+    const ports = createPorts(() => ({
+      content: "Simple reply without structured output.",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "hello" };
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.output).toBeUndefined();
+  });
+
+  it("typed output prose matches the reply for final answers", async () => {
+    const prose = "Eggs have about 6g of protein per large egg.";
+    const ports = createPorts(() => ({
+      content: prose,
+      stop: true,
+      output: {
+        prose,
+        foodRefs: [
+          {
+            foodId: "egg-whole-raw",
+            foodName: "Eggs, whole, raw",
+            matchType: "exact" as const,
+            allergens: ["egg"],
+          },
+        ],
+        ruleRefs: [],
+      },
+    }));
+    const input: TurnInput = { tag: "utterance", content: "egg protein?" };
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.reply).toBe(prose);
+    expect(result.output?.prose).toBe(prose);
+  });
+
+  it("typed output with both foodRefs and ruleRefs flows through complete turn", async () => {
+    const typedOutput = {
+      prose:
+        "For your omega-3 goals, I recommend salmon. Note: check warfarin interaction.",
+      foodRefs: [
+        {
+          foodId: "salmon-atlantic-raw",
+          foodName: "Salmon, Atlantic, raw",
+          matchType: "fuzzy" as const,
+          allergens: ["fish"],
+        },
+        {
+          foodId: "spinach-raw",
+          foodName: "Spinach, raw",
+          matchType: "exact" as const,
+        },
+      ],
+      ruleRefs: [
+        {
+          ruleId: "WARFARIN-VITK",
+          summary: "High vitamin K foods may interfere with warfarin",
+        },
+        {
+          ruleId: "OMEGA3-RECOMMENDED",
+          summary: "Omega-3 fatty acids support cardiovascular health",
+        },
+      ],
+    };
+    const ports = createPorts(() => ({
+      content: typedOutput.prose,
+      stop: true,
+      output: typedOutput,
+    }));
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "What should I eat for heart health?",
+    };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Stream is well-formed
+    expectStartEvent(events);
+    const endEvent = expectTerminalEvent(events);
+
+    // Result and event both carry the typed output
+    expect(result.output).toEqual(typedOutput);
+    expect(endEvent.result.output).toEqual(typedOutput);
+
+    // Structured fields are directly inspectable
+    expect(result.output!.foodRefs).toHaveLength(2);
+    expect(result.output!.foodRefs[0].matchType).toBe("fuzzy");
+    expect(result.output!.foodRefs[1].matchType).toBe("exact");
+    expect(result.output!.ruleRefs).toHaveLength(2);
+    expect(result.output!.ruleRefs.map((r) => r.ruleId)).toEqual([
+      "WARFARIN-VITK",
+      "OMEGA3-RECOMMENDED",
+    ]);
+
+    // FoodRef with no allergens is valid (untagged is loggable, not recommendable)
+    expect(result.output!.foodRefs[1].allergens).toBeUndefined();
+  });
+
+  it("typed output in multi-step tool turn propagates from final model response", async () => {
+    let callCount = 0;
+    const typedOutput = {
+      prose: "Chicken breast has 31g protein per 100g.",
+      foodRefs: [
+        {
+          foodId: "chicken-breast-raw",
+          foodName: "Chicken breast, raw",
+          matchType: "exact" as const,
+        },
+      ],
+      ruleRefs: [] as Array<{ ruleId: string; summary: string }>,
+    };
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up nutrition data...",
+          stop: false,
+          toolCalls: [
+            {
+              name: "search_food",
+              args: { food: "chicken" },
+            },
+          ],
+        };
+      }
+      return {
+        content: typedOutput.prose,
+        stop: true,
+        output: typedOutput,
+      };
+    });
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.output).toEqual(typedOutput);
+    const endEvent = expectTerminalEvent(events);
+    expect(endEvent.result.output).toEqual(typedOutput);
+  });
+});

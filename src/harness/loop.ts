@@ -61,6 +61,8 @@ export interface TurnResult {
   readonly reply: string;
   readonly steps: number;
   readonly stopReason: StopReason;
+  /** Typed final output contract (issue #30 / ADD §Loop). */
+  readonly output?: import("./types").TypedOutput;
 }
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
@@ -267,7 +269,12 @@ export async function* run(
         type: "agent_response",
         data: { content: response.content, step },
       });
-      return { reply, steps: step, stopReason: "end_turn" };
+      return {
+        reply,
+        steps: step,
+        stopReason: "end_turn",
+        output: response.output,
+      };
     }
 
     // 模型未交卷且无工具调用：将其产出回灌为历史，继续下一步
@@ -297,5 +304,10 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   while (!next.done) {
     next = await gen.next();
   }
-  return { reply: next.value.reply, steps: next.value.steps, stopReason: next.value.stopReason };
+  return {
+    reply: next.value.reply,
+    steps: next.value.steps,
+    stopReason: next.value.stopReason,
+    output: next.value.output,
+  };
 }

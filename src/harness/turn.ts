@@ -2,10 +2,13 @@
 // Schema version is bumped only for breaking event-shape changes.
 
 import { run, type RunTurnInput } from "./loop";
-import type { AgentEvent, StopReason } from "./types";
+import type { AgentEvent, StopReason, TypedOutput } from "./types";
+
+// Re-export typed output contract types for public API consumers.
+export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump on breaking changes to event shape (add/remove/rename fields). */
-export const SCHEMA_VERSION = "1.0.0";
+export const SCHEMA_VERSION = "1.1.0";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
 
@@ -64,6 +67,9 @@ export interface TurnResult {
   readonly reply: string;
   readonly steps: number;
   readonly stopReason: StopReason;
+  /** Typed final output contract (issue #30 / ADD §Loop). Present when
+   *  the model returned structured FoodRefs and RuleRefs alongside prose. */
+  readonly output?: TypedOutput;
 }
 
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
