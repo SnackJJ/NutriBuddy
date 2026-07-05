@@ -73,10 +73,31 @@ export const STOP_REASONS = [
   "max_steps",
   "aborted",
   "gate_blocked",
+  "write_proposal",
   "crash",
 ] as const;
 
 export type StopReason = (typeof STOP_REASONS)[number];
+
+/**
+ * Write-proposal payload carried in the terminal event when the turn ends
+ * with stopReason "write_proposal" (issue #36 / PRD v2 §3.4 / ADD §Tools).
+ *
+ * Contains the resolved food entities and nutrition computed server-side,
+ * representing the immutable proposal bytes the user must confirm.
+ */
+export interface WriteProposalData {
+  readonly proposalId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
+  readonly kcal: number;
+  readonly proteinG: number;
+  readonly fatG: number;
+  readonly carbsG: number;
+  readonly nutritionSource: string;
+  readonly createdAt: string;
+}
 
 /** Async generator 的最终返回。 */
 export interface TerminalResult {
@@ -85,6 +106,11 @@ export interface TerminalResult {
   readonly stopReason: StopReason;
   /** Structured final answer data, when the model returned it. */
   readonly output?: TypedOutput;
+  /**
+   * Write-proposal payload carried when stopReason is "write_proposal".
+   * Contains the resolved entities and confirmation payload (issue #36).
+   */
+  readonly proposal?: WriteProposalData;
 }
 
 /** 工具处理器：接收 args 返回字符串结果。 */

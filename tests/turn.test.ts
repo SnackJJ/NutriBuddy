@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SCHEMA_VERSION,
   consumeTurn,
+  parseWriteProposalData,
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
@@ -19,6 +20,7 @@ import {
   type ModelRequest,
   type ModelResponse,
   type ToolCall,
+  type WriteProposalData,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
 
@@ -944,6 +946,135 @@ describe("gate verdict events", () => {
     expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
   });
 
+  describe("write-proposal gate verdicts (issue #36)", () => {
+    function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+      return JSON.stringify({
+        proposal_id: "proposal-001",
+        message: "Log 200g chicken breast for lunch? — Confirm?",
+        proposal: {
+          id: "proposal-001",
+          food_name: "chicken breast",
+          portion_g: 200,
+          meal_type: "lunch",
+          created_at: "2026-07-05T12:00:00.000Z",
+          nutrition: {
+            kcal: 330,
+            protein_g: 62,
+            fat_g: 7.2,
+            carbs_g: 0,
+          },
+        },
+        nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+        ...overrides,
+      });
+    }
+
+    it("output gate verdict carries write-proposal evidence", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+            ],
+          };
+        }
+        return { content: "Done — I've proposed logging that meal.", stop: true };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const input: TurnInput = { tag: "utterance", content: "log 200g chicken breast for lunch" };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events, result } = await collect(turn(input, ports));
+
+      expect(result.stopReason).toBe("write_proposal");
+
+      const outputVerdict = expectGateVerdict(events, "output");
+      expect(outputVerdict.verdict).toBe("pass");
+      expect(outputVerdict.evidence).toContain("Write proposal emitted");
+      expect(outputVerdict.evidence).toContain("user confirmation");
+    });
+
+    it("commit gate verdict documents missing meal ledger mutation on write-proposal", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "dinner" } },
+            ],
+          };
+        }
+        return { content: "Done.", stop: true };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const input: TurnInput = { tag: "utterance", content: "log chicken breast dinner" };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events, result } = await collect(turn(input, ports));
+
+      expect(result.stopReason).toBe("write_proposal");
+
+      const commitVerdict = expectGateVerdict(events, "commit");
+      expect(commitVerdict.verdict).toBe("pass");
+      expect(commitVerdict.evidence).toContain("no meal ledger mutation");
+      expect(commitVerdict.evidence).toContain(result.proposal?.proposalId);
+    });
+
+    it("commit gate evidence is distinct from blocking evidence", async () => {
+      // Write-proposal pass
+      let callCount = 0;
+      const writePropAdapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+            ],
+          };
+        }
+        return { content: "Done.", stop: true };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const wpInput: TurnInput = { tag: "utterance", content: "log chicken" };
+      const wpPorts = createPorts(undefined, { adapter: writePropAdapter, tools });
+
+      const { events: wpEvents } = await collect(turn(wpInput, wpPorts));
+      const wpCommit = expectGateVerdict(wpEvents, "commit");
+
+      // Gate-blocked
+      const blockedAdapter = stubAdapter(() => ({
+        content: "I recommend eating peanuts for protein!",
+        stop: true,
+      }));
+      const blockedInput: TurnInput = { tag: "utterance", content: "protein?" };
+      const blockedPorts = createPorts(undefined, {
+        adapter: blockedAdapter,
+        userContext: { allergies: ["peanut"], medications: [] },
+        interactionStore: { all: async () => [] },
+      });
+
+      const { events: blockedEvents } = await collect(turn(blockedInput, blockedPorts));
+      const blockedCommit = expectGateVerdict(blockedEvents, "commit");
+
+      // Write-proposal commit evidence talks about proposals, not blocks
+      expect(wpCommit.evidence.toLowerCase()).toContain("proposal");
+      expect(wpCommit.evidence.toLowerCase()).not.toContain("block");
+
+      // Blocked commit evidence talks about blocks, not proposals
+      expect(blockedCommit.evidence.toLowerCase()).toContain("block");
+      expect(blockedCommit.evidence).not.toBe(wpCommit.evidence);
+    });
+  });
+
   it("scorer sees zero gate blocks when post-gate passes", async () => {
     const adapter = stubAdapter(() => ({
       content: "I recommend chicken for protein!",
@@ -959,5 +1090,322 @@ describe("gate verdict events", () => {
     const { events } = await collect(turn(input, ports));
 
     expect(countBlockedGateVerdicts(events)).toBe(0);
+  });
+});
+
+describe("parseWriteProposalData (issue #36)", () => {
+  function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      proposal_id: "proposal-001",
+      message: "Log 200g chicken breast for lunch? — Confirm?",
+      proposal: {
+        id: "proposal-001",
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+        created_at: "2026-07-05T12:00:00.000Z",
+        nutrition: {
+          kcal: 330,
+          protein_g: 62,
+          fat_g: 7.2,
+          carbs_g: 0,
+        },
+      },
+      nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+      ...overrides,
+    });
+  }
+
+  it("parses a valid log_meal response into WriteProposalData", () => {
+    const data = parseWriteProposalData(makeLogMealResult());
+
+    expect(data).toBeDefined();
+    if (!data) throw new Error("expected defined data");
+
+    expect(data.proposalId).toBe("proposal-001");
+    expect(data.foodName).toBe("chicken breast");
+    expect(data.portionG).toBe(200);
+    expect(data.mealType).toBe("lunch");
+    expect(data.kcal).toBe(330);
+    expect(data.proteinG).toBe(62);
+    expect(data.fatG).toBe(7.2);
+    expect(data.carbsG).toBe(0);
+    expect(data.nutritionSource).toBe("");
+    expect(data.createdAt).toBe("2026-07-05T12:00:00.000Z");
+  });
+
+  it("returns undefined for non-JSON input", () => {
+    expect(parseWriteProposalData("not json")).toBeUndefined();
+  });
+
+  it("returns undefined when proposal field is missing", () => {
+    const result = JSON.stringify({ proposal_id: "x", message: "hi" });
+    expect(parseWriteProposalData(result)).toBeUndefined();
+  });
+
+  it("returns undefined when proposal.id is missing", () => {
+    const result = JSON.stringify({
+      proposal: { food_name: "chicken" },
+    });
+    expect(parseWriteProposalData(result)).toBeUndefined();
+  });
+
+  it("returns undefined when proposal.food_name is missing", () => {
+    const result = JSON.stringify({
+      proposal: { id: "prop-1" },
+    });
+    expect(parseWriteProposalData(result)).toBeUndefined();
+  });
+
+  it("preserves all fields from a complete proposal response", () => {
+    const data = parseWriteProposalData(
+      makeLogMealResult({
+        proposal: {
+          id: "prop-custom",
+          food_name: "rice",
+          portion_g: 150,
+          meal_type: "dinner",
+          created_at: "2026-01-01T00:00:00Z",
+          nutrition: {
+            kcal: 200,
+            protein_g: 4,
+            fat_g: 0.5,
+            carbs_g: 45,
+          },
+        },
+      }),
+    );
+
+    expect(data).toBeDefined();
+    if (!data) throw new Error("expected defined data");
+
+    expect(data.proposalId).toBe("prop-custom");
+    expect(data.foodName).toBe("rice");
+    expect(data.portionG).toBe(150);
+    expect(data.mealType).toBe("dinner");
+    expect(data.kcal).toBe(200);
+    expect(data.proteinG).toBe(4);
+    expect(data.fatG).toBe(0.5);
+    expect(data.carbsG).toBe(45);
+    expect(data.createdAt).toBe("2026-01-01T00:00:00Z");
+  });
+
+  it("tolerates missing nutrition fields (they become undefined)", () => {
+    const result = JSON.stringify({
+      proposal: {
+        id: "prop-1",
+        food_name: "unknown",
+        portion_g: 100,
+        meal_type: "snack",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    const data = parseWriteProposalData(result);
+
+    expect(data).toBeDefined();
+    if (!data) throw new Error("expected defined data");
+
+    expect(data.kcal).toBeUndefined();
+    expect(data.proteinG).toBeUndefined();
+    expect(data.fatG).toBeUndefined();
+    expect(data.carbsG).toBeUndefined();
+  });
+});
+
+describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
+  function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      proposal_id: "proposal-001",
+      message: "Log 200g chicken breast for lunch? — Confirm?",
+      proposal: {
+        id: "proposal-001",
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+        created_at: "2026-07-05T12:00:00.000Z",
+        nutrition: {
+          kcal: 330,
+          protein_g: 62,
+          fat_g: 7.2,
+          carbs_g: 0,
+        },
+      },
+      nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+      ...overrides,
+    });
+  }
+
+  it("terminal result has stopReason 'write_proposal' with resolved proposal data", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that meal for you.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" },
+            },
+          ],
+        };
+      }
+      return { content: "Done — I've proposed logging that meal.", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = { tag: "utterance", content: "log 200g chicken breast for lunch" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.proposal).toBeDefined();
+    expect(result.proposal?.proposalId).toBe("proposal-001");
+    expect(result.proposal?.foodName).toBe("chicken breast");
+    expect(result.proposal?.portionG).toBe(200);
+    expect(result.proposal?.mealType).toBe("lunch");
+    expect(result.proposal?.kcal).toBe(330);
+    expect(result.proposal?.proteinG).toBe(62);
+    expect(result.proposal?.fatG).toBe(7.2);
+    expect(result.proposal?.carbsG).toBe(0);
+    expect(result.proposal?.createdAt).toBe("2026-07-05T12:00:00.000Z");
+
+    const endEvent = expectTerminalEvent(events);
+    expect(endEvent.result.stopReason).toBe("write_proposal");
+    expect(endEvent.result.proposal).toEqual(result.proposal);
+  });
+
+  it("the model's final reply is preserved alongside the proposal on the terminal result", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that.",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "rice", portion_g: 150, meal_type: "dinner" } },
+          ],
+        };
+      }
+      return { content: "I've proposed 150g rice for your dinner. Confirm?", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = { tag: "utterance", content: "log rice dinner" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.reply).toContain("rice");
+    expect(result.reply).toContain("dinner");
+    expect(result.proposal).toBeDefined();
+  });
+
+  it("event stream includes tool gate verdict for log_meal before write-proposal termination", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Logging...",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+          ],
+        };
+      }
+      return { content: "Done.", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = { tag: "utterance", content: "log chicken" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+
+    const allCheckpoints = gateVerdicts(events).map((e) => e.checkpoint);
+    expect(allCheckpoints).toContain("input");
+    expect(allCheckpoints).toContain("tool");
+    expect(allCheckpoints).toContain("output");
+    expect(allCheckpoints).toContain("commit");
+
+    const toolVerdict = expectGateVerdict(events, "tool");
+    expect(toolVerdict.evidence).toContain("log_meal");
+  });
+
+  it("write_proposal is a recognized STOP_REASONS member", () => {
+    expect(STOP_REASONS).toContain("write_proposal");
+  });
+
+  it("a proposal_confirm turn following a write-proposal turn does not touch the adapter", async () => {
+    // Write-proposal turn
+    let callCount = 0;
+    const wpAdapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Logging...",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+          ],
+        };
+      }
+      return { content: "Done.", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const wpInput: TurnInput = { tag: "utterance", content: "log chicken" };
+    const ports = createPorts(undefined, { adapter: wpAdapter, tools });
+
+    const { result: wpResult } = await collect(turn(wpInput, ports));
+    expect(wpResult.stopReason).toBe("write_proposal");
+    expect(wpResult.proposal).toBeDefined();
+
+    // Confirm turn: the adapter is not called; short-circuit handles it
+    let confirmGenerateCalled = false;
+    const confirmPorts = createPorts(() => {
+      confirmGenerateCalled = true;
+      return { content: "should not be used", stop: true };
+    });
+    const confirmInput: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: wpResult.proposal!.proposalId,
+      confirmed: true,
+    };
+
+    const { result: confirmResult } = await collect(turn(confirmInput, confirmPorts));
+
+    expect(confirmGenerateCalled).toBe(false);
+    expect(confirmResult.reply).toContain("confirmed");
+  });
+
+  it("only log_meal tool calls trigger write-proposal; other tools do not override stopReason", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [
+            { name: "search_food", args: { food: "chicken" } },
+          ],
+        };
+      }
+      return { content: "Chicken has 31g protein per 100g.", stop: true };
+    });
+    const tools = new Map([["search_food", async () => "chicken: 31g protein/100g"]]);
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    // search_food is not log_meal, so stopReason stays as end_turn (not write_proposal)
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.proposal).toBeUndefined();
   });
 });

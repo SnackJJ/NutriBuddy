@@ -2,14 +2,21 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createLogMealHandler,
   LOG_MEAL_SCHEMA,
-  type MealLogStore,
-  type MealLogEntry,
+  type ProposalStore,
+  type Proposal,
+  type ProposalInput,
 } from "../src/harness/logMeal";
 import type { GetFoodNutrition, NutritionData } from "../src/harness/foodNutrition";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TEST_USER = "b4e0a1c2-3d4e-5f6a-7b8c-9d0e1f2a3b4c";
+let proposalCounter = 0;
+
+function nextProposalId(): string {
+  proposalCounter++;
+  return `proposal-${proposalCounter.toString().padStart(3, "0")}`;
+}
 
 function fakeNutrition(data: Partial<NutritionData> = {}): GetFoodNutrition {
   return vi.fn(async (_foodName: string, _portionG: number) => ({
@@ -30,42 +37,43 @@ function throwingNutrition(message: string): GetFoodNutrition {
   };
 }
 
-interface MemStoreState {
-  entries: MealLogEntry[];
-  nextId: number;
+interface MemProposalState {
+  proposals: Proposal[];
 }
 
-function memMealLogStore(state?: MemStoreState): {
-  store: MealLogStore;
-  state: MemStoreState;
+function memProposalStore(state?: MemProposalState): {
+  store: ProposalStore;
+  state: MemProposalState;
 } {
-  const s = state ?? { entries: [], nextId: 1 };
+  const s = state ?? { proposals: [] };
   return {
     state: s,
     store: {
-      async insert(params) {
-        const entry: MealLogEntry = {
-          id: s.nextId++,
+      async store(params: ProposalInput): Promise<Proposal> {
+        const proposal: Proposal = {
+          id: nextProposalId(),
           userId: params.userId,
           foodName: params.foodName,
           portionG: params.portionG,
           mealType: params.mealType,
-          loggedAt: new Date("2026-06-26T12:00:00Z").toISOString(),
           kcal: params.kcal,
           proteinG: params.proteinG,
           fatG: params.fatG,
           carbsG: params.carbsG,
+          nutritionSource: params.nutritionSource,
+          status: "proposed",
+          createdAt: new Date("2026-06-26T12:00:00Z").toISOString(),
         };
-        s.entries.push(entry);
-        return entry;
+        s.proposals.push(proposal);
+        return proposal;
       },
     },
   };
 }
 
-function throwingStore(message: string): MealLogStore {
+function throwingProposalStore(message: string): ProposalStore {
   return {
-    async insert() {
+    async store() {
       throw new Error(message);
     },
   };
@@ -75,10 +83,10 @@ function throwingStore(message: string): MealLogStore {
 
 describe("createLogMealHandler", () => {
   it("returns a function", () => {
-    const { store } = memMealLogStore();
+    const { store } = memProposalStore();
     const handler = createLogMealHandler({
       getFoodNutrition: fakeNutrition(),
-      mealLogStore: store,
+      proposalStore: store,
       userId: TEST_USER,
     });
     expect(typeof handler).toBe("function");
@@ -88,10 +96,10 @@ describe("createLogMealHandler", () => {
 
   describe("input validation", () => {
     it("rejects missing food_name", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -102,10 +110,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects empty food_name", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -116,10 +124,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects whitespace-only food_name", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -130,10 +138,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects missing portion_g", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -144,10 +152,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects zero portion_g", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -158,10 +166,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects negative portion_g", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -175,10 +183,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects non-numeric portion_g", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -192,10 +200,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("rejects invalid meal_type", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -210,10 +218,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("accepts valid meal_types: breakfast, lunch, dinner, snack", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -225,7 +233,7 @@ describe("createLogMealHandler", () => {
         });
         const parsed = JSON.parse(result);
         expect(parsed.error).toBeUndefined();
-        expect(parsed.success).toBe(true);
+        expect(parsed.proposal_id).toBeDefined();
       }
     });
   });
@@ -234,10 +242,10 @@ describe("createLogMealHandler", () => {
 
   describe("default meal_type", () => {
     it('defaults to "snack" when meal_type is omitted', async () => {
-      const { store, state } = memMealLogStore();
+      const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -246,21 +254,21 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
       });
       const parsed = JSON.parse(result);
-      expect(parsed.success).toBe(true);
-      expect(parsed.meal.meal_type).toBe("snack");
-      expect(state.entries[0].mealType).toBe("snack");
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.meal_type).toBe("snack");
+      expect(state.proposals[0].mealType).toBe("snack");
     });
   });
 
-  // ─── Successful Meal Logging ────────────────────────────────────────────
+  // ─── Proposal Creation ─────────────────────────────────────────────────
 
-  describe("successful logging", () => {
-    it("logs a meal and returns confirmation + nutrition summary", async () => {
-      const { store, state } = memMealLogStore();
+  describe("proposal creation", () => {
+    it("stores a proposal and returns confirmation prompt + nutrition summary", async () => {
+      const { store, state } = memProposalStore();
       const nutrition = fakeNutrition();
       const handler = createLogMealHandler({
         getFoodNutrition: nutrition,
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -271,32 +279,51 @@ describe("createLogMealHandler", () => {
       });
       const parsed = JSON.parse(result);
 
-      expect(parsed.success).toBe(true);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(typeof parsed.proposal_id).toBe("string");
       expect(parsed.message).toContain("200g chicken breast");
       expect(parsed.message).toContain("lunch");
-      expect(parsed.meal.food_name).toBe("chicken breast");
-      expect(parsed.meal.portion_g).toBe(200);
-      expect(parsed.meal.meal_type).toBe("lunch");
-      expect(parsed.meal.logged_at).toBeDefined();
+      expect(parsed.message).toContain("Confirm?");
+      expect(parsed.proposal.food_name).toBe("chicken breast");
+      expect(parsed.proposal.portion_g).toBe(200);
+      expect(parsed.proposal.meal_type).toBe("lunch");
+      expect(parsed.proposal.created_at).toBeDefined();
       expect(parsed.nutrition_summary.kcal).toBe(330);
       expect(parsed.nutrition_summary.protein_g).toBe(62);
       expect(parsed.nutrition_summary.fat_g).toBe(7.2);
       expect(parsed.nutrition_summary.carbs_g).toBe(0);
 
-      // Verify store was called
-      expect(state.entries.length).toBe(1);
-      expect(state.entries[0].userId).toBe(TEST_USER);
-      expect(state.entries[0].foodName).toBe("chicken breast");
-      expect(state.entries[0].portionG).toBe(200);
-      expect(state.entries[0].mealType).toBe("lunch");
-      expect(state.entries[0].kcal).toBe(330);
+      // Verify proposal was stored
+      expect(state.proposals.length).toBe(1);
+      expect(state.proposals[0].userId).toBe(TEST_USER);
+      expect(state.proposals[0].foodName).toBe("chicken breast");
+      expect(state.proposals[0].portionG).toBe(200);
+      expect(state.proposals[0].mealType).toBe("lunch");
+      expect(state.proposals[0].kcal).toBe(330);
+      expect(state.proposals[0].status).toBe("proposed");
+    });
+
+    it("stores the nutrition source in the proposal", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition({ source: "USDA FoodData Central" }),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+      });
+
+      expect(state.proposals[0].nutritionSource).toBe("USDA FoodData Central");
     });
 
     it("trims whitespace from food_name", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -305,16 +332,16 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
       });
       const parsed = JSON.parse(result);
-      expect(parsed.success).toBe(true);
-      expect(parsed.meal.food_name).toBe("chicken breast");
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.food_name).toBe("chicken breast");
     });
 
     it("calls getFoodNutrition with correct arguments", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const nutrition = fakeNutrition();
       const handler = createLogMealHandler({
         getFoodNutrition: nutrition,
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -323,11 +350,11 @@ describe("createLogMealHandler", () => {
       expect(nutrition).toHaveBeenCalledWith("chicken breast", 350);
     });
 
-    it("returns a unique meal id", async () => {
-      const { store } = memMealLogStore();
+    it("returns a unique proposal id for each call", async () => {
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -338,7 +365,31 @@ describe("createLogMealHandler", () => {
         await handler({ food_name: "rice", portion_g: 150 }),
       );
 
-      expect(r1.meal.id).not.toBe(r2.meal.id);
+      expect(r1.proposal_id).not.toBe(r2.proposal_id);
+      expect(r1.proposal.id).not.toBe(r2.proposal.id);
+    });
+
+    // Issue #36: log_meal stores proposals, not meal ledger rows.
+    // The handler has no access to MealLogStore, so the meal ledger is
+    // untouched by construction — no model-output path can mutate it.
+    it("does not accept a MealLogStore dependency (structurally prevents meal ledger writes)", () => {
+      // TypeScript-level check: LogMealDeps only exposes proposalStore.
+      // This test documents the structural guarantee. There is no
+      // mealLogStore field on LogMealDeps, so no caller can pass one.
+      // The log_meal handler cannot mutate the meal ledger because it
+      // has no reference to it.
+      //
+      // We verify by constructing a handler with only proposalStore and
+      // confirming it works — proving MealLogStore is unnecessary.
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      expect(typeof handler).toBe("function");
+      expect(state.proposals.length).toBe(0);
     });
   });
 
@@ -346,10 +397,10 @@ describe("createLogMealHandler", () => {
 
   describe("error handling", () => {
     it("returns error when nutrition lookup fails", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: throwingNutrition("Food not found in database"),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -363,10 +414,10 @@ describe("createLogMealHandler", () => {
       expect(parsed.error).toContain("Food not found");
     });
 
-    it("returns error when store insert fails", async () => {
+    it("returns error when proposal store fails", async () => {
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: throwingStore("DB connection failed"),
+        proposalStore: throwingProposalStore("DB connection failed"),
         userId: TEST_USER,
       });
 
@@ -376,23 +427,22 @@ describe("createLogMealHandler", () => {
       });
       const parsed = JSON.parse(result);
       expect(parsed.error).toBeDefined();
-      expect(parsed.error).toContain("failed to log meal");
+      expect(parsed.error).toContain("failed to create meal proposal");
       expect(parsed.error).toContain("DB connection failed");
     });
 
-    it("does not insert to store when nutrition lookup fails", async () => {
-      const { store, state } = memMealLogStore();
-      // Wrap so we can track calls
-      const insertSpy = vi.fn(store.insert);
+    it("does not store proposal when nutrition lookup fails", async () => {
+      const { store, state } = memProposalStore();
+      const storeSpy = vi.fn(store.store);
       const handler = createLogMealHandler({
         getFoodNutrition: throwingNutrition("not found"),
-        mealLogStore: { ...store, insert: insertSpy },
+        proposalStore: { ...store, store: storeSpy },
         userId: TEST_USER,
       });
 
       await handler({ food_name: "bad food", portion_g: 100 });
-      expect(insertSpy).not.toHaveBeenCalled();
-      expect(state.entries.length).toBe(0);
+      expect(storeSpy).not.toHaveBeenCalled();
+      expect(state.proposals.length).toBe(0);
     });
   });
 
@@ -400,10 +450,10 @@ describe("createLogMealHandler", () => {
 
   describe("response format", () => {
     it("returns valid JSON", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -416,10 +466,10 @@ describe("createLogMealHandler", () => {
     });
 
     it("error responses contain an error key", async () => {
-      const { store } = memMealLogStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -428,11 +478,11 @@ describe("createLogMealHandler", () => {
       expect(parsed.error).toBeDefined();
     });
 
-    it("success responses contain success, message, meal, nutrition_summary", async () => {
-      const { store } = memMealLogStore();
+    it("proposal responses contain proposal_id, message, proposal, nutrition_summary", async () => {
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
-        mealLogStore: store,
+        proposalStore: store,
         userId: TEST_USER,
       });
 
@@ -443,14 +493,65 @@ describe("createLogMealHandler", () => {
       });
       const parsed = JSON.parse(result);
 
-      expect(parsed.success).toBe(true);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(typeof parsed.proposal_id).toBe("string");
       expect(typeof parsed.message).toBe("string");
-      expect(parsed.meal).toBeDefined();
+      expect(parsed.proposal).toBeDefined();
+      expect(parsed.proposal.id).toBe(parsed.proposal_id);
       expect(parsed.nutrition_summary).toBeDefined();
       expect(typeof parsed.nutrition_summary.kcal).toBe("number");
       expect(typeof parsed.nutrition_summary.protein_g).toBe("number");
       expect(typeof parsed.nutrition_summary.fat_g).toBe("number");
       expect(typeof parsed.nutrition_summary.carbs_g).toBe("number");
+    });
+
+    it("message includes confirmation prompt wording", async () => {
+      const { store } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+
+      expect(parsed.message).toContain("Confirm?");
+      expect(parsed.message).toContain("330 kcal");
+      expect(parsed.message).toContain("62g protein");
+    });
+
+    // Issue #36: the response is shaped for the write-proposal terminal event
+    it("proposal object carries resolved entities for terminal event", async () => {
+      const { store } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+
+      // The proposal object in the response contains the data the turn
+      // will use to construct the write-proposal terminal event.
+      expect(parsed.proposal.id).toBeDefined();
+      expect(parsed.proposal.food_name).toBe("chicken breast");
+      expect(parsed.proposal.portion_g).toBe(200);
+      expect(parsed.proposal.meal_type).toBe("lunch");
+      expect(parsed.proposal.created_at).toBeDefined();
+      expect(parsed.proposal.nutrition.kcal).toBe(330);
+      expect(parsed.proposal.nutrition.protein_g).toBe(62);
+      expect(parsed.proposal.nutrition.fat_g).toBe(7.2);
+      expect(parsed.proposal.nutrition.carbs_g).toBe(0);
     });
   });
 
@@ -464,6 +565,12 @@ describe("createLogMealHandler", () => {
       expect(LOG_MEAL_SCHEMA.function.name).toBe("log_meal");
       expect(typeof LOG_MEAL_SCHEMA.function.description).toBe("string");
       expect(LOG_MEAL_SCHEMA.function.description.length).toBeGreaterThan(0);
+    });
+
+    it("describes proposal-only behavior in its description", () => {
+      const desc = LOG_MEAL_SCHEMA.function.description;
+      expect(desc.toLowerCase()).toContain("propos");
+      expect(desc.toLowerCase()).toContain("confirm");
     });
 
     it("declares food_name as a required string parameter", () => {

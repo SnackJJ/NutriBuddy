@@ -2,7 +2,7 @@
 // Schema version follows SemVer for event-shape changes.
 
 import { run, type RunTurnInput } from "./loop";
-import type { AgentEvent, TerminalResult } from "./types";
+import type { AgentEvent, TerminalResult, WriteProposalData } from "./types";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -152,12 +152,42 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
   return `Blocked: ${lastBlock.payload}`;
 }
 
+export function parseWriteProposalData(toolResult: string): WriteProposalData | undefined {
+  try {
+    const parsed = JSON.parse(toolResult);
+    const p = parsed.proposal;
+    if (!p || !p.id || !p.food_name) return undefined;
+    return {
+      proposalId: p.id,
+      foodName: p.food_name,
+      portionG: p.portion_g,
+      mealType: p.meal_type,
+      kcal: p.nutrition?.kcal,
+      proteinG: p.nutrition?.protein_g,
+      fatG: p.nutrition?.fat_g,
+      carbsG: p.nutrition?.carbs_g,
+      nutritionSource: "",
+      createdAt: p.created_at ?? "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Return type of runUtteranceTurn — carries the terminal result plus any detected write proposal. */
+interface UtteranceTurnOutput {
+  readonly result: TurnResult;
+  readonly writeProposal?: WriteProposalData;
+}
+
 async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
-): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
+): AsyncGenerator<AnyTurnEvent, UtteranceTurnOutput, undefined> {
   const gen = run(createRunTurnInput(input, ports));
+
+  let lastWriteProposalData: WriteProposalData | undefined;
 
   let next = await gen.next();
   while (!next.done) {
@@ -174,12 +204,19 @@ async function* runUtteranceTurn(
         },
         nextMetadata,
       );
+
+      // Issue #36: detect log_meal tool calls and extract proposal data
+      if (next.value.toolResult.name === "log_meal") {
+        lastWriteProposalData = parseWriteProposalData(
+          next.value.toolResult.result,
+        );
+      }
     }
 
     next = await gen.next();
   }
 
-  return next.value;
+  return { result: next.value, writeProposal: lastWriteProposalData };
 }
 
 function createRunTurnInput(
@@ -255,20 +292,41 @@ export async function* turn(
   );
 
   let result: TurnResult;
+  let writeProposal: WriteProposalData | undefined;
 
   switch (input.tag) {
-    case "utterance":
-      result = yield* runUtteranceTurn(input, ports, nextMetadata);
+    case "utterance": {
+      const utteranceOutput = yield* runUtteranceTurn(
+        input,
+        ports,
+        nextMetadata,
+      );
+      result = utteranceOutput.result;
+      writeProposal = utteranceOutput.writeProposal;
       break;
+    }
     case "proposal_confirm":
       result = createProposalConfirmResult(input);
       break;
   }
 
+  // Issue #36: when log_meal was called, override stopReason to write_proposal
+  // and attach the resolved proposal data to the terminal result.
+  if (writeProposal) {
+    result = {
+      ...result,
+      stopReason: "write_proposal",
+      proposal: writeProposal,
+    };
+  }
+
   const isGateBlocked = result.stopReason === "gate_blocked";
+  const isWriteProposal = result.stopReason === "write_proposal";
   const outputEvidence = isGateBlocked
     ? extractGateEvidence(ports.tracer)
-    : "Output passed safety checks";
+    : isWriteProposal
+      ? "Write proposal emitted — awaiting user confirmation"
+      : "Output passed safety checks";
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
@@ -285,11 +343,18 @@ export async function* turn(
   yield createGateVerdictEvent(
     {
       checkpoint: "commit",
-      verdict: isGateBlocked ? "block" : "pass",
+      verdict: isGateBlocked ? "block" : (
+        // Issue #36: commit gate passes on write_proposal — the proposal
+        // is stored, the meal ledger is untouched, and mutation awaits
+        // the next turn's confirmation short-circuit.
+        isWriteProposal ? "pass" : "pass"
+      ),
       checkName: "commit_gate_check",
       evidence: isGateBlocked
         ? outputEvidence
-        : "Response committed successfully",
+        : isWriteProposal
+          ? `Proposal ${writeProposal?.proposalId ?? ""} stored — no meal ledger mutation occurred`
+          : "Response committed successfully",
     },
     nextMetadata,
   );
