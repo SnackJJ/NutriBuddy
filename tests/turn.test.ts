@@ -445,3 +445,99 @@ describe("turn ports injection", () => {
     expect(prompt).toContain("SAFETY CONSTRAINT");
   });
 });
+
+describe("turn cross-vocabulary (CLI + eval share)", () => {
+  it("terminal TurnEndEvent shape is compatible with CLI display and eval scoring", async () => {
+    const input: TurnInput = { tag: "utterance", content: "protein?" };
+    const ports = createPorts(() => ({
+      content: "6g protein per egg.",
+      stop: true,
+    }));
+
+    const { events, result } = await collect(turn(input, ports));
+    const endEvent = expectTerminalEvent(events);
+
+    // CLI needs: reply string to write to stdout
+    expect(typeof result.reply).toBe("string");
+    expect(result.reply).toBe(endEvent.result.reply);
+
+    // Eval needs: steps, stopReason for HarnessResult
+    expect(typeof result.steps).toBe("number");
+    expect(result.steps).toBeGreaterThanOrEqual(0);
+    expect(result.stopReason).toBe(endEvent.result.stopReason);
+    expect([
+      "end_turn",
+      "max_steps",
+      "aborted",
+      "gate_blocked",
+      "crash",
+    ]).toContain(result.stopReason);
+  });
+
+  it("tracer events use the shared vocabulary both CLI and eval consume", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "egg" } }],
+        };
+      }
+      return { content: "6g protein per egg.", stop: true };
+    });
+    const tools = new Map([
+      ["search_food", async () => "egg: 6g protein"],
+    ]);
+    const tracer = new Tracer();
+    const input: TurnInput = { tag: "utterance", content: "egg protein?" };
+    const ports = createPorts(undefined, { adapter, tools, tracer });
+
+    const { result } = await collect(turn(input, ports));
+
+    const traceEvents = tracer.events();
+    const types = traceEvents.map((e) => e.type);
+
+    // Loop always records these core vocabulary types:
+    expect(types).toContain("user_input");
+    expect(types).toContain("model_prompt");
+    expect(types).toContain("model_return");
+
+    // All recorded types are valid TraceEventType values from the shared
+    // vocabulary (tool_call, gate_block, gate_exhausted, and
+    // max_steps_reached are valid but only appear in specific scenarios).
+    const validTypes = new Set([
+      "user_input",
+      "model_prompt",
+      "model_return",
+      "max_steps_reached",
+      "gate_block",
+      "gate_exhausted",
+      "tool_call",
+    ]);
+    for (const t of types) {
+      expect(validTypes.has(t)).toBe(true);
+    }
+
+    // Result is well-formed for both CLI display and eval scoring
+    expect(result.reply).toBe("6g protein per egg.");
+    expect(result.steps).toBe(2);
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("event stream always starts with turn_start and ends with turn_end (shared by CLI + eval)", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    expect(events.length).toBeGreaterThanOrEqual(2); // at least start + end
+    expect(events[0].type).toBe("turn_start");
+    expect(events[events.length - 1].type).toBe("turn_end");
+    // All events carry the same schema version
+    for (const e of events) {
+      expect(e.schema).toBe(SCHEMA_VERSION);
+    }
+  });
+});

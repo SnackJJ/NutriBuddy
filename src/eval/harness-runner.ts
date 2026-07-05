@@ -3,8 +3,9 @@
 // 通过完整 Loop（pre-gate + post-gate + 工具）回答 eval query。
 // 记录每条 case 的响应、步数、工具调用、gate block 次数、违规、耗时。
 
-import type { ModelAdapter, AgentEvent, TerminalResult, ToolHandler } from "../harness/types";
-import { run } from "../harness/loop";
+import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
+import type { TurnStepEvent } from "../harness/turn";
+import { turn } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase, HarnessResult } from "./types";
@@ -31,7 +32,7 @@ export async function runHarnessEval(
 
     let reply = "";
     let steps = 0;
-    let stopReason: TerminalResult["stopReason"] = "end_turn";
+    let stopReason: StopReason = "end_turn";
     const toolCalls: string[] = [];
     let gateBlocks = 0;
 
@@ -39,21 +40,26 @@ export async function runHarnessEval(
     const hasGate = c.userContext && interactionStore;
 
     try {
-      const gen = run({
-        userInput: c.query,
-        adapter,
-        tracer,
-        tools,
-        userContext: hasGate ? c.userContext : undefined,
-        interactionStore: hasGate ? interactionStore : undefined,
-      });
+      const gen = turn(
+        { tag: "utterance", content: c.query },
+        {
+          adapter,
+          tracer,
+          tools,
+          userContext: hasGate ? c.userContext : undefined,
+          interactionStore: hasGate ? interactionStore : undefined,
+        },
+      );
 
       let next = await gen.next();
       while (!next.done) {
         const event = next.value;
-        steps = event.step; // track last-seen step before potential crash (issue #21)
-        if (event.type === "act" && event.toolCall) {
-          toolCalls.push(event.toolCall.name);
+        if (event.type === "step") {
+          const agentEvent = (event as TurnStepEvent).agentEvent;
+          steps = agentEvent.step; // track last-seen step before potential crash (issue #21)
+          if (agentEvent.type === "act" && agentEvent.toolCall) {
+            toolCalls.push(agentEvent.toolCall.name);
+          }
         }
         // Track gate blocks via tracer
         next = await gen.next();
