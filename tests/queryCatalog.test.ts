@@ -9,7 +9,9 @@ import {
   type Observation,
   type ParamDef,
   type ColumnDef,
+  type QueryResult,
 } from "../src/catalog/queryCatalog";
+import { buildTemplatePromptSection } from "../src/harness/contextAssembler";
 import {
   createCatalog,
   SEED_FOODS,
@@ -27,23 +29,28 @@ function seedQueryCatalog(): QueryCatalog {
   return createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
 }
 
-/** A valid food ID from the seed data. */
 const CHICKEN_BREAST_ID = "food-chicken-breast-001";
 
-function expectObservation(result: { type: string; [key: string]: unknown }): Observation {
-  if (result.type !== "observation") {
-    throw new Error(`Expected observation but got ${result.type}: ${JSON.stringify(result)}`);
+type QueryError = Extract<QueryResult, { readonly type: "error" }>;
+
+function expectObservation(result: QueryResult): Observation {
+  if (result.type === "observation") {
+    return result.observation;
   }
-  return (result as { type: "observation"; observation: Observation }).observation;
+
+  throw new Error(
+    `Expected observation but got ${result.type}: ${JSON.stringify(result)}`,
+  );
 }
 
-function expectError(
-  result: { type: string; [key: string]: unknown },
-): { message: string; availableTemplates: readonly string[] } {
-  if (result.type !== "error") {
-    throw new Error(`Expected error but got ${result.type}: ${JSON.stringify(result)}`);
+function expectError(result: QueryResult): QueryError {
+  if (result.type === "error") {
+    return result;
   }
-  return result as { type: "error"; message: string; availableTemplates: readonly string[] };
+
+  throw new Error(
+    `Expected error but got ${result.type}: ${JSON.stringify(result)}`,
+  );
 }
 
 /**
@@ -51,43 +58,58 @@ function expectError(
  * M1 executes against in-memory catalog; future templates will run real SQL against Supabase.
  */
 function createStubRunner(catalog: Catalog) {
-  return async (templateId: string, params: Record<string, unknown>, _userId: string): Promise<Observation> => {
-    if (templateId === "food_lookup") {
-      const foodId = String(params.food_id);
-      const portionG = typeof params.portion_g === "number" ? params.portion_g : 100;
-
-      const allFoods = catalog.allFoods;
-      const food = allFoods.find((f) => f.id === foodId);
-
-      if (!food) {
-        throw new Error(`Food not found: ${foodId}`);
-      }
-
-      const scale = portionG / 100;
-      const round = (v: number) => Math.round(v * scale * 10) / 10;
-
-      return {
-        templateId,
-        columns: FOOD_LOOKUP_TEMPLATE.resultSchema,
-        rows: [
-          {
-            food_id: food.id,
-            food_name: food.canonicalName,
-            portion_g: portionG,
-            kcal: round(food.per100g.kcal),
-            protein_g: round(food.per100g.proteinG),
-            fat_g: round(food.per100g.fatG),
-            carbs_g: round(food.per100g.carbsG),
-            allergen_tags: food.allergenTags.join(", "),
-          },
-        ],
-        rowCount: 1,
-        truncated: false,
-      };
+  return async (
+    templateId: string,
+    params: Record<string, unknown>,
+    _userId: string,
+  ): Promise<Observation> => {
+    if (templateId !== "food_lookup") {
+      throw new Error(`Unknown template: ${templateId}`);
     }
 
-    throw new Error(`Unknown template: ${templateId}`);
+    const foodId = String(params.food_id);
+    const portionG =
+      typeof params.portion_g === "number" ? params.portion_g : 100;
+    const food = catalog.allFoods.find((f) => f.id === foodId);
+
+    if (!food) {
+      throw new Error(`Food not found: ${foodId}`);
+    }
+
+    const scale = portionG / 100;
+    const round = (per100gValue: number) =>
+      Math.round(per100gValue * scale * 10) / 10;
+
+    return {
+      templateId,
+      columns: FOOD_LOOKUP_TEMPLATE.resultSchema,
+      rows: [
+        {
+          food_id: food.id,
+          food_name: food.canonicalName,
+          portion_g: portionG,
+          kcal: round(food.per100g.kcal),
+          protein_g: round(food.per100g.proteinG),
+          fat_g: round(food.per100g.fatG),
+          carbs_g: round(food.per100g.carbsG),
+          allergen_tags: food.allergenTags.join(", "),
+        },
+      ],
+      rowCount: 1,
+      truncated: false,
+    };
   };
+}
+
+function expectColumn(
+  schema: readonly ColumnDef[],
+  name: string,
+  expected: Pick<ColumnDef, "type" | "unit">,
+): void {
+  const column = schema.find((c) => c.name === name);
+  expect(column).toBeDefined();
+  expect(column!.type).toBe(expected.type);
+  expect(column!.unit).toBe(expected.unit);
 }
 
 // ─── template definitions ──────────────────────────────────────────────────
@@ -115,31 +137,11 @@ describe("QueryTemplate definitions", () => {
   it("food_lookup declares a result schema with unit-bearing numeric columns", () => {
     const schema = FOOD_LOOKUP_TEMPLATE.resultSchema;
 
-    // Unit-bearing numeric columns
-    const portionCol = schema.find((c: ColumnDef) => c.name === "portion_g");
-    expect(portionCol).toBeDefined();
-    expect(portionCol!.type).toBe("number");
-    expect(portionCol!.unit).toBe("g");
-
-    const kcalCol = schema.find((c: ColumnDef) => c.name === "kcal");
-    expect(kcalCol).toBeDefined();
-    expect(kcalCol!.type).toBe("number");
-    expect(kcalCol!.unit).toBe("kcal");
-
-    const proteinCol = schema.find((c: ColumnDef) => c.name === "protein_g");
-    expect(proteinCol).toBeDefined();
-    expect(proteinCol!.type).toBe("number");
-    expect(proteinCol!.unit).toBe("g");
-
-    const fatCol = schema.find((c: ColumnDef) => c.name === "fat_g");
-    expect(fatCol).toBeDefined();
-    expect(fatCol!.type).toBe("number");
-    expect(fatCol!.unit).toBe("g");
-
-    const carbsCol = schema.find((c: ColumnDef) => c.name === "carbs_g");
-    expect(carbsCol).toBeDefined();
-    expect(carbsCol!.type).toBe("number");
-    expect(carbsCol!.unit).toBe("g");
+    expectColumn(schema, "portion_g", { type: "number", unit: "g" });
+    expectColumn(schema, "kcal", { type: "number", unit: "kcal" });
+    expectColumn(schema, "protein_g", { type: "number", unit: "g" });
+    expectColumn(schema, "fat_g", { type: "number", unit: "g" });
+    expectColumn(schema, "carbs_g", { type: "number", unit: "g" });
   });
 
   it("every column in the result schema has a description", () => {
@@ -273,7 +275,6 @@ describe("validateParams", () => {
 
 describe("validateParams — enum parameters", () => {
   it("validates enum values against the declared allowed set", () => {
-    // Create a template with an enum parameter
     const template: QueryTemplate = {
       id: "test_enum",
       description: "Test template with enum param",
@@ -289,12 +290,8 @@ describe("validateParams — enum parameters", () => {
       resultSchema: [],
     };
 
-    // Valid enum value
-    expect(
-      validateParams(template, { nutrient: "kcal" }),
-    ).toHaveLength(0);
+    expect(validateParams(template, { nutrient: "kcal" })).toHaveLength(0);
 
-    // Invalid enum value
     const errors = validateParams(template, { nutrient: "vitamin_d" });
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].param).toBe("nutrient");
@@ -316,7 +313,6 @@ describe("validateParams — enum parameters", () => {
       resultSchema: [],
     };
 
-    // No enumValues defined → nothing passes
     const errors = validateParams(template, { color: "red" });
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].message).toMatch(/enum/i);
@@ -371,13 +367,11 @@ describe("executeQuery", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0];
 
-    // Numeric values with defined units
     expect(typeof row.kcal).toBe("number");
     expect(typeof row.protein_g).toBe("number");
     expect(typeof row.fat_g).toBe("number");
     expect(typeof row.carbs_g).toBe("number");
 
-    // String values without units
     expect(typeof row.food_id).toBe("string");
     expect(typeof row.food_name).toBe("string");
   });
@@ -394,7 +388,6 @@ describe("executeQuery", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0];
 
-    // Chicken breast per 100g: 165 kcal, 31g protein, 3.6g fat, 0g carbs
     expect(row.kcal).toBe(165);
     expect(row.protein_g).toBe(31);
     expect(row.fat_g).toBe(3.6);
@@ -414,11 +407,10 @@ describe("executeQuery", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0];
 
-    // 200g chicken breast = 2× 100g values
-    expect(row.kcal).toBe(330); // 165 × 2
-    expect(row.protein_g).toBe(62); // 31 × 2
-    expect(row.fat_g).toBe(7.2); // 3.6 × 2
-    expect(row.carbs_g).toBe(0); // 0 × 2
+    expect(row.kcal).toBe(330);
+    expect(row.protein_g).toBe(62);
+    expect(row.fat_g).toBe(7.2);
+    expect(row.carbs_g).toBe(0);
     expect(row.portion_g).toBe(200);
   });
 
@@ -489,25 +481,24 @@ describe("executeQuery", () => {
   });
 
   it("model cannot inject user_id as a parameter — it is rejected by validation", async () => {
-    // The model tries to pass user_id as a parameter. The validator MUST reject
-    // unknown params — user_id is NOT a declared parameter on any template.
+    const rejectRunner = async (): Promise<Observation> => {
+      throw new Error("Runner should not be called for invalid params");
+    };
+
     const result = await executeQuery(
       queryCatalog,
       "food_lookup",
       {
         food_id: CHICKEN_BREAST_ID,
-        user_id: "evil-user", // model tries to inject user id
+        user_id: "evil-user",
       },
-      "authenticated-user-001", // real user id from session
-      runner,
+      "authenticated-user-001",
+      rejectRunner,
     );
 
-    // Unknown parameter is rejected at the validation gate
     const err = expectError(result);
     expect(err.message).toMatch(/user_id/);
     expect(err.message).toMatch(/unknown/i);
-
-    // The runner was never called — model can't bypass user identity binding
   });
 
   it("userId bound by caller is the only identity that reaches the runner", async () => {
@@ -520,7 +511,13 @@ describe("executeQuery", () => {
       capturedUserId = userId;
       return {
         templateId,
-        columns: [{ name: "scoped_user", type: "string" as const, description: "User scoping" }],
+        columns: [
+          {
+            name: "scoped_user",
+            type: "string" as const,
+            description: "User scoping",
+          },
+        ],
         rows: [{ scoped_user: userId }],
         rowCount: 1,
         truncated: false,
@@ -542,10 +539,6 @@ describe("executeQuery", () => {
   });
 
   it("user identity is scoped per-call and never bleeds across executions", async () => {
-    // Verify two different users get different data scoping
-    let capturedA: string | undefined;
-    let capturedB: string | undefined;
-
     const captureRunner = async (
       templateId: string,
       _params: Record<string, unknown>,
@@ -553,7 +546,13 @@ describe("executeQuery", () => {
     ): Promise<Observation> => {
       return {
         templateId,
-        columns: [{ name: "scoped_user", type: "string" as const, description: "User scoping test" }],
+        columns: [
+          {
+            name: "scoped_user",
+            type: "string" as const,
+            description: "User scoping test",
+          },
+        ],
         rows: [{ scoped_user: userId }],
         rowCount: 1,
         truncated: false,
@@ -583,7 +582,6 @@ describe("executeQuery", () => {
 
     expect(rowA.scoped_user).toBe("user-A");
     expect(rowB.scoped_user).toBe("user-B");
-    // User scoping must NOT bleed across calls
     expect(rowA.scoped_user).not.toBe(rowB.scoped_user);
   });
 });
@@ -607,7 +605,6 @@ describe("observation → numeric tracing", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0] as Record<string, unknown>;
 
-    // Every numeric field should have a corresponding column with a unit
     const numericColumnNames = obs.columns
       .filter((c: ColumnDef) => c.type === "number" && c.unit !== undefined)
       .map((c: ColumnDef) => c.name);
@@ -619,10 +616,6 @@ describe("observation → numeric tracing", () => {
   });
 
   it("nutrition numbers come from observations, not model arithmetic", async () => {
-    // This test simulates the verification contract:
-    // Given an observation, a numeric claim can be verified by looking up
-    // the corresponding column value in the observation row.
-
     const result = await executeQuery(
       queryCatalog,
       "food_lookup",
@@ -634,11 +627,11 @@ describe("observation → numeric tracing", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0] as Record<string, unknown>;
 
-    // The model might claim "salmon has 20g protein per 100g"
     const modelClaim = { nutrient: "protein_g", value: 20, unit: "g" };
 
-    // Verification: the claim MUST match the observation
-    const columnDef = obs.columns.find((c: ColumnDef) => c.name === modelClaim.nutrient);
+    const columnDef = obs.columns.find(
+      (c: ColumnDef) => c.name === modelClaim.nutrient,
+    );
     expect(columnDef).toBeDefined();
     expect(columnDef!.unit).toBe(modelClaim.unit);
 
@@ -647,7 +640,6 @@ describe("observation → numeric tracing", () => {
   });
 
   it("numeric provenance is traceable: observation → catalog entry → USDA data", async () => {
-    // Full trace: model claim → observation value → catalog FoodRef → USDA per-100g
     const result = await executeQuery(
       queryCatalog,
       "food_lookup",
@@ -659,32 +651,28 @@ describe("observation → numeric tracing", () => {
     const obs = expectObservation(result);
     const row = obs.rows[0] as Record<string, unknown>;
 
-    // Step 1: The observation carries the food ID
     const observedFoodId = row.food_id;
     expect(observedFoodId).toBe("food-salmon-001");
 
-    // Step 2: Resolve the food in the catalog (the ground truth)
     const resolved = resolveFood(foodCatalog, "salmon");
     expect(resolved.foodRef).not.toBeNull();
     expect(resolved.foodRef!.foodId).toBe(observedFoodId);
 
-    // Step 3: The catalog's per-100g values match the observation's values
-    // (at default 100g portion, they should be identical)
     const { per100g } = resolved.foodRef!;
     expect(row.kcal).toBe(per100g.kcal);
     expect(row.protein_g).toBe(per100g.proteinG);
     expect(row.fat_g).toBe(per100g.fatG);
     expect(row.carbs_g).toBe(per100g.carbsG);
 
-    // Step 4: The observation's columns declare units, completing the trace
     const kcalCol = obs.columns.find((c: ColumnDef) => c.name === "kcal");
     expect(kcalCol!.unit).toBe("kcal");
-    const proteinCol = obs.columns.find((c: ColumnDef) => c.name === "protein_g");
+    const proteinCol = obs.columns.find(
+      (c: ColumnDef) => c.name === "protein_g",
+    );
     expect(proteinCol!.unit).toBe("g");
   });
 
   it("can trace nutrition for any food in the seed catalog", async () => {
-    // Verify ALL seed foods can be traced through the read path
     for (const food of foodCatalog.allFoods) {
       const result = await executeQuery(
         queryCatalog,
@@ -704,7 +692,6 @@ describe("observation → numeric tracing", () => {
       expect(row.fat_g).toBe(food.per100g.fatG);
       expect(row.carbs_g).toBe(food.per100g.carbsG);
 
-      // Allergen tags should match the seed data
       if (food.allergenTags.length > 0) {
         expect(row.allergen_tags).toBe(food.allergenTags.join(", "));
       } else {
@@ -714,13 +701,6 @@ describe("observation → numeric tracing", () => {
   });
 
   it("a full read turn: model selects template + params → observation → answer's facts trace to observation", async () => {
-    // Simulate a full model interaction:
-    // 1. Model selects template "food_lookup" with params { food_id: "food-egg-001" }
-    // 2. Executor validates, binds user identity, returns observation
-    // 3. Model's answer claims "eggs have 13g protein per 100g"
-    // 4. Verification: the claim matches the observation
-
-    // Step 1 & 2: Execute the query
     const result = await executeQuery(
       queryCatalog,
       "food_lookup",
@@ -731,21 +711,17 @@ describe("observation → numeric tracing", () => {
 
     const obs = expectObservation(result);
 
-    // Step 3: Model narrates from observation (in reality, the model does this;
-    // here we simulate what the verifier would check)
-    const modelAnswer = {
-      prose: "Eggs contain 13g protein, 11g fat, and 155 kcal per 100g.",
-      claims: [
-        { column: "protein_g", value: 13, unit: "g" },
-        { column: "fat_g", value: 11, unit: "g" },
-        { column: "kcal", value: 155, unit: "kcal" },
-      ],
-    };
+    const modelClaims = [
+      { column: "protein_g", value: 13, unit: "g" },
+      { column: "fat_g", value: 11, unit: "g" },
+      { column: "kcal", value: 155, unit: "kcal" },
+    ];
 
-    // Step 4: Verify every numeric claim against the observation
     const row = obs.rows[0] as Record<string, unknown>;
-    for (const claim of modelAnswer.claims) {
-      const colDef = obs.columns.find((c: ColumnDef) => c.name === claim.column);
+    for (const claim of modelClaims) {
+      const colDef = obs.columns.find(
+        (c: ColumnDef) => c.name === claim.column,
+      );
       expect(colDef).toBeDefined();
       expect(colDef!.unit).toBe(claim.unit);
 
@@ -797,21 +773,8 @@ describe("template signature exposure for prompt injection", () => {
 
   it("query catalog generates a prompt-parseable template catalog string", () => {
     const catalog = seedQueryCatalog();
+    const promptSection = buildTemplatePromptSection(catalog)!;
 
-    // Simulate what buildTemplatePromptSection() would produce
-    const lines: string[] = [];
-    for (const t of catalog.templateList) {
-      lines.push(`  ${t.id}: ${t.description}`);
-      lines.push(`    Parameters:`);
-      for (const p of t.parameters) {
-        const required = p.required ? " (required)" : " (optional)";
-        const enumHint = p.enumValues ? ` [${p.enumValues.join("|")}]` : "";
-        lines.push(`      - ${p.name}: ${p.type}${required}${enumHint} — ${p.description}`);
-      }
-      lines.push(`    Returns: ${t.resultSchema.map((c: ColumnDef) => `${c.name} (${c.type}${c.unit ? `, ${c.unit}` : ""})`).join(", ")}`);
-    }
-
-    const promptSection = lines.join("\n");
     expect(promptSection).toContain("food_lookup");
     expect(promptSection).toContain("food_id");
     expect(promptSection).toContain("string (required)");

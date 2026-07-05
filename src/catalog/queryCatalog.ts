@@ -123,92 +123,117 @@ function isPresent(value: unknown): boolean {
   return value !== undefined && value !== null;
 }
 
+function requiredParamError(param: ParamDef): ValidationError {
+  return {
+    param: param.name,
+    message: `Required parameter "${param.name}" is missing.`,
+  };
+}
+
+function validateStringParam(
+  param: ParamDef,
+  value: unknown,
+): ValidationError | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return null;
+  }
+
+  return {
+    param: param.name,
+    message: `Parameter "${param.name}" must be a non-empty string.`,
+  };
+}
+
+function validateNumberParam(
+  param: ParamDef,
+  value: unknown,
+): ValidationError | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return {
+      param: param.name,
+      message: `Parameter "${param.name}" must be a finite number.`,
+    };
+  }
+
+  if (value <= 0) {
+    return {
+      param: param.name,
+      message: `Parameter "${param.name}" must be a positive number.`,
+    };
+  }
+
+  return null;
+}
+
+function validateEnumParam(
+  param: ParamDef,
+  value: unknown,
+): ValidationError | null {
+  if (typeof value !== "string") {
+    return {
+      param: param.name,
+      message: `Parameter "${param.name}" must be a string (enum).`,
+    };
+  }
+
+  if (!param.enumValues || param.enumValues.length === 0) {
+    return {
+      param: param.name,
+      message: `Parameter "${param.name}" has no defined enum values.`,
+    };
+  }
+
+  if (param.enumValues.includes(value)) {
+    return null;
+  }
+
+  return {
+    param: param.name,
+    message:
+      `Parameter "${param.name}" value "${value}" is not in the allowed enum: ` +
+      `[${param.enumValues.join(", ")}].`,
+  };
+}
+
+function validateDateParam(
+  param: ParamDef,
+  value: unknown,
+): ValidationError | null {
+  if (typeof value !== "string") {
+    return {
+      param: param.name,
+      message: `Parameter "${param.name}" must be a string (ISO 8601 date).`,
+    };
+  }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (dateRegex.test(value)) {
+    return null;
+  }
+
+  return {
+    param: param.name,
+    message: `Parameter "${param.name}" must be a valid ISO 8601 date (YYYY-MM-DD).`,
+  };
+}
+
 function validateParam(
   param: ParamDef,
   value: unknown,
 ): ValidationError | null {
-  // Required check
   if (!isPresent(value)) {
-    if (param.required) {
-      return {
-        param: param.name,
-        message: `Required parameter "${param.name}" is missing.`,
-      };
-    }
-    return null; // optional, not present → OK
+    return param.required ? requiredParamError(param) : null;
   }
 
-  // Type checks
   switch (param.type) {
-    case "string": {
-      if (typeof value !== "string" || value.trim().length === 0) {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a non-empty string.`,
-        };
-      }
-      break;
-    }
-    case "number": {
-      if (typeof value !== "number" || !Number.isFinite(value)) {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a finite number.`,
-        };
-      }
-      // Portion-like numbers must be positive
-      if (value <= 0) {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a positive number.`,
-        };
-      }
-      break;
-    }
-    case "enum": {
-      if (typeof value !== "string") {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a string (enum).`,
-        };
-      }
-      if (
-        param.enumValues &&
-        param.enumValues.length > 0 &&
-        !param.enumValues.includes(value)
-      ) {
-        return {
-          param: param.name,
-          message:
-            `Parameter "${param.name}" value "${value}" is not in the allowed enum: ` +
-            `[${param.enumValues.join(", ")}].`,
-        };
-      }
-      if (!param.enumValues || param.enumValues.length === 0) {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" has no defined enum values.`,
-        };
-      }
-      break;
-    }
-    case "date": {
-      if (typeof value !== "string") {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a string (ISO 8601 date).`,
-        };
-      }
-      // Validate ISO 8601 date format (YYYY-MM-DD)
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(value)) {
-        return {
-          param: param.name,
-          message: `Parameter "${param.name}" must be a valid ISO 8601 date (YYYY-MM-DD).`,
-        };
-      }
-      break;
-    }
+    case "string":
+      return validateStringParam(param, value);
+    case "number":
+      return validateNumberParam(param, value);
+    case "enum":
+      return validateEnumParam(param, value);
+    case "date":
+      return validateDateParam(param, value);
   }
 
   return null;
@@ -224,7 +249,6 @@ export function validateParams(
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // Check each declared parameter
   for (const param of template.parameters) {
     const error = validateParam(param, params[param.name]);
     if (error) {
@@ -232,7 +256,6 @@ export function validateParams(
     }
   }
 
-  // Check for unknown parameters (model cannot inject extra fields)
   const declaredNames = new Set(template.parameters.map((p) => p.name));
   for (const key of Object.keys(params)) {
     if (!declaredNames.has(key)) {
@@ -281,7 +304,6 @@ export async function executeQuery(
   userId: string,
   runner: QueryRunner,
 ): Promise<QueryResult> {
-  // 1. Template lookup
   const template = catalog.templates.get(templateId);
   if (!template) {
     return makeErrorResult(
@@ -292,7 +314,6 @@ export async function executeQuery(
     );
   }
 
-  // 2. Parameter validation
   const errors = validateParams(template, params);
   if (errors.length > 0) {
     const details = errors
@@ -305,7 +326,6 @@ export async function executeQuery(
     );
   }
 
-  // 3. Execute against data port (userId bound by caller, not from model params)
   const observation = await runner(templateId, params, userId);
 
   return { type: "observation", observation };

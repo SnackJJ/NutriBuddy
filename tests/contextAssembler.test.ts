@@ -44,7 +44,8 @@ describe("assemblePinnedRegion", () => {
   it("includes sqlTemplates section when provided", () => {
     const pinned: PinnedRegion = {
       systemPrompt: "You are a nutrition advisor.",
-      sqlTemplates: "[TOOL: code_act]\nAvailable templates:\n  - profile_query: ...",
+      sqlTemplates:
+        "[TOOL: code_act]\nAvailable templates:\n  - profile_query: ...",
     };
     const result = assemblePinnedRegion(pinned);
     expect(result).toContain("You are a nutrition advisor.");
@@ -75,7 +76,7 @@ describe("assemblePinnedRegion", () => {
       {
         name: "search_food",
         description: "Search USDA food database.",
-        parameters: 'food: string (required) - food name to search for',
+        parameters: "food: string (required) - food name to search for",
       },
     ];
     const pinned: PinnedRegion = {

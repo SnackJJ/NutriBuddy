@@ -13,7 +13,11 @@
 // pinned 跨轮不变 → system message 字节一致 → prompt cache 命中。
 
 import type { ChatMessage } from "./types";
-import type { QueryCatalog } from "../catalog/queryCatalog";
+import type {
+  ColumnDef,
+  ParamDef,
+  QueryCatalog,
+} from "../catalog/queryCatalog";
 
 export const DEFAULT_SYSTEM_PROMPT =
   "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。";
@@ -101,6 +105,21 @@ export function assembleContext(input: AssembleInput): ChatMessage[] {
 
 // ─── Query Catalog Template Injection ──────────────────────────────────────
 
+function formatTemplateParameter(parameter: ParamDef): string {
+  const required = parameter.required ? "(required)" : "(optional)";
+  const enumHint =
+    parameter.enumValues && parameter.enumValues.length > 0
+      ? ` [${parameter.enumValues.join(" | ")}]`
+      : "";
+
+  return `    - ${parameter.name}: ${parameter.type} ${required}${enumHint} — ${parameter.description}`;
+}
+
+function formatResultColumn(column: ColumnDef): string {
+  const unit = column.unit ? ` (${column.unit})` : "";
+  return `    - ${column.name}: ${column.type}${unit} — ${column.description}`;
+}
+
 /**
  * Build a prompt section exposing reviewed query template signatures.
  *
@@ -134,21 +153,13 @@ export function buildTemplatePromptSection(
     if (t.parameters.length > 0) {
       lines.push("  Parameters:");
       for (const p of t.parameters) {
-        const required = p.required ? "(required)" : "(optional)";
-        const enumHint =
-          p.enumValues && p.enumValues.length > 0
-            ? ` [${p.enumValues.join(" | ")}]`
-            : "";
-        lines.push(
-          `    - ${p.name}: ${p.type} ${required}${enumHint} — ${p.description}`,
-        );
+        lines.push(formatTemplateParameter(p));
       }
     }
 
     lines.push("  Result columns:");
     for (const c of t.resultSchema) {
-      const unit = c.unit ? ` (${c.unit})` : "";
-      lines.push(`    - ${c.name}: ${c.type}${unit} — ${c.description}`);
+      lines.push(formatResultColumn(c));
     }
 
     lines.push("");

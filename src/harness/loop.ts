@@ -33,6 +33,8 @@ import type { QueryCatalog } from "../catalog/queryCatalog";
 export const MAX_STEPS = 8;
 /** Post-gate 最大重试次数（issue #10）。 */
 const MAX_POST_GATE_RETRIES = 2;
+const QUERY_CATALOG_TOOL = "query_catalog";
+const CODE_ACT_TOOL = "code_act";
 
 export interface RunTurnInput {
   readonly userInput: string;
@@ -96,19 +98,17 @@ export async function* run(
     tools,
     userContext,
     interactionStore,
+    queryCatalog,
   } = input;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
 
-  // Query catalog 模板注入：注册了 query_catalog 或 code_act 工具时，
-  // 将 reviewed template signatures 注入 system prompt。
-  // queryCatalog 提供时优先使用 typed query catalog；否则回退到旧 code_act 路径。
-  const QUERY_CATALOG_TOOL = "query_catalog";
-  const CODE_ACT_TOOL = "code_act";
-  const hasQueryCatalog = tools?.has(QUERY_CATALOG_TOOL) || tools?.has(CODE_ACT_TOOL);
-  const templateSection = hasQueryCatalog
-    ? buildTemplatePromptSection(input.queryCatalog)
+  // Expose reviewed template signatures only when a template-aware tool exists.
+  const hasTemplateAwareTool =
+    tools?.has(QUERY_CATALOG_TOOL) || tools?.has(CODE_ACT_TOOL);
+  const templateSection = hasTemplateAwareTool
+    ? buildTemplatePromptSection(queryCatalog)
     : undefined;
   const gateCtx =
     userContext && interactionStore
