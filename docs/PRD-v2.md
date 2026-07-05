@@ -2,6 +2,8 @@
 
 > 2026-06-25，经 `/grill-with-docs` 全面挑战原 PRD 后重写。
 > 原 PRD v1 保留在 `docs/PRD.md`，作为历史参考。
+>
+> 2026-07-05 架构收敛：`docs/ADD.md` 是当前架构基准。本文保留产品目标与里程碑语境；凡与 ADD 冲突处，以 ADD 为准。
 
 ## 0. 项目定位
 
@@ -34,53 +36,63 @@
 
 ## 2. 架构
 
-### 2.1 拓扑：单 Agent + 确定性预处理 + Post-Gate
+### 2.1 拓扑：单 Agent + 确定性代码 + Gates
 
 ```
-用户请求
-  → [Pre-gate] 代码层取过敏/用药/禁忌（确定性 SQL，不走 RAG）
-  → [ContextAssembler] pinned region（system + profile + SQL 模板）+ 当前轮
-  → [单 Agent Loop] ReAct + CodeAct 混合
-  → [Post-gate] 输出 ∩ 禁忌 ≠ ∅ → 硬拦 fail loud
-  → 返回用户
+Tagged turn input（utterance | proposal confirmation）
+  → [Turn seam] 注入 model/store/catalog/clock ports
+  → [Input gate] 约束扫描与 directive 注入
+  → [ContextAssembler] pinned region + dynamic region
+  → [Single Agent Loop] ReAct + typed query catalog
+  → [Tool/Output/Commit gates] deterministic verdict events
+  → Exactly one terminal event（final / clarification / write proposal / refusal / error）
 ```
 
-### 2.2 Loop：ReAct + CodeAct 混合
+核心原则：模型负责选择和叙述；事实、数字、实体、写入都由确定性代码定义和校验。食品实体只能来自 resolver minted catalog id；数字只能来自 query catalog observation；写入只能来自用户确认过的 stored proposal。
 
-- **CodeAct**：批量数据查询（profile + 今日饮食 + 营养计算），模型生成 SQL（基于注入的模板），harness 在限制环境中执行
-- **ReAct**：需要根据中间结果判断的操作（写操作、异常处理、追问用户）
+### 2.2 Loop：ReAct + Typed Query Catalog
 
-### 2.3 八个模块（M1 实际搭建六块）
+- **ReAct**：处理歧义、追问、工具选择、write proposal 等交互决策。
+- **Typed query catalog**：模型只发出 template id + typed parameters；executor 渲染 reviewed SQL 并返回 schema-declared observation。模型不从零写 SQL，不做营养数字心算。
+- **Step budget**：`MAX_STEPS=8`。预算耗尽必须产出 typed stop reason 和 deterministic refusal，不允许静默截断。
+- **Terminal protocols**：clarification request 和 write proposal 都是 terminal events；用户回复或确认是下一次 turn input。
+- **Buffered release**：最终回答先完整生成并过 output gate；不做 token streaming。UI 可流式展示 step events。
 
-| 模块                 | M1 做什么                                                                            | 推迟的                       |
-| -------------------- | ------------------------------------------------------------------------------------ | ---------------------------- |
-| **Loop**             | ReAct + CodeAct 混合循环，MAX_STEPS=5                                                | —                            |
-| **ContextAssembler** | pinned region（system prompt + user profile + SQL 模板）+ 当前轮                     | compaction                   |
-| **ToolRegistry**     | `execute_query`（CodeAct SQL 执行器，模板白名单）+ `log_meal` + `get_food_nutrition` | —                            |
-| **MemoryStore**      | profile 层（过敏、用药、目标），确定性 SQL                                           | 情景记忆                     |
-| **Verifier**         | pre-gate + post-gate（几行 `if`，不拆独立模块）                                      | 独立 Verifier 模块、覆盖判停 |
-| **Tracer**           | 不可变仅追加事件日志，结构化 trajectory                                              | —                            |
-| **Retriever**        | **全推迟**：M1 不需要语义 RAG，所有关键数据确定性查询                                | 路 B 知识 RAG                |
-| **ModelAdapter**     | DeepSeek / 通义千问，OpenAI-compatible 接口                                          | 多模型路由                   |
+### 2.3 八个模块与当前切片
+
+| 模块                 | 当前架构职责                                                                                  | 推迟的                         |
+| -------------------- | --------------------------------------------------------------------------------------------- | ------------------------------ |
+| **Loop**             | 单 turn orchestration；ReAct + typed query catalog；8 step budget；terminal event discipline   | —                              |
+| **ContextAssembler** | pinned region（system contracts + catalog signatures + profile/rules snapshot）+ dynamic region | compaction                     |
+| **ToolRegistry**     | `query_catalog` / `get_food_nutrition` / proposal-only `log_meal`                              | autonomous exact-match writes  |
+| **MemoryStore**      | profile constraints、meal ledger、proposals、reference data                                    | free-text episodic memory      |
+| **Verifier/Gates**   | input/tool/output/commit gates；所有 verdict 都是 typed event                                  | semantic gate beyond backstop  |
+| **Tracer**           | schema-versioned per-turn event stream + append-only session log                               | —                              |
+| **Retriever**        | **全推迟**：知识 RAG 不参与安全正确性                                                          | metric-gated knowledge RAG     |
+| **ModelAdapter**     | 模型作为 port；scripted adapter 跑 CI，live adapter 跑 nightly                                  | 多模型路由与 fallback provider |
 
 ## 3. 数据策略
 
 ### 3.1 三层数据
 
-| 层             | 内容                                                   | 存储                      | M1？     |
-| -------------- | ------------------------------------------------------ | ------------------------- | -------- |
-| **硬约束规则** | 药物-营养素相互作用（warfarin+vitamin K 等），20-30 条 | SQL 表                    | ✅ M1 建 |
-| **营养数据**   | 基础食材营养值                                         | USDA FoodData Central API | ✅ M1 接 |
-| **权威知识**   | NIH ODS / USDA 膳食指南全文                            | 下载→chunk→embed→pgvector | ❌ M2    |
-| **个人数据**   | 用户 profile（过敏/用药/目标/身体指标）                | Supabase Postgres         | ✅ M1 建 |
+| 层             | 内容                                                   | 存储 / 运行时形态                                    | 当前策略 |
+| -------------- | ------------------------------------------------------ | ---------------------------------------------------- | -------- |
+| **硬约束规则** | 药物-营养素相互作用（warfarin+vitamin K 等），20-30 条 | Supabase/Postgres，pinned user's applicable subset   | 早建     |
+| **营养数据**   | curated 食材 per-100g values、allergen tags、aliases、portion aliases | USDA snapshot ingestion → local catalog tables       | 早建     |
+| **权威知识**   | NIH ODS / USDA 膳食指南全文                            | 下载→chunk→embed→pgvector                            | 推迟     |
+| **个人数据**   | profile constraints、meal ledger、proposals            | Supabase/Postgres，append-only / immutable where needed | 早建     |
 
-### 3.2 SQL 模板注入
+### 3.2 Typed Query Catalog
 
-高频查询提供预验证模板，注入 system prompt。模型填空（参数），不从零写 SQL。
+高频查询提供 reviewed templates，并在 context 中暴露 template signatures。模型只能选择 template id 和 typed parameters；executor 校验 enum/date/user scope 后渲染 SQL。用户 id 由 authenticated session 绑定，不能由模型填入。
 
 ### 3.3 食物标准化
 
-用户输入 "a bowl of rice" → `normalize_food`（LLM fuzzy match + USDA 查库）→ `{food: "rice, white, cooked", portion_g: 150}`
+用户输入 "a bowl of rice" → deterministic resolver（exact → alias → fuzzy threshold）+ portion-alias table → catalog FoodRef + grams。多候选、低置信、未知食物返回 typed miss，要求 clarification；模型不能 mint food id。
+
+### 3.4 写入策略
+
+`log_meal` 只创建 immutable proposal，不直接写 meal ledger。用户确认时，下一次 turn 以 structured proposal confirmation 进入 seam，短路模型调用，由 deterministic commit path 按 proposal id 写入。profile constraints 没有 agent write path，只能走 validated profile API。
 
 ## 4. Eval 体系
 
@@ -111,14 +123,36 @@
 
 ## 6. 里程碑
 
-### M1（当前）：最小可靠闭环
+### Phase 0（当前）：Seam and Vocabulary
+
+**范围**：schema-versioned event envelope、tagged turn input、ports、turn skeleton、scripted-model fixture、scorer over events。
+
+**验收**：一个 scripted utterance turn 和一个 scripted confirmation turn 在 CI 中零网络运行，且只按 typed events 评分。
+
+### Phase 1：Grounding Substrate
+
+**范围**：local catalog seed、reviewed allergen tags、alias/portion tables、resolver cascade、typed query catalog、least-privilege read path。
+
+### Phase 2：Gated Read Path
+
+**范围**：input/tool/output gates、regenerate-then-refuse、two-region context、observation caps、step-event streaming。
+
+### Phase 3：Write Path
+
+**范围**：proposal store/state machine、write-proposal terminal event、confirmation short-circuit、ledger lineage、edit-rate metrics。
+
+### Phase 4：Surfaces and Tenancy
+
+**范围**：Web chat driving the seam、confirm/edit UI、profile management、auth/RLS、per-session trace scoping、nightly live eval。
+
+### 原 M1 验收场景：最小可靠闭环
 
 **范围**：Loop + ContextAssembler + ToolRegistry + MemoryStore(profile) + Tracer + ModelAdapter
 
 **验收**：
 
 > "I ate 200g chicken breast and a bowl of rice for lunch. How much protein did I get, and what's a good snack to reach my protein target?"
-> 系统：查 USDA → 计算摄入 → 对比目标 → 推荐零食 → **不含过敏原 → 有据可查**
+> 系统：查 local catalog/reference tables → 计算摄入 → 对比目标 → 推荐零食 → **不含过敏原 → 有据可查**
 
 **交付物**：
 
@@ -126,24 +160,20 @@
 - 20-30 条 eval 集 + baseline 数据
 - 代码评自动化（CI）
 
-### M2：知识 RAG + Verifier 模块化
+### Metric-Gated Extensions
 
-- 下载 NIH ODS / USDA 指南 → chunk → embed → pgvector
-- 独立 Verifier 模块（覆盖判停、约束闸、数字核实）
-- LLM judge 接入 eval 流程
-- 多用户支持（Supabase Auth）
-
-### M3：记忆增强 + 趋势分析
-
-- 情景记忆（对话历史语义检索）
-- 趋势聚合（周/月营养报告）
-- compaction（长对话上下文管理）
+- Knowledge RAG：只有当 answer-quality demand 足够明确时进入。
+- Context compaction：只有 context telemetry 证明 observation caps 不够时进入。
+- Autonomous exact-match writes：只有 exact-match proposal edit rate 接近 0 时进入；fuzzy writes 永久确认。
+- Multi-model routing/fallback：可用性指标触发。
+- 趋势聚合：在 meal ledger 和 query catalog 稳定后进入。
+- Free-text episodic memory：没有具体 consumer 前不进入。
 
 ## 7. 与 NutriMind 的关系
 
 - NutriBuddy 的 Tracer 输出结构化 trajectory → 未来可被 NutriMind 的 RL 训练消费
 - 两个项目代码独立，架构选择互不约束
-- NutriMind 的端侧/RL 目标是远期愿景，不影响 NutriBuddy 的 M1-M3 决策
+- NutriMind 的端侧/RL 目标是远期愿景，不影响 NutriBuddy 的 ADD/Phase 决策
 
 ## 8. 关键 ADR
 

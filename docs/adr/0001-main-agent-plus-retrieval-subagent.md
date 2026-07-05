@@ -1,11 +1,13 @@
 # 主 agent + 单一检索 subagent
 
+> 2026-07-05 更新：`docs/ADD.md` 是当前架构 source of truth。本 ADR 仍约束“不要按领域拆多 agent”；知识检索 subagent 也已从 M2 固定项改为 metric-gated extension。
+
 NutriBuddy 采用「主 agent + 单一检索 subagent」拓扑,不做按领域划分的专家 agent 团(膳食/补剂/运动营养师等)。
 
 ## 决定
 
 - subagent **只按机制成立**(上下文隔离 / 自治多步),不按主题成立。
-- 全项目唯一够格的 subagent 是**检索**(路 B 知识 RAG):多轮检索 + 覆盖判停会产生大量中间垃圾,需要隔离 context;必要时可并行 fan-out 多个检索 subagent。
+- 全项目唯一可能够格的 subagent 是**检索**(知识 RAG):多轮检索 + 覆盖判停会产生大量中间垃圾,需要隔离 context;必要时可并行 fan-out 多个检索 subagent。但它不是安全正确性的前置条件，只在 ADD 指标触发后进入。
 - 领域专长(运动营养、补剂等)通过给**同一个主 agent**挂 **skill / 领域 context 包**(对的检索范围 + 领域 context + 工具)实现,**不**新增 agent。
 - 膳食规划是主 agent 的本职,留在主 agent,不拆为 subagent。
 
@@ -29,4 +31,4 @@ NutriBuddy 采用「主 agent + 单一检索 subagent」拓扑,不做按领域�
 4. **Hallucination as Context Drift**（2026）：agent 间同步使幻觉恶化 34-42%。
 5. **大厂一致建议**：Anthropic、Shopify、Microsoft、Google DeepMind/MIT、Cognition（Devin 团队）均建议从单 agent 起步。
 
-**替代方案**：单 agent + 代码层确定性预处理（提取过敏/用药/禁忌 → 解决已知冲突 → 注入硬约束）+ 代码层 post-gate（输出 ∩ 禁忌 ≠ ∅ → 硬拦 fail loud）。NutriOrion 的硬约束机制完全适用于单 agent 架构。
+**替代方案**：单 agent + 确定性代码层 gates。模型负责选择和叙述；food id、营养数字、写入 proposal、commit 都由确定性代码定义和校验。NutriOrion 的硬约束机制完全适用于单 agent 架构，但在 NutriBuddy 中体现为 ADD 定义的 input/tool/output/commit gates 和 typed verdict events。
