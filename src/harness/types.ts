@@ -45,9 +45,7 @@ export interface ModelResponse {
   readonly stop: boolean;
   /** 模型发出的工具调用列表；M1 adapter 暂不产出，由 loop 的测试 stub 驱动。 */
   readonly toolCalls?: readonly ToolCall[];
-  /** Typed final output contract (issue #30 / ADD §Loop). When present,
-   *  carries structured FoodRefs and RuleRefs alongside prose for gateable,
-   *  auditable final answers. */
+  /** Structured final answer data for gateable, auditable responses. */
   readonly output?: TypedOutput;
 }
 
@@ -70,15 +68,19 @@ export interface AgentEvent {
 }
 
 /** ReAct 循环终止原因。 */
-export type StopReason = "end_turn" | "max_steps" | "aborted" | "gate_blocked" | "crash";
+export type StopReason =
+  | "end_turn"
+  | "max_steps"
+  | "aborted"
+  | "gate_blocked"
+  | "crash";
 
 /** Async generator 的最终返回。 */
 export interface TerminalResult {
   readonly reply: string;
   readonly steps: number;
   readonly stopReason: StopReason;
-  /** Typed final output contract (issue #30 / ADD §Loop). Present when
-   *  the model returned structured FoodRefs and RuleRefs. */
+  /** Structured final answer data, when the model returned it. */
   readonly output?: TypedOutput;
 }
 
@@ -87,7 +89,7 @@ export type ToolHandler = (
   args: Readonly<Record<string, unknown>>,
 ) => Promise<string>;
 
-// ── Typed Final Output Contract (issue #30 / ADD §Loop / §Output gate) ──
+// ── Typed final output contract (ADD §Loop / §Output gate) ──
 
 /** A catalog-validated food reference included in a recommendation. */
 export interface FoodRef {
@@ -105,9 +107,8 @@ export interface RuleRef {
 }
 
 /**
- * Typed final output contract: prose plus structured recommendation
- * FoodRefs and advisory RuleRefs. Free prose is unauditable; typed
- * fields are gateable (ADD §Loop line 35, §Output gate line 67).
+ * Final answer contract: prose plus structured references that gates can
+ * verify without parsing free text.
  */
 export interface TypedOutput {
   readonly prose: string;

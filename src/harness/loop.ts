@@ -20,17 +20,12 @@ import type {
   ChatMessage,
   ModelAdapter,
   ModelTier,
-  StopReason,
   TerminalResult,
   ToolHandler,
 } from "./types";
 import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
-import {
-  buildPreGateContext,
-  checkPostGate,
-  type UserContext,
-} from "./gate";
+import { buildPreGateContext, checkPostGate, type UserContext } from "./gate";
 import type { InteractionStore } from "../lib/drugInteractions";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
@@ -57,13 +52,7 @@ export interface RunTurnInput {
   readonly interactionStore?: InteractionStore;
 }
 
-export interface TurnResult {
-  readonly reply: string;
-  readonly steps: number;
-  readonly stopReason: StopReason;
-  /** Typed final output contract (issue #30 / ADD §Loop). */
-  readonly output?: import("./types").TypedOutput;
-}
+export type TurnResult = TerminalResult;
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
   return messages.map((m) => `${m.role}: ${m.content}`).join("\n");
@@ -162,7 +151,12 @@ export async function* run(
     });
     eventLog?.record({
       type: "model_call",
-      data: { step, model: tier, thinking, systemPrompt: assemblePinnedRegion(pinned) },
+      data: {
+        step,
+        model: tier,
+        thinking,
+        systemPrompt: assemblePinnedRegion(pinned),
+      },
     });
 
     yield { type: "thought", step };
@@ -261,7 +255,11 @@ export async function* run(
             type: "gate_exhausted",
             payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
           });
-          return { reply: gateExhaustedReply(check.reasons), steps: step, stopReason: "gate_blocked" };
+          return {
+            reply: gateExhaustedReply(check.reasons),
+            steps: step,
+            stopReason: "gate_blocked",
+          };
         }
       }
 
@@ -304,10 +302,5 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   while (!next.done) {
     next = await gen.next();
   }
-  return {
-    reply: next.value.reply,
-    steps: next.value.steps,
-    stopReason: next.value.stopReason,
-    output: next.value.output,
-  };
+  return next.value;
 }

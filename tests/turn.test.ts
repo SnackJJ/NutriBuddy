@@ -8,6 +8,7 @@ import {
   type TurnPorts,
   type TurnResult,
   type TurnStartEvent,
+  type TypedOutput,
 } from "../src/harness/turn";
 import { Tracer } from "../src/harness/tracer";
 import type {
@@ -93,6 +94,15 @@ function expectTerminalEvent(events: readonly AnyTurnEvent[]): TurnEndEvent {
 
   expect(lastEvent).toBe(turnEnds[0]);
   return lastEvent;
+}
+
+function expectTypedOutput(result: TurnResult): TypedOutput {
+  expect(result.output).toBeDefined();
+  if (!result.output) {
+    throw new Error("expected typed output");
+  }
+
+  return result.output;
 }
 
 function expectEventMetadata(
@@ -447,78 +457,114 @@ describe("turn ports injection", () => {
 });
 
 describe("typed final output contract", () => {
-  it("terminal event carries typed output when model returns it", async () => {
-    const typedOutput = {
-      prose: "I recommend eggs for breakfast.",
-      foodRefs: [
-        {
-          foodId: "egg-whole-raw",
-          foodName: "Eggs, whole, raw",
-          matchType: "exact" as const,
-          allergens: ["egg"],
-        },
-      ],
-      ruleRefs: [
-        {
-          ruleId: "R001",
-          summary: "High protein food suitable for your goals",
-        },
-      ],
-    };
-    const ports = createPorts(() => ({
-      content: typedOutput.prose,
+  const EGG_BREAKFAST_OUTPUT = {
+    prose: "I recommend eggs for breakfast.",
+    foodRefs: [
+      {
+        foodId: "egg-whole-raw",
+        foodName: "Eggs, whole, raw",
+        matchType: "exact",
+        allergens: ["egg"],
+      },
+    ],
+    ruleRefs: [
+      {
+        ruleId: "R001",
+        summary: "High protein food suitable for your goals",
+      },
+    ],
+  } satisfies TypedOutput;
+
+  const SALMON_DINNER_OUTPUT = {
+    prose: "Based on your profile, I recommend salmon.",
+    foodRefs: [
+      {
+        foodId: "salmon-atlantic-raw",
+        foodName: "Salmon, Atlantic, raw",
+        matchType: "exact",
+        allergens: ["fish"],
+      },
+    ],
+    ruleRefs: [
+      {
+        ruleId: "R003",
+        summary: "Omega-3 rich food for anti-inflammatory benefit",
+      },
+    ],
+  } satisfies TypedOutput;
+
+  const HEART_HEALTH_OUTPUT = {
+    prose:
+      "For your omega-3 goals, I recommend salmon. Note: check warfarin interaction.",
+    foodRefs: [
+      {
+        foodId: "salmon-atlantic-raw",
+        foodName: "Salmon, Atlantic, raw",
+        matchType: "fuzzy",
+        allergens: ["fish"],
+      },
+      {
+        foodId: "spinach-raw",
+        foodName: "Spinach, raw",
+        matchType: "exact",
+      },
+    ],
+    ruleRefs: [
+      {
+        ruleId: "WARFARIN-VITK",
+        summary: "High vitamin K foods may interfere with warfarin",
+      },
+      {
+        ruleId: "OMEGA3-RECOMMENDED",
+        summary: "Omega-3 fatty acids support cardiovascular health",
+      },
+    ],
+  } satisfies TypedOutput;
+
+  const CHICKEN_PROTEIN_OUTPUT = {
+    prose: "Chicken breast has 31g protein per 100g.",
+    foodRefs: [
+      {
+        foodId: "chicken-breast-raw",
+        foodName: "Chicken breast, raw",
+        matchType: "exact",
+      },
+    ],
+    ruleRefs: [],
+  } satisfies TypedOutput;
+
+  function createTypedOutputPorts(output: TypedOutput): TurnPorts {
+    return createPorts(() => ({
+      content: output.prose,
       stop: true,
-      output: typedOutput,
+      output,
     }));
+  }
+
+  it("terminal event carries typed output when model returns it", async () => {
+    const ports = createTypedOutputPorts(EGG_BREAKFAST_OUTPUT);
     const input: TurnInput = { tag: "utterance", content: "breakfast ideas?" };
 
     const { events, result } = await collect(turn(input, ports));
 
-    expect(result.output).toEqual(typedOutput);
+    expect(result.output).toEqual(EGG_BREAKFAST_OUTPUT);
     const endEvent = expectTerminalEvent(events);
-    expect(endEvent.result.output).toEqual(typedOutput);
+    expect(endEvent.result.output).toEqual(EGG_BREAKFAST_OUTPUT);
   });
 
   it("typed output fields are inspectable without prose parsing", async () => {
-    const ports = createPorts(() => ({
-      content: "Based on your profile, I recommend salmon.",
-      stop: true,
-      output: {
-        prose: "Based on your profile, I recommend salmon.",
-        foodRefs: [
-          {
-            foodId: "salmon-atlantic-raw",
-            foodName: "Salmon, Atlantic, raw",
-            matchType: "exact" as const,
-            allergens: ["fish"],
-          },
-        ],
-        ruleRefs: [
-          {
-            ruleId: "R003",
-            summary: "Omega-3 rich food for anti-inflammatory benefit",
-          },
-        ],
-      },
-    }));
+    const ports = createTypedOutputPorts(SALMON_DINNER_OUTPUT);
     const input: TurnInput = { tag: "utterance", content: "healthy dinner?" };
 
     const { events } = await collect(turn(input, ports));
     const endEvent = expectTerminalEvent(events);
-    const output = endEvent.result.output!;
+    const output = expectTypedOutput(endEvent.result);
 
-    // Inspect structured fields directly — no string parsing of prose
     expect(output.foodRefs).toHaveLength(1);
-    expect(output.foodRefs[0].foodId).toBe("salmon-atlantic-raw");
-    expect(output.foodRefs[0].foodName).toBe("Salmon, Atlantic, raw");
-    expect(output.foodRefs[0].matchType).toBe("exact");
-    expect(output.foodRefs[0].allergens).toEqual(["fish"]);
+    expect(output.foodRefs[0]).toEqual(SALMON_DINNER_OUTPUT.foodRefs[0]);
 
     expect(output.ruleRefs).toHaveLength(1);
-    expect(output.ruleRefs[0].ruleId).toBe("R003");
-    expect(output.ruleRefs[0].summary).toBe(
-      "Omega-3 rich food for anti-inflammatory benefit",
-    );
+    expect(output.ruleRefs[0]).toEqual(SALMON_DINNER_OUTPUT.ruleRefs[0]);
   });
 
   it("adapter without typed output produces no output field on result", async () => {
@@ -534,64 +580,29 @@ describe("typed final output contract", () => {
   });
 
   it("typed output prose matches the reply for final answers", async () => {
-    const prose = "Eggs have about 6g of protein per large egg.";
-    const ports = createPorts(() => ({
-      content: prose,
-      stop: true,
-      output: {
-        prose,
-        foodRefs: [
-          {
-            foodId: "egg-whole-raw",
-            foodName: "Eggs, whole, raw",
-            matchType: "exact" as const,
-            allergens: ["egg"],
-          },
-        ],
-        ruleRefs: [],
-      },
-    }));
+    const output = {
+      prose: "Eggs have about 6g of protein per large egg.",
+      foodRefs: [
+        {
+          foodId: "egg-whole-raw",
+          foodName: "Eggs, whole, raw",
+          matchType: "exact",
+          allergens: ["egg"],
+        },
+      ],
+      ruleRefs: [],
+    } satisfies TypedOutput;
+    const ports = createTypedOutputPorts(output);
     const input: TurnInput = { tag: "utterance", content: "egg protein?" };
 
     const { result } = await collect(turn(input, ports));
 
-    expect(result.reply).toBe(prose);
-    expect(result.output?.prose).toBe(prose);
+    expect(result.reply).toBe(output.prose);
+    expect(expectTypedOutput(result).prose).toBe(output.prose);
   });
 
   it("typed output with both foodRefs and ruleRefs flows through complete turn", async () => {
-    const typedOutput = {
-      prose:
-        "For your omega-3 goals, I recommend salmon. Note: check warfarin interaction.",
-      foodRefs: [
-        {
-          foodId: "salmon-atlantic-raw",
-          foodName: "Salmon, Atlantic, raw",
-          matchType: "fuzzy" as const,
-          allergens: ["fish"],
-        },
-        {
-          foodId: "spinach-raw",
-          foodName: "Spinach, raw",
-          matchType: "exact" as const,
-        },
-      ],
-      ruleRefs: [
-        {
-          ruleId: "WARFARIN-VITK",
-          summary: "High vitamin K foods may interfere with warfarin",
-        },
-        {
-          ruleId: "OMEGA3-RECOMMENDED",
-          summary: "Omega-3 fatty acids support cardiovascular health",
-        },
-      ],
-    };
-    const ports = createPorts(() => ({
-      content: typedOutput.prose,
-      stop: true,
-      output: typedOutput,
-    }));
+    const ports = createTypedOutputPorts(HEART_HEALTH_OUTPUT);
     const input: TurnInput = {
       tag: "utterance",
       content: "What should I eat for heart health?",
@@ -599,41 +610,26 @@ describe("typed final output contract", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Stream is well-formed
     expectStartEvent(events);
     const endEvent = expectTerminalEvent(events);
 
-    // Result and event both carry the typed output
-    expect(result.output).toEqual(typedOutput);
-    expect(endEvent.result.output).toEqual(typedOutput);
+    expect(result.output).toEqual(HEART_HEALTH_OUTPUT);
+    expect(endEvent.result.output).toEqual(HEART_HEALTH_OUTPUT);
 
-    // Structured fields are directly inspectable
-    expect(result.output!.foodRefs).toHaveLength(2);
-    expect(result.output!.foodRefs[0].matchType).toBe("fuzzy");
-    expect(result.output!.foodRefs[1].matchType).toBe("exact");
-    expect(result.output!.ruleRefs).toHaveLength(2);
-    expect(result.output!.ruleRefs.map((r) => r.ruleId)).toEqual([
+    const output = expectTypedOutput(result);
+    expect(output.foodRefs).toHaveLength(2);
+    expect(output.foodRefs[0].matchType).toBe("fuzzy");
+    expect(output.foodRefs[1].matchType).toBe("exact");
+    expect(output.ruleRefs).toHaveLength(2);
+    expect(output.ruleRefs.map((r) => r.ruleId)).toEqual([
       "WARFARIN-VITK",
       "OMEGA3-RECOMMENDED",
     ]);
-
-    // FoodRef with no allergens is valid (untagged is loggable, not recommendable)
-    expect(result.output!.foodRefs[1].allergens).toBeUndefined();
+    expect(output.foodRefs[1].allergens).toBeUndefined();
   });
 
   it("typed output in multi-step tool turn propagates from final model response", async () => {
     let callCount = 0;
-    const typedOutput = {
-      prose: "Chicken breast has 31g protein per 100g.",
-      foodRefs: [
-        {
-          foodId: "chicken-breast-raw",
-          foodName: "Chicken breast, raw",
-          matchType: "exact" as const,
-        },
-      ],
-      ruleRefs: [] as Array<{ ruleId: string; summary: string }>,
-    };
     const adapter = stubAdapter(() => {
       callCount++;
       if (callCount === 1) {
@@ -649,9 +645,9 @@ describe("typed final output contract", () => {
         };
       }
       return {
-        content: typedOutput.prose,
+        content: CHICKEN_PROTEIN_OUTPUT.prose,
         stop: true,
-        output: typedOutput,
+        output: CHICKEN_PROTEIN_OUTPUT,
       };
     });
     const tools = new Map([
@@ -662,8 +658,8 @@ describe("typed final output contract", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    expect(result.output).toEqual(typedOutput);
+    expect(result.output).toEqual(CHICKEN_PROTEIN_OUTPUT);
     const endEvent = expectTerminalEvent(events);
-    expect(endEvent.result.output).toEqual(typedOutput);
+    expect(endEvent.result.output).toEqual(CHICKEN_PROTEIN_OUTPUT);
   });
 });

@@ -1,13 +1,12 @@
 // Turn Seam: the single harness entry point (issue #29 / PRD v2 section 4).
-// Schema version is bumped only for breaking event-shape changes.
+// Schema version follows SemVer for event-shape changes.
 
 import { run, type RunTurnInput } from "./loop";
-import type { AgentEvent, StopReason, TypedOutput } from "./types";
+import type { AgentEvent, TerminalResult } from "./types";
 
-// Re-export typed output contract types for public API consumers.
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
-/** Bump on breaking changes to event shape (add/remove/rename fields). */
+/** Bump minor for compatible additions, major for breaking event-shape changes. */
 export const SCHEMA_VERSION = "1.1.0";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
@@ -63,14 +62,8 @@ export interface TurnEndEvent extends TurnEvent {
 
 export type AnyTurnEvent = TurnStartEvent | TurnStepEvent | TurnEndEvent;
 
-export interface TurnResult {
-  readonly reply: string;
-  readonly steps: number;
-  readonly stopReason: StopReason;
-  /** Typed final output contract (issue #30 / ADD §Loop). Present when
-   *  the model returned structured FoodRefs and RuleRefs alongside prose. */
-  readonly output?: TypedOutput;
-}
+/** Final result emitted in turn_end and returned by the turn generator. */
+export type TurnResult = TerminalResult;
 
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
