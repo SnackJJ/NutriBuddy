@@ -4,7 +4,7 @@
 // 记录每条 case 的响应、步数、工具调用、gate block 次数、违规、耗时。
 
 import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
-import { consumeTurn, turn } from "../harness/turn";
+import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase, HarnessResult } from "./types";
@@ -34,6 +34,7 @@ export async function runHarnessEval(
     let stopReason: StopReason = "end_turn";
     const toolCalls: string[] = [];
     let gateBlocks = 0;
+    let gateVerdictBlocks = 0;
 
     const shouldRunGate =
       c.userContext !== undefined && interactionStore !== undefined;
@@ -51,6 +52,10 @@ export async function runHarnessEval(
           },
         ),
         (event) => {
+          if (isBlockedGateVerdict(event)) {
+            gateVerdictBlocks++;
+          }
+
           if (event.type !== "step") {
             return;
           }
@@ -67,11 +72,11 @@ export async function runHarnessEval(
       steps = result.steps;
       stopReason = result.stopReason;
 
-      gateBlocks = countGateBlocks(tracer);
+      gateBlocks = countGateBlocks(gateVerdictBlocks, tracer);
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
-      gateBlocks = countGateBlocks(tracer);
+      gateBlocks = countGateBlocks(gateVerdictBlocks, tracer);
     }
 
     const durationMs = Date.now() - start;
@@ -99,6 +104,14 @@ export async function runHarnessEval(
   return results;
 }
 
-function countGateBlocks(tracer: Tracer): number {
+function isBlockedGateVerdict(event: AnyTurnEvent): boolean {
+  return event.type === "gate_verdict" && event.verdict === "block";
+}
+
+function countGateBlocks(gateVerdictBlocks: number, tracer: Tracer): number {
+  return Math.max(gateVerdictBlocks, countTracerGateBlocks(tracer));
+}
+
+function countTracerGateBlocks(tracer: Tracer): number {
   return tracer.events().filter((event) => event.type === "gate_block").length;
 }

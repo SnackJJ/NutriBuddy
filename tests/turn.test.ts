@@ -5,6 +5,7 @@ import {
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
+  type TurnGateVerdictEvent,
   type TurnInput,
   type TurnPorts,
   type TurnResult,
@@ -73,6 +74,31 @@ function eventsOfType<T extends AnyTurnEvent["type"]>(
   return events.filter((event): event is TurnEventOf<T> => event.type === type);
 }
 
+function gateVerdicts(events: readonly AnyTurnEvent[]): TurnGateVerdictEvent[] {
+  return eventsOfType(events, "gate_verdict");
+}
+
+function expectGateVerdict(
+  events: readonly AnyTurnEvent[],
+  checkpoint: TurnGateVerdictEvent["checkpoint"],
+): TurnGateVerdictEvent {
+  const verdict = gateVerdicts(events).find(
+    (event) => event.checkpoint === checkpoint,
+  );
+
+  expect(verdict).toBeDefined();
+  if (!verdict) {
+    throw new Error(`expected ${checkpoint} gate verdict`);
+  }
+
+  return verdict;
+}
+
+function countBlockedGateVerdicts(events: readonly AnyTurnEvent[]): number {
+  return gateVerdicts(events).filter((event) => event.verdict === "block")
+    .length;
+}
+
 function expectStartEvent(events: readonly AnyTurnEvent[]): TurnStartEvent {
   const firstEvent = events[0];
 
@@ -124,7 +150,7 @@ function expectEventMetadata(
 }
 
 describe("turn (utterance)", () => {
-  it("emits start, loop steps, and terminal result for a single-step utterance", async () => {
+  it("emits start, loop steps, gate verdicts, and terminal result for a single-step utterance", async () => {
     const input: TurnInput = {
       tag: "utterance",
       content: "How much protein in an egg?",
@@ -138,8 +164,11 @@ describe("turn (utterance)", () => {
 
     expect(events.map((event) => event.type)).toEqual([
       "turn_start",
+      "gate_verdict",
       "step",
       "step",
+      "gate_verdict",
+      "gate_verdict",
       "turn_end",
     ]);
     expect(expectStartEvent(events).input).toEqual(input);
@@ -229,7 +258,7 @@ describe("turn (utterance)", () => {
 });
 
 describe("turn (proposal_confirm)", () => {
-  it("emits start and end events for a confirmed proposal", async () => {
+  it("emits start, gate verdicts, and end events for a confirmed proposal", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
@@ -240,6 +269,8 @@ describe("turn (proposal_confirm)", () => {
 
     expect(events.map((event) => event.type)).toEqual([
       "turn_start",
+      "gate_verdict",
+      "gate_verdict",
       "turn_end",
     ]);
     expect(expectStartEvent(events).input).toEqual(input);
@@ -683,8 +714,11 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     expect(result).toEqual(endEvent.result);
     expect(events.map((event) => event.type)).toEqual([
       "turn_start",
+      "gate_verdict",
       "step",
       "step",
+      "gate_verdict",
+      "gate_verdict",
       "turn_end",
     ]);
   });
@@ -758,5 +792,172 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     for (const event of events) {
       expect(event.schema).toBe(SCHEMA_VERSION);
     }
+  });
+});
+
+describe("gate verdict events", () => {
+  const emptyInteractionStore: InteractionStore = { all: async () => [] };
+
+  it("emits input gate verdict after turn_start on utterance turns", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    const inputVerdict = expectGateVerdict(events, "input");
+
+    expect(inputVerdict.verdict).toBe("pass");
+    expect(inputVerdict.checkName).toBe("pre_gate_input_check");
+    expect(inputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(events.indexOf(inputVerdict)).toBeGreaterThan(
+      events.findIndex((e) => e.type === "turn_start"),
+    );
+  });
+
+  it("emits tool gate verdict after tool observation in multi-step turns", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+        };
+      }
+      return { content: "Chicken has 31g protein/100g.", stop: true };
+    });
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events } = await collect(turn(input, ports));
+
+    const toolVerdict = expectGateVerdict(events, "tool");
+
+    expect(toolVerdict.verdict).toBe("pass");
+    expect(toolVerdict.checkName).toBe("tool_gate_check");
+    expect(toolVerdict.evidence).toContain("search_food");
+  });
+
+  it("emits output and commit gate verdicts with pass on clean turns", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    const outputVerdict = expectGateVerdict(events, "output");
+    const commitVerdict = expectGateVerdict(events, "commit");
+
+    expect(outputVerdict.verdict).toBe("pass");
+    expect(outputVerdict.checkName).toBe("post_gate_output_check");
+    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(commitVerdict.verdict).toBe("pass");
+    expect(commitVerdict.checkName).toBe("commit_gate_check");
+    expect(commitVerdict.evidence.length).toBeGreaterThan(0);
+  });
+
+  it("emits blocking output and commit gate verdicts when post-gate blocks", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "I recommend eating peanuts for protein!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("gate_blocked");
+
+    const outputVerdict = expectGateVerdict(events, "output");
+    const commitVerdict = expectGateVerdict(events, "commit");
+
+    expect(outputVerdict.verdict).toBe("block");
+    expect(outputVerdict.checkName).toBe("post_gate_output_check");
+    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(outputVerdict.evidence.toLowerCase()).toContain("block");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.checkName).toBe("commit_gate_check");
+    expect(commitVerdict.evidence.length).toBeGreaterThan(0);
+  });
+
+  it("gate verdict events carry valid schema and metadata", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    const gateEvents = gateVerdicts(events);
+    expect(gateEvents.length).toBeGreaterThanOrEqual(3); // input, output, commit (no tool gate on turn without tools)
+
+    for (const gv of gateEvents) {
+      expect(gv.schema).toBe(SCHEMA_VERSION);
+      expect(typeof gv.seq).toBe("number");
+      expect(typeof gv.checkpoint).toBe("string");
+      expect(typeof gv.verdict).toBe("string");
+      expect(typeof gv.checkName).toBe("string");
+      expect(typeof gv.evidence).toBe("string");
+    }
+  });
+
+  it("proposal confirmation turns emit input and commit gate verdicts (no tool/output)", async () => {
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "p1",
+      confirmed: true,
+    };
+    const ports = createPorts();
+
+    const { events } = await collect(turn(input, ports));
+
+    const checkpoints = gateVerdicts(events).map((event) => event.checkpoint);
+
+    // Proposal confirmation has no model call, so no tool/output gate
+    expect(checkpoints).toContain("input");
+    expect(checkpoints).toContain("commit");
+    expect(checkpoints).not.toContain("tool");
+    expect(checkpoints).not.toContain("output");
+  });
+
+  it("scorer can detect a blocked turn by reading gate verdict events directly", async () => {
+    // Simulate what the eval scorer does: collect gate verdict blocks
+    // from the turn event stream without inspecting tracer or prose.
+    const adapter = stubAdapter(() => ({
+      content: "I recommend eating peanuts for protein!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: { all: async () => [] },
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("scorer sees zero gate blocks when post-gate passes", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "I recommend chicken for protein!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: { all: async () => [] },
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    expect(countBlockedGateVerdicts(events)).toBe(0);
   });
 });

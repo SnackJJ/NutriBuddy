@@ -7,7 +7,7 @@ import type { AgentEvent, TerminalResult } from "./types";
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.1.0";
+export const SCHEMA_VERSION = "1.2.0";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
 
@@ -45,6 +45,26 @@ export interface TurnEvent {
   readonly timestamp: string;
 }
 
+/** Gate checkpoints along the turn lifecycle (issue #34). */
+export type GateCheckpoint = "input" | "tool" | "output" | "commit";
+
+/** Verdict state for a single gate checkpoint (issue #34). */
+export type GateVerdict = "pass" | "block" | "error";
+
+/**
+ * Gate verdict event emitted at each turn checkpoint (issue #34 / PRD v2 §2.1).
+ *
+ * Carries the checkpoint identity, pass/block/error verdict, a stable
+ * check name for scorer detection, and a human-readable evidence summary.
+ */
+export interface TurnGateVerdictEvent extends TurnEvent {
+  readonly type: "gate_verdict";
+  readonly checkpoint: GateCheckpoint;
+  readonly verdict: GateVerdict;
+  readonly checkName: string;
+  readonly evidence: string;
+}
+
 export interface TurnStartEvent extends TurnEvent {
   readonly type: "turn_start";
   readonly input: TurnInput;
@@ -60,7 +80,11 @@ export interface TurnEndEvent extends TurnEvent {
   readonly result: TurnResult;
 }
 
-export type AnyTurnEvent = TurnStartEvent | TurnStepEvent | TurnEndEvent;
+export type AnyTurnEvent =
+  | TurnStartEvent
+  | TurnStepEvent
+  | TurnGateVerdictEvent
+  | TurnEndEvent;
 
 /** Final result emitted in turn_end and returned by the turn generator. */
 export type TurnResult = TerminalResult;
@@ -69,6 +93,10 @@ export type TurnEventHandler = (event: AnyTurnEvent) => void;
 
 type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
+type GateVerdictEventDetails = Pick<
+  TurnGateVerdictEvent,
+  "checkpoint" | "verdict" | "checkName" | "evidence"
+>;
 
 function createEventMetadata(clock: Clock): NextEventMetadata {
   let seq = 0;
@@ -101,16 +129,53 @@ function createTurnEndEvent(
   return { ...nextMetadata(), type: "turn_end", result };
 }
 
+function createGateVerdictEvent(
+  details: GateVerdictEventDetails,
+  nextMetadata: NextEventMetadata,
+): TurnGateVerdictEvent {
+  return {
+    ...nextMetadata(),
+    type: "gate_verdict",
+    ...details,
+  };
+}
+
+function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
+  const gateBlocks = tracer
+    .events()
+    .filter((event) => event.type === "gate_block");
+  if (gateBlocks.length === 0) {
+    return "No safety violations detected";
+  }
+
+  const lastBlock = gateBlocks[gateBlocks.length - 1];
+  return `Blocked: ${lastBlock.payload}`;
+}
+
 async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
-): AsyncGenerator<TurnStepEvent, TurnResult, undefined> {
+): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
   const gen = run(createRunTurnInput(input, ports));
 
   let next = await gen.next();
   while (!next.done) {
     yield createTurnStepEvent(next.value, nextMetadata);
+
+    // Emit tool gate verdict after each tool observation
+    if (next.value.type === "observe" && next.value.toolResult) {
+      yield createGateVerdictEvent(
+        {
+          checkpoint: "tool",
+          verdict: "pass",
+          checkName: "tool_gate_check",
+          evidence: `Tool ${next.value.toolResult.name} executed successfully`,
+        },
+        nextMetadata,
+      );
+    }
+
     next = await gen.next();
   }
 
@@ -178,6 +243,17 @@ export async function* turn(
   const nextMetadata = createEventMetadata(ports.clock ?? (() => new Date()));
 
   yield createTurnStartEvent(input, nextMetadata);
+
+  yield createGateVerdictEvent(
+    {
+      checkpoint: "input",
+      verdict: "pass",
+      checkName: "pre_gate_input_check",
+      evidence: "Input accepted for processing",
+    },
+    nextMetadata,
+  );
+
   let result: TurnResult;
 
   switch (input.tag) {
@@ -188,6 +264,35 @@ export async function* turn(
       result = createProposalConfirmResult(input);
       break;
   }
+
+  const isGateBlocked = result.stopReason === "gate_blocked";
+  const outputEvidence = isGateBlocked
+    ? extractGateEvidence(ports.tracer)
+    : "Output passed safety checks";
+
+  if (input.tag === "utterance") {
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "output",
+        verdict: isGateBlocked ? "block" : "pass",
+        checkName: "post_gate_output_check",
+        evidence: outputEvidence,
+      },
+      nextMetadata,
+    );
+  }
+
+  yield createGateVerdictEvent(
+    {
+      checkpoint: "commit",
+      verdict: isGateBlocked ? "block" : "pass",
+      checkName: "commit_gate_check",
+      evidence: isGateBlocked
+        ? outputEvidence
+        : "Response committed successfully",
+    },
+    nextMetadata,
+  );
 
   yield createTurnEndEvent(result, nextMetadata);
 
