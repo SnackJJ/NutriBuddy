@@ -18,6 +18,7 @@ interface MealLogDbRow {
   readonly protein_g: number;
   readonly fat_g: number;
   readonly carbs_g: number;
+  readonly proposal_id: string;
   readonly created_at: string;
 }
 
@@ -33,6 +34,7 @@ function rowToEntry(row: MealLogDbRow): MealLogEntry {
     proteinG: row.protein_g,
     fatG: row.fat_g,
     carbsG: row.carbs_g,
+    proposalId: row.proposal_id,
   };
 }
 
@@ -55,6 +57,7 @@ export function createSupabaseMealLogStore(
           protein_g: params.proteinG,
           fat_g: params.fatG,
           carbs_g: params.carbsG,
+          proposal_id: params.proposalId,
         })
         .select()
         .single();
