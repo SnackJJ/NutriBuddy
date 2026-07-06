@@ -1411,4 +1411,106 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
     expect(result.stopReason).toBe("end_turn");
     expect(result.proposal).toBeUndefined();
   });
+
+  it("log_meal with malformed response falls through to end_turn (parseWriteProposalData returns undefined)", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that.",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "chicken", portion_g: 150 } },
+          ],
+        };
+      }
+      return { content: "Something went wrong with the meal log.", stop: true };
+    });
+    // Return malformed JSON — missing the proposal field entirely
+    const tools = new Map([
+      ["log_meal", async () => JSON.stringify({ error: "internal failure" })],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "log 150g chicken" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    // parseWriteProposalData returns undefined for malformed response,
+    // so the turn falls through to normal end_turn — no proposal override
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.proposal).toBeUndefined();
+    expect(result.reply).toContain("wrong");
+  });
+
+  it("multiple log_meal calls in one turn capture only the last proposal", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log the chicken.",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200 } },
+          ],
+        };
+      }
+      if (callCount === 2) {
+        return {
+          content: "Now let me also log the rice.",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "rice", portion_g: 150 } },
+          ],
+        };
+      }
+      return { content: "Both meals proposed.", stop: true };
+    });
+    const tools = new Map([
+      [
+        "log_meal",
+        async (args: Record<string, unknown>) => {
+          if (args["food_name"] === "chicken breast") {
+            return makeLogMealResult({
+              proposal_id: "proposal-chicken",
+              proposal: {
+                id: "proposal-chicken",
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+                created_at: "2026-07-05T12:00:00.000Z",
+                nutrition: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+                nutrition_source: "USDA FoodData Central",
+              },
+              message: "Log 200g chicken breast for lunch?",
+            });
+          }
+          return makeLogMealResult({
+            proposal_id: "proposal-rice",
+            proposal: {
+              id: "proposal-rice",
+              food_name: "rice",
+              portion_g: 150,
+              meal_type: "dinner",
+              created_at: "2026-07-05T12:00:01.000Z",
+              nutrition: { kcal: 195, protein_g: 4, fat_g: 0.4, carbs_g: 43 },
+              nutrition_source: "USDA FoodData Central",
+            },
+            message: "Log 150g rice for dinner?",
+          });
+        },
+      ],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "log chicken and rice" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    // Only the LAST log_meal call's proposal is captured
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.proposal?.proposalId).toBe("proposal-rice");
+    expect(result.proposal?.foodName).toBe("rice");
+    expect(result.proposal?.kcal).toBe(195);
+  });
 });
