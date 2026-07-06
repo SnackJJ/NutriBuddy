@@ -10,7 +10,7 @@ import type { Observation } from "../catalog/queryCatalog";
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.2.0";
+export const SCHEMA_VERSION = "1.3.0";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
 
