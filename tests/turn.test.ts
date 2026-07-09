@@ -2163,6 +2163,56 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(commitVerdict.evidence).toContain("voided");
   });
 
+  it("rejects confirmation of an expired proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "yogurt",
+      portionG: 200,
+      mealType: "snack",
+      kcal: 122,
+      proteinG: 10,
+      fatG: 4,
+      carbsG: 12,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Manually expire the proposal (simulating time-based expiry)
+    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
+    proposalState.proposals[idx] = {
+      ...proposalState.proposals[idx],
+      status: "expired" as ProposalStatus,
+    };
+
+    // Try to confirm the expired proposal
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: expired
+    expect(result.reply).toContain("already expired");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("expired");
+  });
+
   it("meal ledger row carries stored proposal content, not regenerated model output", async () => {
     const { store: proposalStore } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
