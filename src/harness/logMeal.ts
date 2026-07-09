@@ -29,7 +29,8 @@ export type ProposalStatus =
   | "committed"
   | "rejected"
   | "voided"
-  | "expired";
+  | "expired"
+  | "superseded";
 
 /** 写入提案所需的不可变数据。 */
 export interface ProposalInput {
