@@ -288,7 +288,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       // A markdown list of issue IDs and titles, one per line.
       ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
       CLOSE_TASK_COMMAND:
-        'gh issue close <ID> --comment "Completed by Sandcastle"',
+        'gh issue comment <ID> --body "Completed by Sandcastle" && gh issue close <ID>',
     },
   });
 
