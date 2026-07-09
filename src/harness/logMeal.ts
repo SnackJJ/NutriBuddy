@@ -12,12 +12,7 @@ import type { GetFoodNutrition } from "./foodNutrition";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
-const VALID_MEAL_TYPES = new Set([
-  "breakfast",
-  "lunch",
-  "dinner",
-  "snack",
-]);
+const VALID_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
 
 const DEFAULT_MEAL_TYPE = "snack";
 
@@ -63,19 +58,13 @@ export interface Proposal {
 
 /** 提案存储端口。可注入 Supabase 实现或单测 mock。 */
 export interface ProposalStore {
-  /** Store a new proposal in "proposed" status (issue #36). */
+  /** Store a new proposal in "proposed" status. */
   store(input: ProposalInput): Promise<Proposal>;
-  /** Look up a proposal by id for the commit path (issue #37). */
+  /** Look up a proposal by id. */
   get(id: string): Promise<Proposal | undefined>;
-  /**
-   * Commit a proposal: status transitions "proposed" → "committed".
-   * Throws if the proposal is not in "proposed" status (issue #37).
-   */
+  /** Transition a proposal from "proposed" to "committed". */
   commit(id: string): Promise<Proposal>;
-  /**
-   * Decline a proposal: status transitions "proposed" → "rejected".
-   * Best-effort; throws if not in "proposed" status (issue #37).
-   */
+  /** Transition a proposal from "proposed" to "rejected". */
   decline(id: string): Promise<Proposal>;
 }
 
@@ -138,20 +127,29 @@ interface ParsedArgs {
   readonly mealType: string;
 }
 
-function parseArgs(args: Readonly<Record<string, unknown>>): ParsedArgs | string {
+function parseArgs(
+  args: Readonly<Record<string, unknown>>,
+): ParsedArgs | string {
   const foodName = args.food_name;
   if (typeof foodName !== "string" || foodName.trim().length === 0) {
     return "missing or invalid food_name: must be a non-empty string";
   }
 
   const portionG = args.portion_g;
-  if (typeof portionG !== "number" || !Number.isFinite(portionG) || portionG <= 0) {
+  if (
+    typeof portionG !== "number" ||
+    !Number.isFinite(portionG) ||
+    portionG <= 0
+  ) {
     return "missing or invalid portion_g: must be a positive number (grams)";
   }
 
   let mealType = DEFAULT_MEAL_TYPE;
   if (args.meal_type !== undefined) {
-    if (typeof args.meal_type !== "string" || !VALID_MEAL_TYPES.has(args.meal_type)) {
+    if (
+      typeof args.meal_type !== "string" ||
+      !VALID_MEAL_TYPES.has(args.meal_type)
+    ) {
       return (
         `invalid meal_type "${String(args.meal_type)}": ` +
         `must be one of ${[...VALID_MEAL_TYPES].join(", ")}`
@@ -225,8 +223,7 @@ export const LOG_MEAL_SCHEMA = {
         meal_type: {
           type: "string",
           enum: ["breakfast", "lunch", "dinner", "snack"],
-          description:
-            "Meal type. Defaults to 'snack' if omitted.",
+          description: "Meal type. Defaults to 'snack' if omitted.",
         },
       },
       required: ["food_name", "portion_g"],

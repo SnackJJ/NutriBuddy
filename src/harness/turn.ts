@@ -3,7 +3,7 @@
 
 import { run, type RunTurnInput } from "./loop";
 import type { AgentEvent, TerminalResult, WriteProposalData } from "./types";
-import type { ProposalStore, MealLogStore } from "./logMeal";
+import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -104,6 +104,9 @@ type GateVerdictEventDetails = Pick<
   TurnGateVerdictEvent,
   "checkpoint" | "verdict" | "checkName" | "evidence"
 >;
+type CommitGateVerdict = Omit<GateVerdictEventDetails, "checkpoint">;
+
+const COMMIT_GATE_CHECK = "commit_gate_check";
 
 function createEventMetadata(clock: Clock): NextEventMetadata {
   let seq = 0;
@@ -159,7 +162,9 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
   return `Blocked: ${lastBlock.payload}`;
 }
 
-export function parseWriteProposalData(toolResult: string): WriteProposalData | undefined {
+export function parseWriteProposalData(
+  toolResult: string,
+): WriteProposalData | undefined {
   try {
     const parsed = JSON.parse(toolResult);
     const p = parsed.proposal;
@@ -251,12 +256,16 @@ function createRunTurnInput(
 /** Return value of handleProposalConfirm — carries the turn result plus commit gate details. */
 interface ProposalConfirmOutcome {
   result: TurnResult;
-  commitVerdict: Omit<GateVerdictEventDetails, "checkpoint">;
+  commitVerdict: CommitGateVerdict;
 }
 
 function createProposalConfirmResult(input: ProposalConfirmInput): TurnResult {
+  return createEndTurnResult(createProposalConfirmReply(input));
+}
+
+function createEndTurnResult(reply: string): TurnResult {
   return {
-    reply: createProposalConfirmReply(input),
+    reply,
     steps: 0,
     stopReason: "end_turn",
   };
@@ -269,6 +278,50 @@ function createProposalConfirmReply(input: ProposalConfirmInput): string {
 
   const feedback = input.feedback ? ` ${input.feedback}` : "";
   return `Proposal ${input.proposalId} confirmed.${feedback}`;
+}
+
+function createProposalConfirmOutcome(
+  result: TurnResult,
+  verdict: GateVerdict,
+  evidence: string,
+): ProposalConfirmOutcome {
+  return {
+    result,
+    commitVerdict: {
+      verdict,
+      checkName: COMMIT_GATE_CHECK,
+      evidence,
+    },
+  };
+}
+
+async function declineProposalBestEffort(
+  proposalStore: ProposalStore,
+  proposalId: string,
+): Promise<void> {
+  try {
+    await proposalStore.decline(proposalId);
+  } catch {
+    // The rejection reply remains valid even if the store transition fails.
+  }
+}
+
+async function insertMealLogFromProposal(
+  mealLogStore: MealLogStore,
+  userId: string,
+  proposal: Proposal,
+): Promise<void> {
+  await mealLogStore.insert({
+    userId,
+    foodName: proposal.foodName,
+    portionG: proposal.portionG,
+    mealType: proposal.mealType,
+    kcal: proposal.kcal,
+    proteinG: proposal.proteinG,
+    fatG: proposal.fatG,
+    carbsG: proposal.carbsG,
+    proposalId: proposal.id,
+  });
 }
 
 /**
@@ -286,41 +339,25 @@ async function handleProposalConfirm(
   input: ProposalConfirmInput,
   ports: TurnPorts,
 ): Promise<ProposalConfirmOutcome> {
-  const { proposalId, confirmed, feedback } = input;
+  const { proposalId, confirmed } = input;
   const { proposalStore, mealLogStore, sessionUserId } = ports;
 
   // Backward-compat: when stores are absent, fall back to legacy reply-only path.
   if (!proposalStore || !mealLogStore || !sessionUserId) {
-    return {
-      result: createProposalConfirmResult(input),
-      commitVerdict: {
-        verdict: "pass",
-        checkName: "commit_gate_check",
-        evidence: `Proposal ${proposalId} ${confirmed ? "confirmed" : "rejected"} (no store wired)`,
-      },
-    };
+    return createProposalConfirmOutcome(
+      createProposalConfirmResult(input),
+      "pass",
+      `Proposal ${proposalId} ${confirmed ? "confirmed" : "rejected"} (no store wired)`,
+    );
   }
 
   if (!confirmed) {
-    // Best-effort decline: update the proposal status to "rejected".
-    try {
-      await proposalStore.decline(proposalId);
-    } catch {
-      // Decline is best-effort; the rejection reply is still valid even if
-      // the store update fails.
-    }
-    return {
-      result: {
-        reply: createProposalConfirmReply(input),
-        steps: 0,
-        stopReason: "end_turn",
-      },
-      commitVerdict: {
-        verdict: "pass",
-        checkName: "commit_gate_check",
-        evidence: `Proposal ${proposalId} explicitly rejected by user`,
-      },
-    };
+    await declineProposalBestEffort(proposalStore, proposalId);
+    return createProposalConfirmOutcome(
+      createProposalConfirmResult(input),
+      "pass",
+      `Proposal ${proposalId} explicitly rejected by user`,
+    );
   }
 
   // ── Confirmed: verify ownership and status ──────────────────────────────
@@ -328,77 +365,96 @@ async function handleProposalConfirm(
   const proposal = await proposalStore.get(proposalId);
 
   if (!proposal) {
-    return {
-      result: {
-        reply: `Proposal ${proposalId} not found — it may have expired or been voided.`,
-        steps: 0,
-        stopReason: "end_turn",
-      },
-      commitVerdict: {
-        verdict: "error",
-        checkName: "commit_gate_check",
-        evidence: `Proposal ${proposalId} not found — may have expired or been voided`,
-      },
-    };
+    return createProposalConfirmOutcome(
+      createEndTurnResult(
+        `Proposal ${proposalId} not found — it may have expired or been voided.`,
+      ),
+      "error",
+      `Proposal ${proposalId} not found — may have expired or been voided`,
+    );
   }
 
   if (proposal.userId !== sessionUserId) {
-    return {
-      result: {
-        reply: `Cannot confirm proposal ${proposalId}: it belongs to a different user.`,
-        steps: 0,
-        stopReason: "end_turn",
-      },
-      commitVerdict: {
-        verdict: "block",
-        checkName: "commit_gate_check",
-        evidence: `Proposal ${proposalId} belongs to user ${proposal.userId}, not ${sessionUserId}`,
-      },
-    };
+    return createProposalConfirmOutcome(
+      createEndTurnResult(
+        `Cannot confirm proposal ${proposalId}: it belongs to a different user.`,
+      ),
+      "block",
+      `Proposal ${proposalId} belongs to user ${proposal.userId}, not ${sessionUserId}`,
+    );
   }
 
   if (proposal.status !== "proposed") {
-    return {
-      result: {
-        reply: `Proposal ${proposalId} is already ${proposal.status} and cannot be confirmed.`,
-        steps: 0,
-        stopReason: "end_turn",
-      },
-      commitVerdict: {
-        verdict: "block",
-        checkName: "commit_gate_check",
-        evidence: `Proposal ${proposalId} is in status "${proposal.status}" — only "proposed" proposals can be committed`,
-      },
-    };
+    return createProposalConfirmOutcome(
+      createEndTurnResult(
+        `Proposal ${proposalId} is already ${proposal.status} and cannot be confirmed.`,
+      ),
+      "block",
+      `Proposal ${proposalId} is in status "${proposal.status}" — only "proposed" proposals can be committed`,
+    );
   }
 
   // ── Commit: transition status → committed, then write meal ledger ─────
 
   const committed = await proposalStore.commit(proposalId);
 
-  await mealLogStore.insert({
-    userId: sessionUserId,
-    foodName: committed.foodName,
-    portionG: committed.portionG,
-    mealType: committed.mealType,
-    kcal: committed.kcal,
-    proteinG: committed.proteinG,
-    fatG: committed.fatG,
-    carbsG: committed.carbsG,
-    proposalId: committed.id,
-  });
+  await insertMealLogFromProposal(mealLogStore, sessionUserId, committed);
+
+  return createProposalConfirmOutcome(
+    createProposalConfirmResult(input),
+    "pass",
+    `Proposal ${proposalId} committed — meal ledger row references proposal ${proposalId}`,
+  );
+}
+
+function createOutputEvidence(
+  result: TurnResult,
+  tracer: TurnPorts["tracer"],
+): string {
+  if (result.stopReason === "gate_blocked") {
+    return extractGateEvidence(tracer);
+  }
+
+  if (result.stopReason === "write_proposal") {
+    return "Write proposal emitted — awaiting user confirmation";
+  }
+
+  return "Output passed safety checks";
+}
+
+function createCommitGateDetails(
+  result: TurnResult,
+  writeProposal: WriteProposalData | undefined,
+  outputEvidence: string,
+  confirmCommitVerdict: CommitGateVerdict | undefined,
+): GateVerdictEventDetails {
+  if (confirmCommitVerdict) {
+    return { checkpoint: "commit", ...confirmCommitVerdict };
+  }
+
+  if (result.stopReason === "gate_blocked") {
+    return {
+      checkpoint: "commit",
+      verdict: "block",
+      checkName: COMMIT_GATE_CHECK,
+      evidence: outputEvidence,
+    };
+  }
+
+  if (result.stopReason === "write_proposal") {
+    return {
+      checkpoint: "commit",
+      verdict: "pass",
+      checkName: COMMIT_GATE_CHECK,
+      evidence: `Proposal ${writeProposal?.proposalId ?? ""} stored — no meal ledger mutation occurred`,
+    };
+  }
 
   return {
-    result: {
-      reply: createProposalConfirmReply(input),
-      steps: 0,
-      stopReason: "end_turn",
-    },
-    commitVerdict: {
-      verdict: "pass",
-      checkName: "commit_gate_check",
-      evidence: `Proposal ${proposalId} committed — meal ledger row references proposal ${proposalId}`,
-    },
+    checkpoint: "commit",
+    verdict: "pass",
+    checkName: COMMIT_GATE_CHECK,
+    evidence: "Response committed successfully",
   };
 }
 
@@ -437,8 +493,7 @@ export async function* turn(
 
   let result: TurnResult;
   let writeProposal: WriteProposalData | undefined;
-  /** Commit gate details set by proposal_confirm path (issue #37). */
-  let confirmCommitVerdict: Omit<GateVerdictEventDetails, "checkpoint"> | undefined;
+  let confirmCommitVerdict: CommitGateVerdict | undefined;
 
   switch (input.tag) {
     case "utterance": {
@@ -470,12 +525,7 @@ export async function* turn(
   }
 
   const isGateBlocked = result.stopReason === "gate_blocked";
-  const isWriteProposal = result.stopReason === "write_proposal";
-  const outputEvidence = isGateBlocked
-    ? extractGateEvidence(ports.tracer)
-    : isWriteProposal
-      ? "Write proposal emitted — awaiting user confirmation"
-      : "Output passed safety checks";
+  const outputEvidence = createOutputEvidence(result, ports.tracer);
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
@@ -489,22 +539,15 @@ export async function* turn(
     );
   }
 
-  // Issue #37: proposal_confirm path provides its own commit gate verdict.
-  // Otherwise, derive from utterance turn outcome (gate_block / write_proposal / clean).
-  const commitVerdict: GateVerdictEventDetails = confirmCommitVerdict
-    ? { checkpoint: "commit", ...confirmCommitVerdict }
-    : {
-        checkpoint: "commit",
-        verdict: isGateBlocked ? "block" : "pass",
-        checkName: "commit_gate_check",
-        evidence: isGateBlocked
-          ? outputEvidence
-          : isWriteProposal
-            ? `Proposal ${writeProposal?.proposalId ?? ""} stored — no meal ledger mutation occurred`
-            : "Response committed successfully",
-      };
-
-  yield createGateVerdictEvent(commitVerdict, nextMetadata);
+  yield createGateVerdictEvent(
+    createCommitGateDetails(
+      result,
+      writeProposal,
+      outputEvidence,
+      confirmCommitVerdict,
+    ),
+    nextMetadata,
+  );
 
   yield createTurnEndEvent(result, nextMetadata);
 

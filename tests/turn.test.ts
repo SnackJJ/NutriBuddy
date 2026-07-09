@@ -27,7 +27,6 @@ import {
   type ProposalStore,
   type Proposal,
   type ProposalInput,
-  type ProposalStatus,
   type MealLogStore,
   type MealLogEntry,
   type MealLogInsert,
@@ -210,7 +209,7 @@ function memProposalStore(state?: MemProposalState): {
         }
         const committed: Proposal = {
           ...s.proposals[idx],
-          status: "committed" as ProposalStatus,
+          status: "committed",
         };
         s.proposals[idx] = committed;
         return committed;
@@ -223,7 +222,7 @@ function memProposalStore(state?: MemProposalState): {
         }
         const rejected: Proposal = {
           ...s.proposals[idx],
-          status: "rejected" as ProposalStatus,
+          status: "rejected",
         };
         s.proposals[idx] = rejected;
         return rejected;
@@ -1061,7 +1060,9 @@ describe("gate verdict events", () => {
   });
 
   describe("write-proposal gate verdicts (issue #36)", () => {
-    function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+    function makeLogMealResult(
+      overrides: Record<string, unknown> = {},
+    ): string {
       return JSON.stringify({
         proposal_id: "proposal-001",
         message: "Log 200g chicken breast for lunch? — Confirm?",
@@ -1093,14 +1094,27 @@ describe("gate verdict events", () => {
             content: "Let me log that.",
             stop: false,
             toolCalls: [
-              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "lunch",
+                },
+              },
             ],
           };
         }
-        return { content: "Done — I've proposed logging that meal.", stop: true };
+        return {
+          content: "Done — I've proposed logging that meal.",
+          stop: true,
+        };
       });
       const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
-      const input: TurnInput = { tag: "utterance", content: "log 200g chicken breast for lunch" };
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "log 200g chicken breast for lunch",
+      };
       const ports = createPorts(undefined, { adapter, tools });
 
       const { events, result } = await collect(turn(input, ports));
@@ -1122,14 +1136,24 @@ describe("gate verdict events", () => {
             content: "Let me log that.",
             stop: false,
             toolCalls: [
-              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "dinner" } },
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "dinner",
+                },
+              },
             ],
           };
         }
         return { content: "Done.", stop: true };
       });
       const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
-      const input: TurnInput = { tag: "utterance", content: "log chicken breast dinner" };
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "log chicken breast dinner",
+      };
       const ports = createPorts(undefined, { adapter, tools });
 
       const { events, result } = await collect(turn(input, ports));
@@ -1152,7 +1176,14 @@ describe("gate verdict events", () => {
             content: "Let me log that.",
             stop: false,
             toolCalls: [
-              { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "lunch",
+                },
+              },
             ],
           };
         }
@@ -1160,7 +1191,10 @@ describe("gate verdict events", () => {
       });
       const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
       const wpInput: TurnInput = { tag: "utterance", content: "log chicken" };
-      const wpPorts = createPorts(undefined, { adapter: writePropAdapter, tools });
+      const wpPorts = createPorts(undefined, {
+        adapter: writePropAdapter,
+        tools,
+      });
 
       const { events: wpEvents } = await collect(turn(wpInput, wpPorts));
       const wpCommit = expectGateVerdict(wpEvents, "commit");
@@ -1177,7 +1211,9 @@ describe("gate verdict events", () => {
         interactionStore: { all: async () => [] },
       });
 
-      const { events: blockedEvents } = await collect(turn(blockedInput, blockedPorts));
+      const { events: blockedEvents } = await collect(
+        turn(blockedInput, blockedPorts),
+      );
       const blockedCommit = expectGateVerdict(blockedEvents, "commit");
 
       // Write-proposal commit evidence talks about proposals, not blocks
@@ -1364,7 +1400,11 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           toolCalls: [
             {
               name: "log_meal",
-              args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" },
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
             },
           ],
         };
@@ -1372,7 +1412,10 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
       return { content: "Done — I've proposed logging that meal.", stop: true };
     });
     const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
-    const input: TurnInput = { tag: "utterance", content: "log 200g chicken breast for lunch" };
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "log 200g chicken breast for lunch",
+    };
     const ports = createPorts(undefined, { adapter, tools });
 
     const { events, result } = await collect(turn(input, ports));
@@ -1403,11 +1446,17 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           content: "Let me log that.",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "rice", portion_g: 150, meal_type: "dinner" } },
+            {
+              name: "log_meal",
+              args: { food_name: "rice", portion_g: 150, meal_type: "dinner" },
+            },
           ],
         };
       }
-      return { content: "I've proposed 150g rice for your dinner. Confirm?", stop: true };
+      return {
+        content: "I've proposed 150g rice for your dinner. Confirm?",
+        stop: true,
+      };
     });
     const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
     const input: TurnInput = { tag: "utterance", content: "log rice dinner" };
@@ -1430,7 +1479,14 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           content: "Logging...",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+            {
+              name: "log_meal",
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            },
           ],
         };
       }
@@ -1468,7 +1524,14 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           content: "Logging...",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200, meal_type: "lunch" } },
+            {
+              name: "log_meal",
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            },
           ],
         };
       }
@@ -1494,7 +1557,9 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
       confirmed: true,
     };
 
-    const { result: confirmResult } = await collect(turn(confirmInput, confirmPorts));
+    const { result: confirmResult } = await collect(
+      turn(confirmInput, confirmPorts),
+    );
 
     expect(confirmGenerateCalled).toBe(false);
     expect(confirmResult.reply).toContain("confirmed");
@@ -1508,14 +1573,14 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [
-            { name: "search_food", args: { food: "chicken" } },
-          ],
+          toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
     });
-    const tools = new Map([["search_food", async () => "chicken: 31g protein/100g"]]);
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
     const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
     const ports = createPorts(undefined, { adapter, tools });
 
@@ -1535,7 +1600,10 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           content: "Let me log that.",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "chicken", portion_g: 150 } },
+            {
+              name: "log_meal",
+              args: { food_name: "chicken", portion_g: 150 },
+            },
           ],
         };
       }
@@ -1566,7 +1634,10 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
           content: "Let me log the chicken.",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "chicken breast", portion_g: 200 } },
+            {
+              name: "log_meal",
+              args: { food_name: "chicken breast", portion_g: 200 },
+            },
           ],
         };
       }
@@ -1616,7 +1687,10 @@ describe("write-proposal turn flow (issue #36 / PRD v2 §3.4)", () => {
         },
       ],
     ]);
-    const input: TurnInput = { tag: "utterance", content: "log chicken and rice" };
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "log chicken and rice",
+    };
     const ports = createPorts(undefined, { adapter, tools });
 
     const { result } = await collect(turn(input, ports));
@@ -1811,7 +1885,9 @@ describe("proposal commit short-circuit (issue #37)", () => {
       sessionUserId: SESSION_USER_A,
     });
 
-    const { result: firstResult } = await collect(turn(confirmInput, confirmPorts));
+    const { result: firstResult } = await collect(
+      turn(confirmInput, confirmPorts),
+    );
     expect(firstResult.reply).toContain("confirmed");
     expect(proposalState.proposals[0].status).toBe("committed");
     expect(mealLedgerState.entries.length).toBe(1);
@@ -1938,14 +2014,17 @@ describe("proposal commit short-circuit (issue #37)", () => {
       proposalId: proposal.id,
       confirmed: true,
     };
-    const ports = createPorts(() => {
-      generateCalled = true;
-      return { content: "unused", stop: true };
-    }, {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_A,
-    });
+    const ports = createPorts(
+      () => {
+        generateCalled = true;
+        return { content: "unused", stop: true };
+      },
+      {
+        proposalStore,
+        mealLogStore,
+        sessionUserId: SESSION_USER_A,
+      },
+    );
 
     await collect(turn(input, ports));
 
@@ -2133,7 +2212,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
     proposalState.proposals[idx] = {
       ...proposalState.proposals[idx],
-      status: "voided" as ProposalStatus,
+      status: "voided",
     };
 
     // Try to confirm the voided proposal
@@ -2183,7 +2262,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
     proposalState.proposals[idx] = {
       ...proposalState.proposals[idx],
-      status: "expired" as ProposalStatus,
+      status: "expired",
     };
 
     // Try to confirm the expired proposal
@@ -2233,7 +2312,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
     proposalState.proposals[idx] = {
       ...proposalState.proposals[idx],
-      status: "superseded" as ProposalStatus,
+      status: "superseded",
     };
 
     // Try to confirm the superseded proposal

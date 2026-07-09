@@ -5,9 +5,11 @@ import {
   type ProposalStore,
   type Proposal,
   type ProposalInput,
-  type ProposalStatus,
 } from "../src/harness/logMeal";
-import type { GetFoodNutrition, NutritionData } from "../src/harness/foodNutrition";
+import type {
+  GetFoodNutrition,
+  NutritionData,
+} from "../src/harness/foodNutrition";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,7 +81,7 @@ function memProposalStore(state?: MemProposalState): {
         }
         const committed: Proposal = {
           ...s.proposals[idx],
-          status: "committed" as ProposalStatus,
+          status: "committed",
         };
         s.proposals[idx] = committed;
         return committed;
@@ -92,7 +94,7 @@ function memProposalStore(state?: MemProposalState): {
         }
         const rejected: Proposal = {
           ...s.proposals[idx],
-          status: "rejected" as ProposalStatus,
+          status: "rejected",
         };
         s.proposals[idx] = rejected;
         return rejected;
@@ -198,7 +200,10 @@ describe("createLogMealHandler", () => {
         userId: TEST_USER,
       });
 
-      const result = await handler({ food_name: "chicken breast", portion_g: 0 });
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 0,
+      });
       const parsed = JSON.parse(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("portion_g");
@@ -439,7 +444,19 @@ describe("createLogMealHandler", () => {
       const _mealLogStore = {
         async insert() {
           mealLedgerInserted = true;
-          return { id: 1, userId: "", foodName: "", portionG: 0, mealType: "", loggedAt: "", kcal: 0, proteinG: 0, fatG: 0, carbsG: 0, proposalId: "" };
+          return {
+            id: 1,
+            userId: "",
+            foodName: "",
+            portionG: 0,
+            mealType: "",
+            loggedAt: "",
+            kcal: 0,
+            proteinG: 0,
+            fatG: 0,
+            carbsG: 0,
+            proposalId: "",
+          };
         },
       };
 
