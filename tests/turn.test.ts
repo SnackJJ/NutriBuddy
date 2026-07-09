@@ -2065,6 +2065,59 @@ describe("write-proposal turn flow (issue #36)", () => {
     expect(STOP_REASONS).toContain("write_proposal");
   });
 
+  it("accepts caller-bound userId without exposing it in the prompt", async () => {
+    const tracer = new Tracer();
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      userId: "authenticated-user-001",
+      tracer,
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    expectTerminalEvent(events);
+    const prompt =
+      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    expect(prompt).not.toContain("authenticated-user-001");
+  });
+
+  it("does not inject caller-bound userId into model tool args", async () => {
+    let capturedArgs: Readonly<Record<string, unknown>> | undefined;
+    const tools = new Map([
+      [
+        "scoped_tool",
+        async (args: Readonly<Record<string, unknown>>) => {
+          capturedArgs = args;
+          return "ok";
+        },
+      ],
+    ]);
+    const adapter = stubAdapter(() => ({
+      content: "Looking up...",
+      stop: false,
+      toolCalls: [
+        {
+          name: "scoped_tool",
+          args: { user_id: "evil-user" },
+        },
+      ],
+    }));
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(undefined, {
+      adapter,
+      tools,
+      userId: "authenticated-user-001",
+    });
+
+    await collect(turn(input, ports));
+
+    expect(capturedArgs).toEqual({ user_id: "evil-user" });
+    expect(capturedArgs).not.toHaveProperty("userId");
+    expect(JSON.stringify(capturedArgs)).not.toContain(
+      "authenticated-user-001",
+    );
+  });
+
   it("does not let a captured proposal override an output gate block", async () => {
     let callCount = 0;
     const adapter = stubAdapter(() => {

@@ -38,6 +38,12 @@ const CODE_ACT_TOOL = "code_act";
 
 export interface RunTurnInput {
   readonly userInput: string;
+  /**
+   * Authenticated user identity bound by the caller.
+   * It is kept outside model-visible input; scoped tools must use this
+   * caller-bound value instead of accepting identity from model args.
+   */
+  readonly userId?: string;
   readonly adapter: ModelAdapter;
   readonly tracer: Tracer;
   readonly eventLog?: EventLog;

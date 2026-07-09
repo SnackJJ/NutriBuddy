@@ -699,4 +699,66 @@ describe("createLogMealHandler", () => {
       expect(params.required).not.toContain("meal_type");
     });
   });
+
+  // ─── Cross-tenant isolation (issue #38 / PRD v2 §3.4) ───────────────────
+
+  describe("cross-tenant proposal scoping", () => {
+    it("stores proposals under the injected userId, not model args", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        getFoodNutrition: fakeNutrition(),
+        proposalStore: store,
+        userId: "authenticated-user-A",
+      });
+
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+        user_id: "evil-user",
+      });
+
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+
+      expect(state.proposals).toHaveLength(1);
+      expect(state.proposals[0].userId).toBe("authenticated-user-A");
+      expect(state.proposals[0].userId).not.toBe("evil-user");
+    });
+
+    it("uses the userId captured by each handler instance", async () => {
+      const state: MemProposalState = { proposals: [] };
+      const { store: storeA } = memProposalStore(state);
+      const handlerA = createLogMealHandler({
+        getFoodNutrition: fakeNutrition({ foodName: "chicken breast" }),
+        proposalStore: storeA,
+        userId: "user-A",
+      });
+      await handlerA({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+
+      const { store: storeB } = memProposalStore(state);
+      const handlerB = createLogMealHandler({
+        getFoodNutrition: fakeNutrition({ foodName: "salmon" }),
+        proposalStore: storeB,
+        userId: "user-B",
+      });
+      await handlerB({
+        food_name: "salmon",
+        portion_g: 150,
+        meal_type: "dinner",
+      });
+
+      expect(state.proposals).toEqual([
+        expect.objectContaining({
+          userId: "user-A",
+          foodName: "chicken breast",
+        }),
+        expect.objectContaining({ userId: "user-B", foodName: "salmon" }),
+      ]);
+    });
+  });
 });

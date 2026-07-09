@@ -433,6 +433,7 @@ function createRunTurnInput(
 ): RunTurnInput {
   return {
     userInput: input.content,
+    userId: ports.userId,
     adapter: ports.adapter,
     tracer: ports.tracer,
     eventLog: ports.eventLog,
