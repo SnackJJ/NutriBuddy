@@ -664,10 +664,7 @@ describe("createLogMealHandler", () => {
   // ─── Cross-tenant isolation (issue #38 / PRD v2 §3.4) ───────────────────
 
   describe("cross-tenant proposal scoping", () => {
-    it("proposals are scoped to the injected userId, not model args", async () => {
-      // The model might try to pass a user_id in args, but the handler
-      // uses the injected LogMealDeps.userId — model args never influence
-      // which user owns the proposal.
+    it("stores proposals under the injected userId, not model args", async () => {
       const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
         getFoodNutrition: fakeNutrition(),
@@ -675,27 +672,24 @@ describe("createLogMealHandler", () => {
         userId: "authenticated-user-A",
       });
 
-      // Model attempts to pass user_id as an arg — it is silently ignored
-      // (the handler does not read user_id from args)
       const result = await handler({
         food_name: "chicken breast",
         portion_g: 200,
         meal_type: "lunch",
-        user_id: "evil-user", // model-supplied, must be ignored
-      } as unknown as Record<string, unknown>);
+        user_id: "evil-user",
+      });
 
       const parsed = JSON.parse(result);
       expect(parsed.proposal_id).toBeDefined();
 
-      // The stored proposal must be owned by the injected userId
       expect(state.proposals).toHaveLength(1);
       expect(state.proposals[0].userId).toBe("authenticated-user-A");
       expect(state.proposals[0].userId).not.toBe("evil-user");
     });
 
-    it("proposals for different users are isolated in separate store scopes", async () => {
-      // User A creates a proposal — it goes to user A's scope
-      const { store: storeA, state: stateA } = memProposalStore();
+    it("uses the userId captured by each handler instance", async () => {
+      const state: MemProposalState = { proposals: [] };
+      const { store: storeA } = memProposalStore(state);
       const handlerA = createLogMealHandler({
         getFoodNutrition: fakeNutrition({ foodName: "chicken breast" }),
         proposalStore: storeA,
@@ -707,8 +701,7 @@ describe("createLogMealHandler", () => {
         meal_type: "lunch",
       });
 
-      // User B creates a proposal — it goes to user B's scope
-      const { store: storeB, state: stateB } = memProposalStore();
+      const { store: storeB } = memProposalStore(state);
       const handlerB = createLogMealHandler({
         getFoodNutrition: fakeNutrition({ foodName: "salmon" }),
         proposalStore: storeB,
@@ -720,54 +713,13 @@ describe("createLogMealHandler", () => {
         meal_type: "dinner",
       });
 
-      // User A can only see their own proposals
-      expect(stateA.proposals).toHaveLength(1);
-      expect(stateA.proposals[0].userId).toBe("user-A");
-      expect(stateA.proposals[0].foodName).toBe("chicken breast");
-
-      // User B can only see their own proposals
-      expect(stateB.proposals).toHaveLength(1);
-      expect(stateB.proposals[0].userId).toBe("user-B");
-      expect(stateB.proposals[0].foodName).toBe("salmon");
-
-      // User A cannot access user B's proposals through their store
-      for (const proposal of stateA.proposals) {
-        expect(proposal.userId).not.toBe("user-B");
-      }
-      for (const proposal of stateB.proposals) {
-        expect(proposal.userId).not.toBe("user-A");
-      }
-    });
-
-    it("proposal handler structurally prevents model from overriding userId", async () => {
-      // The LogMealDeps interface exposes userId as a fixed string, not
-      // something read from model args. The handler closure captures it
-      // at construction time. This test documents the structural guarantee:
-      // there is NO code path in createLogMealHandler that reads userId
-      // from the args parameter — it only uses the injected deps.userId.
-      const { store } = memProposalStore();
-
-      // TypeScript verifies: LogMealDeps.userId is `string`, not a function
-      // that could be influenced by runtime input.
-      const deps = {
-        getFoodNutrition: fakeNutrition(),
-        proposalStore: store,
-        userId: "fixed-user-id",
-      };
-      const handler = createLogMealHandler(deps);
-
-      // Even when args includes user_id, the handler uses deps.userId.
-      // The handler's type signature is ToolHandler = (args) => string,
-      // so args are typed as Readonly<Record<string, unknown>> — TS
-      // prevents structural access to specific fields from args.
-      const result = await handler({
-        food_name: "chicken breast",
-        portion_g: 200,
-      });
-      const parsed = JSON.parse(result);
-      expect(parsed.proposal_id).toBeDefined();
-      // The handler constructed with fixed-user-id always creates
-      // proposals for that user.
+      expect(state.proposals).toEqual([
+        expect.objectContaining({
+          userId: "user-A",
+          foodName: "chicken breast",
+        }),
+        expect.objectContaining({ userId: "user-B", foodName: "salmon" }),
+      ]);
     });
   });
 });

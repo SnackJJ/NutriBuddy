@@ -39,11 +39,9 @@ const CODE_ACT_TOOL = "code_act";
 export interface RunTurnInput {
   readonly userInput: string;
   /**
-   * Authenticated user identity bound by the caller (not model-fillable).
-   * This userId flows to all scoped operations (query catalog, proposals,
-   * profile reads) and is never exposed in model prompts or tool args.
-   *
-   * When absent, tools that require user scoping will fail-fast.
+   * Authenticated user identity bound by the caller.
+   * It is kept outside model-visible input; scoped tools must use this
+   * caller-bound value instead of accepting identity from model args.
    */
   readonly userId?: string;
   readonly adapter: ModelAdapter;
