@@ -26,7 +26,7 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { ensureHostOnBase } from "../src/lib/ensureHostOnBase";
@@ -81,7 +81,24 @@ const hooks = {
 const copyToWorktree = ["node_modules"];
 
 const CODEX_HOME_IN_SANDBOX = "/home/agent/.codex";
-const codexHostHome = process.env.CODEX_HOST_HOME ?? process.env.CODEX_HOME;
+function readEnvFileValue(key: string): string | undefined {
+  const envPath = join(repoRoot, ".sandcastle", ".env");
+  if (!existsSync(envPath)) return undefined;
+
+  const prefix = `${key}=`;
+  const line = readFileSync(envPath, "utf8")
+    .split(/\r?\n/)
+    .find((entry) => entry.startsWith(prefix));
+  if (!line) return undefined;
+
+  return line.slice(prefix.length).trim().replace(/^["']|["']$/g, "");
+}
+
+const codexHostHome =
+  process.env.CODEX_HOST_HOME ??
+  process.env.CODEX_HOME ??
+  readEnvFileValue("CODEX_HOST_HOME") ??
+  readEnvFileValue("CODEX_HOME");
 const codexMounts = codexHostHome
   ? [
       {
