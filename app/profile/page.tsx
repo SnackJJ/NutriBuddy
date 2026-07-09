@@ -5,8 +5,9 @@ import { profileFormSchema, GOAL_TYPES } from "@/lib/profileValidation";
 import type { GoalType } from "@/lib/profileValidation";
 import type { UserProfile } from "@/lib/memoryStore";
 
-/** Generate a stable client-side userId stored in localStorage (M1 — no auth yet). */
-function getUserId(): string {
+/** Generate a stable client-side userId (M1 — no auth yet). */
+function readUserId(): string {
+  if (typeof window === "undefined") return "";
   const key = "nutribuddy_user_id";
   let id = localStorage.getItem(key);
   if (!id) {
@@ -93,7 +94,7 @@ const GOAL_LABELS: Record<GoalType, string> = {
 };
 
 export default function ProfilePage() {
-  const userId = getUserId();
+  const [userId, setUserId] = useState("");
 
   // Profile data loaded from server
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -117,6 +118,10 @@ export default function ProfilePage() {
     text: string;
   } | null>(null);
 
+  useEffect(() => {
+    setUserId(readUserId());
+  }, []);
+
   /** Sync a UserProfile from the server into the local form state fields. */
   function applyProfileToForm(p: UserProfile) {
     setAllergies([...p.allergies]);
@@ -132,10 +137,14 @@ export default function ProfilePage() {
 
   // Load profile on mount
   useEffect(() => {
+    if (!userId) return;
+
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch(`/api/profile?userId=${encodeURIComponent(userId)}`);
+        const res = await fetch(
+          `/api/profile?userId=${encodeURIComponent(userId)}`,
+        );
         if (!res.ok) throw new Error("Failed to load profile");
         const data = await res.json();
         if (cancelled) return;
@@ -151,12 +160,19 @@ export default function ProfilePage() {
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
+
+    if (!userId) {
+      setMessage({ type: "error", text: "Profile is still loading." });
+      return;
+    }
 
     // Build the patch object — only include non-empty fields
     const patch: Record<string, unknown> = {};
@@ -194,7 +210,7 @@ export default function ProfilePage() {
           type: "error",
           text: data.details
             ? `Validation failed: ${data.details.map((d: { message: string }) => d.message).join(", ")}`
-            : data.error ?? "Save failed",
+            : (data.error ?? "Save failed"),
         });
         return;
       }
