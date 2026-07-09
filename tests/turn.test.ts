@@ -21,6 +21,8 @@ import {
   type ToolCall,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
+import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
+import type { Conflict } from "../src/harness/advisoryGate";
 
 const FIXED_TIMESTAMP = "2026-07-05T12:00:00.000Z";
 
@@ -959,5 +961,381 @@ describe("gate verdict events", () => {
     const { events } = await collect(turn(input, ports));
 
     expect(countBlockedGateVerdicts(events)).toBe(0);
+  });
+});
+
+describe("output gate — numeric provenance and advisory structure", () => {
+  function makeObservation(
+    templateId: string,
+    columns: readonly ColumnDef[],
+    rows: ReadonlyArray<Record<string, unknown>>,
+  ): Observation {
+    return {
+      templateId,
+      columns,
+      rows: rows as any,
+      rowCount: rows.length,
+      truncated: false,
+    };
+  }
+
+  const CHICKEN_COLUMNS: ColumnDef[] = [
+    { name: "food_id", type: "string", description: "Catalog food ID" },
+    { name: "food_name", type: "string", description: "Canonical name" },
+    { name: "portion_g", type: "number", unit: "g", description: "Portion size" },
+    { name: "kcal", type: "number", unit: "kcal", description: "Calories" },
+    { name: "protein_g", type: "number", unit: "g", description: "Protein" },
+    { name: "fat_g", type: "number", unit: "g", description: "Fat" },
+    { name: "carbs_g", type: "number", unit: "g", description: "Carbs" },
+    { name: "allergen_tags", type: "string", description: "Allergens" },
+  ];
+
+  const CHICKEN_OBSERVATION = makeObservation("food_lookup", CHICKEN_COLUMNS, [
+    {
+      food_id: "chicken-breast-001",
+      food_name: "Chicken breast, raw",
+      portion_g: 100,
+      kcal: 165,
+      protein_g: 31,
+      fat_g: 3.6,
+      carbs_g: 0,
+      allergen_tags: "",
+    },
+  ]);
+
+  const PEANUT_CONFLICT: Conflict = {
+    type: "allergy",
+    id: "peanut",
+    description: "User is allergic to peanut",
+  };
+
+  const CLEAN_CHICKEN_OUTPUT: TypedOutput = {
+    prose: "Chicken breast has 31g protein and 165 kcal per 100g serving.",
+    foodRefs: [
+      {
+        foodId: "chicken-breast-001",
+        foodName: "Chicken breast, raw",
+        matchType: "exact",
+      },
+    ],
+    ruleRefs: [],
+  };
+
+  it("emits passing output_numeric_provenance and output_advisory_structure gate verdicts for clean output", async () => {
+    const ports = createPorts(() => ({
+      content: CLEAN_CHICKEN_OUTPUT.prose,
+      stop: true,
+      output: CLEAN_CHICKEN_OUTPUT,
+    }), {
+      observations: [CHICKEN_OBSERVATION],
+      conflicts: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+
+    const { events } = await collect(turn(input, ports));
+
+    const numericVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+    const advisoryVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_advisory_structure",
+    );
+
+    expect(numericVerdict).toBeDefined();
+    expect(numericVerdict!.verdict).toBe("pass");
+    expect(numericVerdict!.evidence).toContain("All numeric facts trace to observations");
+
+    expect(advisoryVerdict).toBeDefined();
+    expect(advisoryVerdict!.verdict).toBe("pass");
+    expect(advisoryVerdict!.evidence).toContain("Advisory structure valid");
+  });
+
+  it("emits blocking output_numeric_provenance verdict when prose contains ungrounded numbers", async () => {
+    const badOutput: TypedOutput = {
+      prose: "Chicken breast has 500g protein and 999 kcal.", // ungrounded
+      foodRefs: [
+        {
+          foodId: "chicken-breast-001",
+          foodName: "Chicken breast, raw",
+          matchType: "exact",
+        },
+      ],
+      ruleRefs: [],
+    };
+
+    const ports = createPorts(() => ({
+      content: badOutput.prose,
+      stop: true,
+      output: badOutput,
+    }), {
+      observations: [CHICKEN_OBSERVATION],
+    });
+    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const numericVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+
+    // The first attempt should have a blocking numeric verdict
+    expect(numericVerdict).toBeDefined();
+    // After retries are exhausted, the final result should be blocked
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("emits blocking output_advisory_structure verdict when conflicts unaddressed", async () => {
+    const badOutput: TypedOutput = {
+      prose: "I recommend peanuts for protein.",
+      foodRefs: [
+        {
+          foodId: "peanut-001",
+          foodName: "Peanuts, raw",
+          matchType: "exact",
+          allergens: ["peanut"],
+        },
+      ],
+      ruleRefs: [], // missing advisory for peanut allergy
+    };
+
+    const ports = createPorts(() => ({
+      content: badOutput.prose,
+      stop: true,
+      output: badOutput,
+    }), {
+      conflicts: [PEANUT_CONFLICT],
+    });
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const advisoryVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_advisory_structure",
+    );
+    expect(advisoryVerdict).toBeDefined();
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("skips numeric provenance gate when no observations are provided", async () => {
+    const output: TypedOutput = {
+      prose: "Eggs have about 6g of protein per large egg.",
+      foodRefs: [
+        {
+          foodId: "egg-whole-raw",
+          foodName: "Eggs, whole, raw",
+          matchType: "exact",
+          allergens: ["egg"],
+        },
+      ],
+      ruleRefs: [],
+    };
+
+    const ports = createPorts(() => ({
+      content: output.prose,
+      stop: true,
+      output,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "egg protein?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Should pass — numeric gate skipped when no observations
+    expect(result.stopReason).toBe("end_turn");
+
+    const numericVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+    expect(numericVerdict).toBeDefined();
+    expect(numericVerdict!.verdict).toBe("pass");
+    expect(numericVerdict!.evidence).toContain("skipped");
+  });
+
+  it("retries then refuses when numeric provenance persistently fails", async () => {
+    // Adapter always returns the same ungrounded output — retries won't fix it
+    const badOutput: TypedOutput = {
+      prose: "Chicken breast has 500g protein and 999 kcal.",
+      foodRefs: [
+        {
+          foodId: "chicken-breast-001",
+          foodName: "Chicken breast, raw",
+          matchType: "exact",
+        },
+      ],
+      ruleRefs: [],
+    };
+
+    const ports = createPorts(() => ({
+      content: badOutput.prose,
+      stop: true,
+      output: badOutput,
+    }), {
+      observations: [CHICKEN_OBSERVATION],
+    });
+    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // After 2 retries, should return gate_blocked
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("cannot safely answer");
+
+    // Should have multiple numeric provenance verdicts (original + retries)
+    const numericVerdicts = gateVerdicts(events).filter(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+    expect(numericVerdicts.length).toBeGreaterThanOrEqual(1);
+    expect(numericVerdicts.some((v) => v.verdict === "block")).toBe(true);
+  });
+
+  it("passes when observations ground all numbers and conflicts have advisory ruleRefs (combined pass)", async () => {
+    const cleanOutput: TypedOutput = {
+      prose: "Based on your profile, I recommend salmon. Note: 20g protein and 208 kcal.",
+      foodRefs: [
+        {
+          foodId: "salmon-001",
+          foodName: "Salmon, Atlantic, raw",
+          matchType: "exact",
+          allergens: ["fish"],
+        },
+      ],
+      ruleRefs: [
+        {
+          ruleId: "WARFARIN-VITK",
+          summary: "Monitor vitamin K with warfarin",
+        },
+      ],
+    };
+
+    const salmonObs = makeObservation("food_lookup", CHICKEN_COLUMNS, [
+      {
+        food_id: "salmon-001",
+        food_name: "Salmon, Atlantic, raw",
+        portion_g: 100,
+        kcal: 208,
+        protein_g: 20,
+        fat_g: 13,
+        carbs_g: 0,
+        allergen_tags: "fish",
+      },
+    ]);
+
+    const warfarinConflict: Conflict = {
+      type: "drug_interaction",
+      id: "WARFARIN-VITK",
+      description: "Warfarin interacts with vitamin K",
+    };
+
+    const ports = createPorts(() => ({
+      content: cleanOutput.prose,
+      stop: true,
+      output: cleanOutput,
+    }), {
+      observations: [salmonObs],
+      conflicts: [warfarinConflict],
+    });
+    const input: TurnInput = { tag: "utterance", content: "healthy dinner?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.output).toEqual(cleanOutput);
+
+    const numericVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+    const advisoryVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_advisory_structure",
+    );
+
+    expect(numericVerdict!.verdict).toBe("pass");
+    expect(advisoryVerdict!.verdict).toBe("pass");
+    expect(countBlockedGateVerdicts(events)).toBe(0);
+  });
+
+  it("model can self-correct on retry when output gate blocks (realistic retry scenario)", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First attempt: hallucinates numbers
+        return {
+          content: "Chicken breast has 500g protein.",
+          stop: true,
+          output: {
+            prose: "Chicken breast has 500g protein.",
+            foodRefs: [
+              {
+                foodId: "chicken-breast-001",
+                foodName: "Chicken breast, raw",
+                matchType: "exact" as const,
+              },
+            ],
+            ruleRefs: [],
+          },
+        };
+      }
+      // Second attempt: corrects the number after feedback
+      return {
+        content: "Chicken breast has 31g protein.",
+        stop: true,
+        output: {
+          prose: "Chicken breast has 31g protein.",
+          foodRefs: [
+            {
+              foodId: "chicken-breast-001",
+              foodName: "Chicken breast, raw",
+              matchType: "exact" as const,
+            },
+          ],
+          ruleRefs: [],
+        },
+      };
+    });
+
+    const ports = createPorts(undefined, {
+      adapter,
+      observations: [CHICKEN_OBSERVATION],
+    });
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Should pass after retry — model fixed the number
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.reply).toContain("31g");
+
+    // Should have at least one blocking numeric verdict and one passing
+    const numericVerdicts = gateVerdicts(events).filter(
+      (gv) => gv.checkName === "output_numeric_provenance",
+    );
+    expect(numericVerdicts.length).toBeGreaterThanOrEqual(2);
+    expect(numericVerdicts[0].verdict).toBe("block");
+    expect(numericVerdicts[numericVerdicts.length - 1].verdict).toBe("pass");
+  });
+
+  it("advisory gate passes when conflicts exist but output makes no food recommendations", async () => {
+    const output: TypedOutput = {
+      prose: "I understand you have a peanut allergy. How can I help you today?",
+      foodRefs: [],
+      ruleRefs: [],
+    };
+
+    const ports = createPorts(() => ({
+      content: output.prose,
+      stop: true,
+      output,
+    }), {
+      conflicts: [PEANUT_CONFLICT],
+    });
+    const input: TurnInput = { tag: "utterance", content: "snack suggestions?" };
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("end_turn");
+    const advisoryVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_advisory_structure",
+    );
+    expect(advisoryVerdict!.verdict).toBe("pass");
   });
 });
