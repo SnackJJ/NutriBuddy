@@ -6,10 +6,11 @@
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Codex Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
-//                               (100 iterations). If it produces commits, a
-//                               Codex reviewer runs in the same sandbox on
-//                               the same branch (1 iteration). All issue
-//                               pipelines run concurrently via
+//                               (100 iterations). If it produces commits, or
+//                               an interrupted prior run already left unmerged
+//                               commits on that branch, a Codex reviewer runs
+//                               in the same sandbox on the same branch
+//                               (1 iteration). All issue pipelines run via
 //                               Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
 //                               into the current branch.
@@ -24,6 +25,7 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -78,17 +80,42 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
-const codexHome = process.env.CODEX_HOME;
-const codexMounts = codexHome
+const CODEX_HOME_IN_SANDBOX = "/home/agent/.codex";
+const codexHostHome = process.env.CODEX_HOST_HOME ?? process.env.CODEX_HOME;
+const codexMounts = codexHostHome
   ? [
-      { hostPath: join(codexHome, "auth.json"), sandboxPath: "/home/agent/.codex/auth.json", readonly: true },
-      { hostPath: join(codexHome, "config.toml"), sandboxPath: "/home/agent/.codex/config.toml", readonly: true },
+      {
+        hostPath: join(codexHostHome, "auth.json"),
+        sandboxPath: join(CODEX_HOME_IN_SANDBOX, "auth.json"),
+        readonly: true,
+      },
+      {
+        hostPath: join(codexHostHome, "config.toml"),
+        sandboxPath: join(CODEX_HOME_IN_SANDBOX, "config.toml"),
+        readonly: true,
+      },
     ].filter((mount) => existsSync(mount.hostPath))
   : [];
+
+if (codexMounts.length === 0) {
+  console.warn(
+    "Codex reviewer credentials were not mounted. Set CODEX_HOST_HOME or CODEX_HOME to your Codex home.",
+  );
+}
 
 const codexReviewSandbox = docker({
   mounts: codexMounts,
 });
+
+function branchHasUnmergedCommits(branch: string): boolean {
+  const count = execFileSync(
+    "git",
+    ["rev-list", "--count", `${BASE_BRANCH}..${branch}`],
+    { cwd: repoRoot, encoding: "utf8" },
+  ).trim();
+
+  return Number(count) > 0;
+}
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -171,12 +198,17 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           },
         });
 
-        // Only review if the implementer produced commits
-        if (implement.commits.length > 0) {
+        // Review if this run produced commits, or if a prior interrupted run
+        // already left commits on the branch that have not reached main yet.
+        const hasUnmergedCommits = branchHasUnmergedCommits(issue.branch);
+        if (implement.commits.length > 0 || hasUnmergedCommits) {
           const review = await sandbox.run({
             name: "codex-reviewer",
             maxIterations: 1,
-            agent: sandcastle.codex("gpt-5.5", { effort: "xhigh" }),
+            agent: sandcastle.codex("gpt-5.5", {
+              effort: "xhigh",
+              env: { CODEX_HOME: CODEX_HOME_IN_SANDBOX },
+            }),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
@@ -207,14 +239,15 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     }
   }
 
-  // Only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
+  // Pass every branch with commits not yet merged into main. This covers
+  // interrupted runs where implementation commits already exist before the
+  // next orchestrator cycle, so the implementer may produce no new commits.
   const completedIssues = settled
     .map((outcome, i) => ({ outcome, issue: issues[i]! }))
     .filter(
       (entry) =>
         entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
+        branchHasUnmergedCommits(entry.issue.branch),
     )
     .map((entry) => entry.issue);
 
