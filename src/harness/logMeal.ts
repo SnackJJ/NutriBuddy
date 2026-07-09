@@ -18,6 +18,15 @@ const DEFAULT_MEAL_TYPE = "snack";
 
 // ── 提案写入端口（issue #36 / PRD v2 §3.4 / ADD §Tools）──
 
+/** 提案状态机（issue #37 / PRD v2 §3.4 / ADD Phase 3）。 */
+export type ProposalStatus =
+  | "proposed"
+  | "committed"
+  | "rejected"
+  | "voided"
+  | "expired"
+  | "superseded";
+
 /** 写入提案所需的不可变数据。 */
 export interface ProposalInput {
   readonly userId: string;
@@ -43,13 +52,20 @@ export interface Proposal {
   readonly fatG: number;
   readonly carbsG: number;
   readonly nutritionSource: string;
-  readonly status: "proposed";
+  readonly status: ProposalStatus;
   readonly createdAt: string;
 }
 
 /** 提案存储端口。可注入 Supabase 实现或单测 mock。 */
 export interface ProposalStore {
+  /** Store a new proposal in "proposed" status. */
   store(input: ProposalInput): Promise<Proposal>;
+  /** Look up a proposal by id. */
+  get(id: string): Promise<Proposal | undefined>;
+  /** Transition a proposal from "proposed" to "committed". */
+  commit(id: string): Promise<Proposal>;
+  /** Transition a proposal from "proposed" to "rejected". */
+  decline(id: string): Promise<Proposal>;
 }
 
 // ─── 遗留膳食存储端口（仅用于 proposal_confirm 提交路径）─────────────────
@@ -66,6 +82,8 @@ export interface MealLogEntry {
   readonly proteinG: number;
   readonly fatG: number;
   readonly carbsG: number;
+  /** The committed proposal that authorised this write (issue #37). */
+  readonly proposalId: string;
 }
 
 /** 插入餐食记录所需的参数（不含 id / loggedAt，由 store 生成）。 */
@@ -78,6 +96,11 @@ export interface MealLogInsert {
   readonly proteinG: number;
   readonly fatG: number;
   readonly carbsG: number;
+  /**
+   * The committed proposal id that authorised this write.
+   * Meal ledger rows always reference their source proposal (issue #37).
+   */
+  readonly proposalId: string;
 }
 
 /** 餐食存储端口。可注入 Supabase 实现或单测 mock。 */

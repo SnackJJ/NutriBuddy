@@ -4,7 +4,11 @@
 // 沿用 harness/Supabase 既有约定：窄端口可注入，单测不触网。
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { MealLogStore, MealLogEntry, MealLogInsert } from "../harness/logMeal";
+import type {
+  MealLogStore,
+  MealLogEntry,
+  MealLogInsert,
+} from "../harness/logMeal";
 
 /** Postgres 表行形状（snake_case，与 supabase/migrations/0002_meal_logs.sql 对应）。 */
 interface MealLogDbRow {
@@ -18,6 +22,7 @@ interface MealLogDbRow {
   readonly protein_g: number;
   readonly fat_g: number;
   readonly carbs_g: number;
+  readonly proposal_id: string;
   readonly created_at: string;
 }
 
@@ -33,6 +38,7 @@ function rowToEntry(row: MealLogDbRow): MealLogEntry {
     proteinG: row.protein_g,
     fatG: row.fat_g,
     carbsG: row.carbs_g,
+    proposalId: row.proposal_id,
   };
 }
 
@@ -55,14 +61,13 @@ export function createSupabaseMealLogStore(
           protein_g: params.proteinG,
           fat_g: params.fatG,
           carbs_g: params.carbsG,
+          proposal_id: params.proposalId,
         })
         .select()
         .single();
 
       if (error) {
-        throw new Error(
-          `Failed to insert meal log: ${error.message}`,
-        );
+        throw new Error(`Failed to insert meal log: ${error.message}`);
       }
 
       return rowToEntry(data as MealLogDbRow);

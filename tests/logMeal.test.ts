@@ -70,6 +70,35 @@ function memProposalStore(state?: MemProposalState): {
         s.proposals.push(proposal);
         return proposal;
       },
+      async get(id: string): Promise<Proposal | undefined> {
+        return s.proposals.find((p) => p.id === id);
+      },
+      async commit(id: string): Promise<Proposal> {
+        const idx = s.proposals.findIndex((p) => p.id === id);
+        if (idx === -1) throw new Error(`Proposal ${id} not found`);
+        if (s.proposals[idx].status !== "proposed") {
+          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
+        }
+        const committed: Proposal = {
+          ...s.proposals[idx],
+          status: "committed",
+        };
+        s.proposals[idx] = committed;
+        return committed;
+      },
+      async decline(id: string): Promise<Proposal> {
+        const idx = s.proposals.findIndex((p) => p.id === id);
+        if (idx === -1) throw new Error(`Proposal ${id} not found`);
+        if (s.proposals[idx].status !== "proposed") {
+          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
+        }
+        const rejected: Proposal = {
+          ...s.proposals[idx],
+          status: "rejected",
+        };
+        s.proposals[idx] = rejected;
+        return rejected;
+      },
     },
   };
 }
@@ -77,6 +106,15 @@ function memProposalStore(state?: MemProposalState): {
 function throwingProposalStore(message: string): ProposalStore {
   return {
     async store() {
+      throw new Error(message);
+    },
+    async get() {
+      throw new Error(message);
+    },
+    async commit() {
+      throw new Error(message);
+    },
+    async decline() {
       throw new Error(message);
     },
   };
@@ -417,6 +455,7 @@ describe("createLogMealHandler", () => {
             proteinG: 0,
             fatG: 0,
             carbsG: 0,
+            proposalId: "",
           };
         },
       };

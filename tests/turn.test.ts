@@ -24,6 +24,14 @@ import {
 import type { InteractionStore } from "../src/lib/drugInteractions";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
 import type { Conflict } from "../src/harness/advisoryGate";
+import {
+  type ProposalStore,
+  type Proposal,
+  type ProposalInput,
+  type MealLogStore,
+  type MealLogEntry,
+  type MealLogInsert,
+} from "../src/harness/logMeal";
 
 const FIXED_TIMESTAMP = "2026-07-05T12:00:00.000Z";
 
@@ -150,6 +158,111 @@ function expectEventMetadata(
   for (let index = 1; index < seqs.length; index++) {
     expect(seqs[index]).toBeGreaterThan(seqs[index - 1]);
   }
+}
+
+// ── proposal commit helpers (issue #37) ──────────────────────────────────
+
+interface MemProposalState {
+  proposals: Proposal[];
+}
+
+let proposalCounter = 100;
+
+function nextProposalId(): string {
+  proposalCounter++;
+  return `proposal-${proposalCounter.toString().padStart(3, "0")}`;
+}
+
+function memProposalStore(state?: MemProposalState): {
+  store: ProposalStore;
+  state: MemProposalState;
+} {
+  const s = state ?? { proposals: [] };
+  return {
+    state: s,
+    store: {
+      async store(params: ProposalInput): Promise<Proposal> {
+        const proposal: Proposal = {
+          id: nextProposalId(),
+          userId: params.userId,
+          foodName: params.foodName,
+          portionG: params.portionG,
+          mealType: params.mealType,
+          kcal: params.kcal,
+          proteinG: params.proteinG,
+          fatG: params.fatG,
+          carbsG: params.carbsG,
+          nutritionSource: params.nutritionSource,
+          status: "proposed",
+          createdAt: new Date(FIXED_TIMESTAMP).toISOString(),
+        };
+        s.proposals.push(proposal);
+        return proposal;
+      },
+      async get(id: string): Promise<Proposal | undefined> {
+        return s.proposals.find((p) => p.id === id);
+      },
+      async commit(id: string): Promise<Proposal> {
+        const idx = s.proposals.findIndex((p) => p.id === id);
+        if (idx === -1) throw new Error(`Proposal ${id} not found`);
+        if (s.proposals[idx].status !== "proposed") {
+          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
+        }
+        const committed: Proposal = {
+          ...s.proposals[idx],
+          status: "committed",
+        };
+        s.proposals[idx] = committed;
+        return committed;
+      },
+      async decline(id: string): Promise<Proposal> {
+        const idx = s.proposals.findIndex((p) => p.id === id);
+        if (idx === -1) throw new Error(`Proposal ${id} not found`);
+        if (s.proposals[idx].status !== "proposed") {
+          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
+        }
+        const rejected: Proposal = {
+          ...s.proposals[idx],
+          status: "rejected",
+        };
+        s.proposals[idx] = rejected;
+        return rejected;
+      },
+    },
+  };
+}
+
+interface MemMealLedgerState {
+  entries: MealLogEntry[];
+}
+
+function memMealLogStore(state?: MemMealLedgerState): {
+  store: MealLogStore;
+  state: MemMealLedgerState;
+} {
+  const s = state ?? { entries: [] };
+  return {
+    state: s,
+    store: {
+      async insert(params: MealLogInsert): Promise<MealLogEntry> {
+        const entry: MealLogEntry = {
+          id: s.entries.length + 1,
+          userId: params.userId,
+          foodName: params.foodName,
+          portionG: params.portionG,
+          mealType: params.mealType,
+          loggedAt: new Date(FIXED_TIMESTAMP).toISOString(),
+          kcal: params.kcal,
+          proteinG: params.proteinG,
+          fatG: params.fatG,
+          carbsG: params.carbsG,
+          proposalId: params.proposalId,
+        };
+        s.entries.push(entry);
+        return entry;
+      },
+    },
+  };
 }
 
 describe("turn (utterance)", () => {
@@ -996,6 +1109,172 @@ describe("gate verdict events", () => {
     expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
   });
 
+  describe("write-proposal gate verdicts (issue #36)", () => {
+    function makeLogMealResult(
+      overrides: Record<string, unknown> = {},
+    ): string {
+      return JSON.stringify({
+        proposal_id: "proposal-001",
+        message: "Log 200g chicken breast for lunch? — Confirm?",
+        proposal: {
+          id: "proposal-001",
+          food_name: "chicken breast",
+          portion_g: 200,
+          meal_type: "lunch",
+          created_at: "2026-07-05T12:00:00.000Z",
+          nutrition: {
+            kcal: 330,
+            protein_g: 62,
+            fat_g: 7.2,
+            carbs_g: 0,
+          },
+          nutrition_source: "USDA FoodData Central",
+        },
+        nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+        ...overrides,
+      });
+    }
+
+    it("output gate verdict carries write-proposal evidence", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "lunch",
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "Done — I've proposed logging that meal.",
+          stop: true,
+        };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "log 200g chicken breast for lunch",
+      };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events, result } = await collect(turn(input, ports));
+
+      expect(result.stopReason).toBe("write_proposal");
+
+      const outputVerdict = expectGateVerdict(events, "output");
+      expect(outputVerdict.verdict).toBe("pass");
+      expect(outputVerdict.evidence).toContain("Write proposal emitted");
+      expect(outputVerdict.evidence).toContain("user confirmation");
+    });
+
+    it("commit gate verdict documents missing meal ledger mutation on write-proposal", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "dinner",
+                },
+              },
+            ],
+          };
+        }
+        return { content: "Done.", stop: true };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "log chicken breast dinner",
+      };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events, result } = await collect(turn(input, ports));
+
+      expect(result.stopReason).toBe("write_proposal");
+
+      const commitVerdict = expectGateVerdict(events, "commit");
+      expect(commitVerdict.verdict).toBe("pass");
+      expect(commitVerdict.evidence).toContain("no meal ledger mutation");
+      expect(commitVerdict.evidence).toContain(result.proposal?.proposalId);
+    });
+
+    it("commit gate evidence is distinct from blocking evidence", async () => {
+      // Write-proposal pass
+      let callCount = 0;
+      const writePropAdapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Let me log that.",
+            stop: false,
+            toolCalls: [
+              {
+                name: "log_meal",
+                args: {
+                  food_name: "chicken breast",
+                  portion_g: 200,
+                  meal_type: "lunch",
+                },
+              },
+            ],
+          };
+        }
+        return { content: "Done.", stop: true };
+      });
+      const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+      const wpInput: TurnInput = { tag: "utterance", content: "log chicken" };
+      const wpPorts = createPorts(undefined, {
+        adapter: writePropAdapter,
+        tools,
+      });
+
+      const { events: wpEvents } = await collect(turn(wpInput, wpPorts));
+      const wpCommit = expectGateVerdict(wpEvents, "commit");
+
+      // Gate-blocked
+      const blockedAdapter = stubAdapter(() => ({
+        content: "I recommend eating peanuts for protein!",
+        stop: true,
+      }));
+      const blockedInput: TurnInput = { tag: "utterance", content: "protein?" };
+      const blockedPorts = createPorts(undefined, {
+        adapter: blockedAdapter,
+        userContext: { allergies: ["peanut"], medications: [] },
+        interactionStore: { all: async () => [] },
+      });
+
+      const { events: blockedEvents } = await collect(
+        turn(blockedInput, blockedPorts),
+      );
+      const blockedCommit = expectGateVerdict(blockedEvents, "commit");
+
+      // Write-proposal commit evidence talks about proposals, not blocks
+      expect(wpCommit.evidence.toLowerCase()).toContain("proposal");
+      expect(wpCommit.evidence.toLowerCase()).not.toContain("block");
+
+      // Blocked commit evidence talks about blocks, not proposals
+      expect(blockedCommit.evidence.toLowerCase()).toContain("block");
+      expect(blockedCommit.evidence).not.toBe(wpCommit.evidence);
+    });
+  });
   it("scorer sees zero gate blocks when post-gate passes", async () => {
     const adapter = stubAdapter(() => ({
       content: "I recommend chicken for protein!",
@@ -1501,11 +1780,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           ],
         };
       }
-
-      return {
-        content: "I've proposed logging that meal. Please confirm.",
-        stop: true,
-      };
+      return { content: "Done — I've proposed logging that meal.", stop: true };
     });
     const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
     const input: TurnInput = {
@@ -1517,9 +1792,268 @@ describe("write-proposal turn flow (issue #36)", () => {
     const { events, result } = await collect(turn(input, ports));
 
     expect(result.stopReason).toBe("write_proposal");
+    expect(result.proposal).toBeDefined();
     expect(result.proposal?.proposalId).toBe("proposal-001");
     expect(result.proposal?.foodName).toBe("chicken breast");
+    expect(result.proposal?.portionG).toBe(200);
+    expect(result.proposal?.mealType).toBe("lunch");
     expect(result.proposal?.kcal).toBe(330);
+    expect(result.proposal?.proteinG).toBe(62);
+    expect(result.proposal?.fatG).toBe(7.2);
+    expect(result.proposal?.carbsG).toBe(0);
+    expect(result.proposal?.createdAt).toBe("2026-07-05T12:00:00.000Z");
+
+    const endEvent = expectTerminalEvent(events);
+    expect(endEvent.result.stopReason).toBe("write_proposal");
+    expect(endEvent.result.proposal).toEqual(result.proposal);
+  });
+
+  it("the model's final reply is preserved alongside the proposal on the terminal result", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: { food_name: "rice", portion_g: 150, meal_type: "dinner" },
+            },
+          ],
+        };
+      }
+      return {
+        content: "I've proposed 150g rice for your dinner. Confirm?",
+        stop: true,
+      };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = { tag: "utterance", content: "log rice dinner" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.reply).toContain("rice");
+    expect(result.reply).toContain("dinner");
+    expect(result.proposal).toBeDefined();
+  });
+
+  it("event stream includes tool gate verdict for log_meal before write-proposal termination", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Logging...",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            },
+          ],
+        };
+      }
+      return { content: "Done.", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = { tag: "utterance", content: "log chicken" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+
+    const allCheckpoints = gateVerdicts(events).map((e) => e.checkpoint);
+    expect(allCheckpoints).toContain("input");
+    expect(allCheckpoints).toContain("tool");
+    expect(allCheckpoints).toContain("output");
+    expect(allCheckpoints).toContain("commit");
+
+    const toolVerdict = expectGateVerdict(events, "tool");
+    expect(toolVerdict.evidence).toContain("log_meal");
+  });
+
+  it("write_proposal is a recognized STOP_REASONS member", () => {
+    expect(STOP_REASONS).toContain("write_proposal");
+  });
+
+  it("a proposal_confirm turn following a write-proposal turn does not touch the adapter", async () => {
+    // Write-proposal turn
+    let callCount = 0;
+    const wpAdapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Logging...",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            },
+          ],
+        };
+      }
+      return { content: "Done.", stop: true };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const wpInput: TurnInput = { tag: "utterance", content: "log chicken" };
+    const ports = createPorts(undefined, { adapter: wpAdapter, tools });
+
+    const { result: wpResult } = await collect(turn(wpInput, ports));
+    expect(wpResult.stopReason).toBe("write_proposal");
+    expect(wpResult.proposal).toBeDefined();
+
+    // Confirm turn: the adapter is not called; short-circuit handles it
+    let confirmGenerateCalled = false;
+    const confirmPorts = createPorts(() => {
+      confirmGenerateCalled = true;
+      return { content: "should not be used", stop: true };
+    });
+    const confirmInput: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: wpResult.proposal!.proposalId,
+      confirmed: true,
+    };
+
+    const { result: confirmResult } = await collect(
+      turn(confirmInput, confirmPorts),
+    );
+
+    expect(confirmGenerateCalled).toBe(false);
+    expect(confirmResult.reply).toContain("confirmed");
+  });
+
+  it("only log_meal tool calls trigger write-proposal; other tools do not override stopReason", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+        };
+      }
+      return { content: "Chicken has 31g protein per 100g.", stop: true };
+    });
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    // search_food is not log_meal, so stopReason stays as end_turn (not write_proposal)
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.proposal).toBeUndefined();
+  });
+
+  it("log_meal with malformed response falls through to end_turn (parseWriteProposalData returns undefined)", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: { food_name: "chicken", portion_g: 150 },
+            },
+          ],
+        };
+      }
+      return { content: "Something went wrong with the meal log.", stop: true };
+    });
+    // Return malformed JSON — missing the proposal field entirely
+    const tools = new Map([
+      ["log_meal", async () => JSON.stringify({ error: "internal failure" })],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "log 150g chicken" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    // parseWriteProposalData returns undefined for malformed response,
+    // so the turn falls through to normal end_turn — no proposal override
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.proposal).toBeUndefined();
+    expect(result.reply).toContain("wrong");
+  });
+
+  it("multiple log_meal calls in one turn capture only the last proposal", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log the chicken.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: { food_name: "chicken breast", portion_g: 200 },
+            },
+          ],
+        };
+      }
+      if (callCount === 2) {
+        return {
+          content: "Now let me also log the rice.",
+          stop: false,
+          toolCalls: [
+            { name: "log_meal", args: { food_name: "rice", portion_g: 150 } },
+          ],
+        };
+      }
+      return { content: "Both meals proposed.", stop: true };
+    });
+    const tools = new Map([
+      [
+        "log_meal",
+        async (args: Record<string, unknown>) => {
+          if (args["food_name"] === "chicken breast") {
+            return makeLogMealResult({
+              proposal_id: "proposal-chicken",
+              proposal: {
+                id: "proposal-chicken",
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            });
+          }
+          return makeLogMealResult();
+        },
+      ],
+    ]);
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "log chicken and rice",
+    };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // The last proposal (rice) should be the one captured
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.proposal).toBeDefined();
+    expect(result.proposal?.proposalId).toBe("proposal-001");
     expect(expectTerminalEvent(events).result).toEqual(result);
 
     const commitVerdict = expectGateVerdict(events, "commit");
@@ -1575,5 +2109,723 @@ describe("write-proposal turn flow (issue #36)", () => {
 
     expect(result.stopReason).toBe("gate_blocked");
     expect(result.proposal).toBeUndefined();
+  });
+});
+
+// ── Proposal commit short-circuit (issue #37 / PRD v2 §3.4 / ADD Phase 3) ─
+
+const SESSION_USER_A = "user-a-0001";
+const SESSION_USER_B = "user-b-0002";
+
+describe("proposal commit short-circuit (issue #37)", () => {
+  it("commits a confirmed proposal and writes a meal ledger row referencing the proposal id", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    // First, store a proposal (simulating what log_meal does)
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Now confirm it
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Result is a confirmation reply
+    expect(result.reply).toContain("confirmed");
+    expect(result.steps).toBe(0);
+    expect(result.stopReason).toBe("end_turn");
+
+    // Proposal status is now "committed"
+    expect(proposalState.proposals[0].status).toBe("committed");
+
+    // Meal ledger has one row
+    expect(mealLedgerState.entries.length).toBe(1);
+    const entry = mealLedgerState.entries[0];
+    expect(entry.userId).toBe(SESSION_USER_A);
+    expect(entry.foodName).toBe("chicken breast");
+    expect(entry.portionG).toBe(200);
+    expect(entry.mealType).toBe("lunch");
+    expect(entry.kcal).toBe(330);
+    expect(entry.proteinG).toBe(62);
+    expect(entry.fatG).toBe(7.2);
+    expect(entry.carbsG).toBe(0);
+    // The meal ledger row references the committed proposal id
+    expect(entry.proposalId).toBe(proposal.id);
+
+    // Commit gate verdict passes
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("pass");
+    expect(commitVerdict.evidence).toContain("committed");
+    expect(commitVerdict.evidence).toContain("meal ledger");
+    expect(commitVerdict.evidence).toContain(proposal.id);
+  });
+
+  it("emits input and commit gate verdicts (no tool/output) for proposal confirmation", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "rice",
+      portionG: 150,
+      mealType: "dinner",
+      kcal: 195,
+      proteinG: 4,
+      fatG: 0.4,
+      carbsG: 43,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    const checkpoints = gateVerdicts(events).map((e) => e.checkpoint);
+    expect(checkpoints).toContain("input");
+    expect(checkpoints).toContain("commit");
+    expect(checkpoints).not.toContain("tool");
+    expect(checkpoints).not.toContain("output");
+  });
+
+  it("blocks confirmation when the proposal belongs to a different user", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    // User A creates the proposal
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "salmon",
+      portionG: 150,
+      mealType: "dinner",
+      kcal: 312,
+      proteinG: 30,
+      fatG: 20,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // User B tries to confirm it
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_B,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: wrong user
+    expect(result.reply).toContain("different user");
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.steps).toBe(0);
+
+    // Proposal status unchanged (still "proposed")
+    expect(proposalState.proposals[0].status).toBe("proposed");
+
+    // No meal ledger mutation occurred
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate verdict blocks with evidence
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("belongs to user");
+    expect(commitVerdict.evidence).toContain(SESSION_USER_A);
+    expect(commitVerdict.evidence).toContain(SESSION_USER_B);
+  });
+
+  it("rejects repeated confirmation of an already committed proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    // Store and commit a proposal
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "egg",
+      portionG: 100,
+      mealType: "breakfast",
+      kcal: 143,
+      proteinG: 12.6,
+      fatG: 9.5,
+      carbsG: 0.7,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // First confirmation: succeeds
+    const confirmInput: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const confirmPorts = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { result: firstResult } = await collect(
+      turn(confirmInput, confirmPorts),
+    );
+    expect(firstResult.reply).toContain("confirmed");
+    expect(proposalState.proposals[0].status).toBe("committed");
+    expect(mealLedgerState.entries.length).toBe(1);
+
+    // Second confirmation: blocked (already committed)
+    const secondPorts = createPorts(() => ({ content: "unused", stop: true }), {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(confirmInput, secondPorts));
+
+    // Blocked: already committed
+    expect(result.reply).toContain("already committed");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No additional meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(1);
+
+    // Commit gate verdict blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("committed");
+  });
+
+  it("returns error gate verdict when proposal is not found", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "nonexistent-id",
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Error: not found
+    expect(result.reply).toContain("not found");
+    expect(result.stopReason).toBe("end_turn");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate verdict is error
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("error");
+    expect(commitVerdict.evidence).toContain("not found");
+  });
+
+  it("explicitly rejects a proposal when confirmed is false and updates status to rejected", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    // Create a proposal
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "pasta",
+      portionG: 250,
+      mealType: "dinner",
+      kcal: 328,
+      proteinG: 12,
+      fatG: 1.5,
+      carbsG: 65,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Reject it
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: false,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Rejection reply
+    expect(result.reply).toContain("rejected");
+    expect(result.steps).toBe(0);
+    expect(result.stopReason).toBe("end_turn");
+
+    // Proposal status updated to "rejected"
+    expect(proposalState.proposals[0].status).toBe("rejected");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate verdict passes (explicit rejection is a valid outcome)
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("pass");
+    expect(commitVerdict.evidence).toContain("rejected");
+  });
+
+  it("does not call the adapter even when stores are wired for commit", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "tofu",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 152,
+      proteinG: 16,
+      fatG: 8,
+      carbsG: 4,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    let generateCalled = false;
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(
+      () => {
+        generateCalled = true;
+        return { content: "unused", stop: true };
+      },
+      {
+        proposalStore,
+        mealLogStore,
+        sessionUserId: SESSION_USER_A,
+      },
+    );
+
+    await collect(turn(input, ports));
+
+    // Adapter was never called — proposal_confirm always short-circuits
+    expect(generateCalled).toBe(false);
+  });
+
+  it("backward compat: falls back to legacy reply when stores are not wired", async () => {
+    // When proposalStore / mealLogStore / sessionUserId are absent,
+    // the turn should still produce a confirmation reply without stores.
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "meal-log-42",
+      confirmed: true,
+    };
+    const ports = createPorts(); // No stores wired
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.reply).toContain("confirmed");
+    expect(result.steps).toBe(0);
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("backward compat: rejection reply works without stores wired", async () => {
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "meal-log-42",
+      confirmed: false,
+    };
+    const ports = createPorts(); // No stores wired
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.reply).toContain("rejected");
+    expect(result.steps).toBe(0);
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("backward compat: feedback is preserved in confirmation reply without stores wired", async () => {
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "meal-log-42",
+      confirmed: true,
+      feedback: "Looks good!",
+    };
+    const ports = createPorts(); // No stores wired
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.reply).toContain("confirmed");
+    expect(result.reply).toContain("Looks good!");
+    expect(result.steps).toBe(0);
+  });
+
+  it("scorer detects block on cross-user confirmation attempt", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_B, // Different user
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    // Scorer should detect the block via gate verdict events
+    expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("scorer sees zero blocks on successful commit", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events } = await collect(turn(input, ports));
+
+    expect(countBlockedGateVerdicts(events)).toBe(0);
+  });
+
+  it("rejects confirmation of an already rejected proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "bread",
+      portionG: 60,
+      mealType: "breakfast",
+      kcal: 159,
+      proteinG: 5.3,
+      fatG: 2,
+      carbsG: 30,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // First, reject it
+    await proposalStore.decline(proposal.id);
+    expect(proposalState.proposals[0].status).toBe("rejected");
+
+    // Now try to confirm the rejected proposal
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: already rejected
+    expect(result.reply).toContain("already rejected");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("rejected");
+  });
+
+  it("rejects confirmation of a voided proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "apple",
+      portionG: 180,
+      mealType: "snack",
+      kcal: 94,
+      proteinG: 0.5,
+      fatG: 0.3,
+      carbsG: 25,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Manually void the proposal (simulating void via store)
+    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
+    proposalState.proposals[idx] = {
+      ...proposalState.proposals[idx],
+      status: "voided",
+    };
+
+    // Try to confirm the voided proposal
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: voided
+    expect(result.reply).toContain("already voided");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("voided");
+  });
+
+  it("rejects confirmation of an expired proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "yogurt",
+      portionG: 200,
+      mealType: "snack",
+      kcal: 122,
+      proteinG: 10,
+      fatG: 4,
+      carbsG: 12,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Manually expire the proposal (simulating time-based expiry)
+    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
+    proposalState.proposals[idx] = {
+      ...proposalState.proposals[idx],
+      status: "expired",
+    };
+
+    // Try to confirm the expired proposal
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: expired
+    expect(result.reply).toContain("already expired");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("expired");
+  });
+
+  it("rejects confirmation of a superseded proposal", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "rice",
+      portionG: 150,
+      mealType: "dinner",
+      kcal: 195,
+      proteinG: 4,
+      fatG: 0.4,
+      carbsG: 43,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Manually supersede the proposal (simulating supersede-on-edit)
+    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
+    proposalState.proposals[idx] = {
+      ...proposalState.proposals[idx],
+      status: "superseded",
+    };
+
+    // Try to confirm the superseded proposal
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: superseded
+    expect(result.reply).toContain("already superseded");
+    expect(result.reply).toContain("cannot be confirmed");
+
+    // No meal ledger mutation
+    expect(mealLedgerState.entries.length).toBe(0);
+
+    // Commit gate blocks
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("superseded");
+  });
+
+  it("meal ledger row carries stored proposal content, not regenerated model output", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+
+    // Store a proposal with specific resolved nutrition values
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "oatmeal",
+      portionG: 250,
+      mealType: "breakfast",
+      kcal: 178,
+      proteinG: 6.5,
+      fatG: 3.5,
+      carbsG: 32,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    // Confirm it — no model call happens
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    await collect(turn(input, ports));
+
+    // The meal ledger row's data comes from the stored proposal, not from any model
+    const entry = mealLedgerState.entries[0];
+    expect(entry.foodName).toBe(proposal.foodName);
+    expect(entry.portionG).toBe(proposal.portionG);
+    expect(entry.mealType).toBe(proposal.mealType);
+    expect(entry.kcal).toBe(proposal.kcal);
+    expect(entry.proteinG).toBe(proposal.proteinG);
+    expect(entry.fatG).toBe(proposal.fatG);
+    expect(entry.carbsG).toBe(proposal.carbsG);
+    expect(entry.proposalId).toBe(proposal.id);
+    expect(entry.userId).toBe(proposal.userId);
+  });
+
+  it("feedback is preserved in confirmation reply even when stores are wired", async () => {
+    const { store: proposalStore } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+    });
+
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: true,
+      feedback: "Please use olive oil instead of butter.",
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_A,
+    });
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.reply).toContain("confirmed");
+    expect(result.reply).toContain("olive oil");
   });
 });
