@@ -19,10 +19,7 @@ function makeObservation(
   };
 }
 
-function typedOutput(
-  prose: string,
-  extra?: Partial<TypedOutput>,
-): TypedOutput {
+function typedOutput(prose: string, extra?: Partial<TypedOutput>): TypedOutput {
   return {
     prose,
     foodRefs: extra?.foodRefs ?? [],
@@ -70,7 +67,9 @@ const CHICKEN_COLUMNS: ColumnDef[] = [
 describe("checkNumericProvenance", () => {
   it("passes when prose contains no numbers with units", () => {
     const result = checkNumericProvenance({
-      output: typedOutput("Based on your profile, here are some recommendations."),
+      output: typedOutput(
+        "Based on your profile, here are some recommendations.",
+      ),
       observations: [],
     });
 
@@ -263,10 +262,17 @@ describe("checkNumericProvenance", () => {
 
   it("handles unit normalization: 165000 cal observation with 165 kcal prose", () => {
     const columns: ColumnDef[] = [
-      { name: "energy_cal", type: "number", unit: "cal", description: "Energy" },
+      {
+        name: "energy_cal",
+        type: "number",
+        unit: "cal",
+        description: "Energy",
+      },
     ];
 
-    const obs = makeObservation("food_lookup", columns, [{ energy_cal: 165000 }]);
+    const obs = makeObservation("food_lookup", columns, [
+      { energy_cal: 165000 },
+    ]);
 
     // Prose uses kcal (common household unit), observation uses cal
     const result = checkNumericProvenance({

@@ -92,12 +92,21 @@ interface ExtractedNumber {
  * so we pre-compile the unit set to check matches.
  */
 const NUTRITION_UNITS = [
-  "g", "mg", "kg",
-  "kcal", "cal", "calories", "calorie",
-  "oz", "lb",
-  "ml", "L",
-  "cup", "cups",
-  "tbsp", "tsp",
+  "g",
+  "mg",
+  "kg",
+  "kcal",
+  "cal",
+  "calories",
+  "calorie",
+  "oz",
+  "lb",
+  "ml",
+  "L",
+  "cup",
+  "cups",
+  "tbsp",
+  "tsp",
 ];
 
 // Build unit alternation for the regex.
@@ -186,7 +195,8 @@ function valuesClose(
   if (observedValue === 0) {
     return Math.abs(proseValue - observedValue) <= 0.01;
   }
-  const relativeDiff = Math.abs(proseValue - observedValue) / Math.abs(observedValue);
+  const relativeDiff =
+    Math.abs(proseValue - observedValue) / Math.abs(observedValue);
   return relativeDiff <= tolerance;
 }
 
@@ -210,11 +220,7 @@ function findMatchingObservation(
     if (proseUnit && obs.unit) {
       const proseBase = toBaseUnits(proseValue, proseUnit);
       const obsBase = toBaseUnits(obs.value, obs.unit);
-      if (
-        proseBase &&
-        obsBase &&
-        proseBase.baseUnit === obsBase.baseUnit
-      ) {
+      if (proseBase && obsBase && proseBase.baseUnit === obsBase.baseUnit) {
         if (valuesClose(proseBase.baseValue, obsBase.baseValue, tolerance)) {
           return obs;
         }

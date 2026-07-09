@@ -9,7 +9,7 @@
     "lint": "next lint",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude **/.sandcastle/**",
     "eval": "npx tsx src/eval/index.ts"
   },
   "devDependencies": {

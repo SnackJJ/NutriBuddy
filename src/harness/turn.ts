@@ -2,7 +2,13 @@
 // Schema version follows SemVer for event-shape changes.
 
 import { run, type RunTurnInput } from "./loop";
-import type { AgentEvent, ChatMessage, TerminalResult, TypedOutput } from "./types";
+import type {
+  AgentEvent,
+  ChatMessage,
+  TerminalResult,
+  TypedOutput,
+  WriteProposalData,
+} from "./types";
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
 import type { Observation } from "../catalog/queryCatalog";
@@ -11,6 +17,7 @@ export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
 export const SCHEMA_VERSION = "1.3.0";
+const QUERY_CATALOG_TOOL = "query_catalog";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
 
@@ -162,9 +169,7 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
 /** Max retry attempts for output gate sub-checks (numeric provenance + advisory). */
 const MAX_OUTPUT_GATE_RETRIES = 2;
 
-function buildOutputGateFeedback(
-  reasons: readonly string[],
-): string {
+function buildOutputGateFeedback(reasons: readonly string[]): string {
   return (
     `Your response was BLOCKED by safety checks:\n${reasons.map((r) => `  - ${r}`).join("\n")}\n\n` +
     `Please regenerate your response. Make absolutely sure all numeric facts ` +
@@ -181,14 +186,100 @@ function outputGateRefusalReply(reasons: readonly string[]): string {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isObservationQueryResult(value: unknown): value is {
+  readonly type: "observation";
+  readonly observation: Observation;
+} {
+  return (
+    isRecord(value) && value.type === "observation" && "observation" in value
+  );
+}
+
+function parseQueryCatalogObservation(result: string): Observation | null {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (!isObservationQueryResult(parsed)) {
+      return null;
+    }
+
+    return parsed.observation;
+  } catch {
+    return null;
+  }
+}
+
+function readString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+export function parseWriteProposalData(
+  toolResult: string,
+): WriteProposalData | undefined {
+  try {
+    const parsed: unknown = JSON.parse(toolResult);
+    if (!isRecord(parsed) || !isRecord(parsed.proposal)) {
+      return undefined;
+    }
+
+    const proposal = parsed.proposal;
+    const proposalId = readString(proposal, "id");
+    const foodName = readString(proposal, "food_name");
+    const portionG = readNumber(proposal, "portion_g");
+    const mealType = readString(proposal, "meal_type");
+    if (!proposalId || !foodName || portionG === undefined || !mealType) {
+      return undefined;
+    }
+
+    const nutrition = isRecord(proposal.nutrition) ? proposal.nutrition : {};
+    return {
+      proposalId,
+      foodName,
+      portionG,
+      mealType,
+      kcal: readNumber(nutrition, "kcal"),
+      proteinG: readNumber(nutrition, "protein_g"),
+      fatG: readNumber(nutrition, "fat_g"),
+      carbsG: readNumber(nutrition, "carbs_g"),
+      nutritionSource: readString(proposal, "nutrition_source") ?? "",
+      createdAt: readString(proposal, "created_at") ?? "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+interface UtteranceTurnOutput {
+  readonly result: TurnResult;
+  readonly writeProposal?: WriteProposalData;
+}
+
 async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
-): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
-  const observations = ports.observations ?? [];
+): AsyncGenerator<AnyTurnEvent, UtteranceTurnOutput, undefined> {
+  const observations = [...(ports.observations ?? [])];
   const conflicts = ports.conflicts ?? [];
   let result: TurnResult | undefined;
+  let lastWriteProposalData: WriteProposalData | undefined;
   let outputGateFailReasons: string[] = [];
 
   for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
@@ -225,6 +316,21 @@ async function* runUtteranceTurn(
           },
           nextMetadata,
         );
+
+        if (next.value.toolResult.name === QUERY_CATALOG_TOOL) {
+          const observation = parseQueryCatalogObservation(
+            next.value.toolResult.result,
+          );
+          if (observation) {
+            observations.push(observation);
+          }
+        }
+
+        if (next.value.toolResult.name === "log_meal") {
+          lastWriteProposalData = parseWriteProposalData(
+            next.value.toolResult.result,
+          );
+        }
       }
 
       next = await gen.next();
@@ -242,14 +348,10 @@ async function* runUtteranceTurn(
       break;
     }
 
-    // Run numeric provenance check (only when observations were collected)
-    const numericResult =
-      observations.length > 0
-        ? checkNumericProvenance({
-            output: result.output,
-            observations,
-          })
-        : { passed: true, reasons: [] as readonly string[] };
+    const numericResult = checkNumericProvenance({
+      output: result.output,
+      observations,
+    });
 
     yield createGateVerdictEvent(
       {
@@ -277,8 +379,7 @@ async function* runUtteranceTurn(
         verdict: advisoryResult.passed ? "pass" : "block",
         checkName: "output_advisory_structure",
         evidence:
-          advisoryResult.reasons.join("; ") ||
-          "Advisory structure valid",
+          advisoryResult.reasons.join("; ") || "Advisory structure valid",
       },
       nextMetadata,
     );
@@ -295,6 +396,12 @@ async function* runUtteranceTurn(
     ];
 
     if (attempt >= MAX_OUTPUT_GATE_RETRIES) {
+      ports.tracer.record({
+        step: result.steps,
+        type: "gate_block",
+        payload: outputGateFailReasons.join("; "),
+      });
+
       // Retries exhausted — refuse
       result = {
         reply: outputGateRefusalReply(outputGateFailReasons),
@@ -307,7 +414,7 @@ async function* runUtteranceTurn(
     // Will retry — feedback injected at top of next iteration
   }
 
-  return result!;
+  return { result: result!, writeProposal: lastWriteProposalData };
 }
 
 function createRunTurnInput(
@@ -383,20 +490,39 @@ export async function* turn(
   );
 
   let result: TurnResult;
+  let writeProposal: WriteProposalData | undefined;
 
   switch (input.tag) {
-    case "utterance":
-      result = yield* runUtteranceTurn(input, ports, nextMetadata);
+    case "utterance": {
+      const utteranceOutput = yield* runUtteranceTurn(
+        input,
+        ports,
+        nextMetadata,
+      );
+      result = utteranceOutput.result;
+      writeProposal = utteranceOutput.writeProposal;
       break;
+    }
     case "proposal_confirm":
       result = createProposalConfirmResult(input);
       break;
   }
 
+  if (writeProposal && result.stopReason !== "gate_blocked") {
+    result = {
+      ...result,
+      stopReason: "write_proposal",
+      proposal: writeProposal,
+    };
+  }
+
   const isGateBlocked = result.stopReason === "gate_blocked";
+  const isWriteProposal = result.stopReason === "write_proposal";
   const outputEvidence = isGateBlocked
     ? extractGateEvidence(ports.tracer)
-    : "Output passed safety checks";
+    : isWriteProposal
+      ? "Write proposal emitted — awaiting user confirmation"
+      : "Output passed safety checks";
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
@@ -417,7 +543,9 @@ export async function* turn(
       checkName: "commit_gate_check",
       evidence: isGateBlocked
         ? outputEvidence
-        : "Response committed successfully",
+        : isWriteProposal
+          ? `Proposal ${writeProposal?.proposalId ?? ""} stored — no meal ledger mutation occurred`
+          : "Response committed successfully",
     },
     nextMetadata,
   );

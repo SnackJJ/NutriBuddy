@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SCHEMA_VERSION,
   consumeTurn,
+  parseWriteProposalData,
   turn,
   type AnyTurnEvent,
   type TurnEndEvent,
@@ -627,7 +628,31 @@ describe("typed final output contract", () => {
       ],
       ruleRefs: [],
     } satisfies TypedOutput;
-    const ports = createTypedOutputPorts(output);
+    const ports = createPorts(
+      () => ({
+        content: output.prose,
+        stop: true,
+        output,
+      }),
+      {
+        observations: [
+          {
+            templateId: "food_lookup",
+            columns: [
+              {
+                name: "protein_g",
+                type: "number",
+                unit: "g",
+                description: "Protein",
+              },
+            ],
+            rows: [{ protein_g: 6 }],
+            rowCount: 1,
+            truncated: false,
+          },
+        ],
+      },
+    );
     const input: TurnInput = { tag: "utterance", content: "egg protein?" };
 
     const { result } = await collect(turn(input, ports));
@@ -689,7 +714,32 @@ describe("typed final output contract", () => {
       ["search_food", async () => "chicken: 31g protein/100g"],
     ]);
     const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
-    const ports = createPorts(undefined, { adapter, tools });
+    const ports = createPorts(undefined, {
+      adapter,
+      tools,
+      observations: [
+        {
+          templateId: "food_lookup",
+          columns: [
+            {
+              name: "protein_g",
+              type: "number",
+              unit: "g",
+              description: "Protein",
+            },
+            {
+              name: "portion_g",
+              type: "number",
+              unit: "g",
+              description: "Portion size",
+            },
+          ],
+          rows: [{ protein_g: 31, portion_g: 100 }],
+          rowCount: 1,
+          truncated: false,
+        },
+      ],
+    });
 
     const { events, result } = await collect(turn(input, ports));
 
@@ -973,7 +1023,7 @@ describe("output gate — numeric provenance and advisory structure", () => {
     return {
       templateId,
       columns,
-      rows: rows as any,
+      rows: rows as Observation["rows"],
       rowCount: rows.length,
       truncated: false,
     };
@@ -982,7 +1032,12 @@ describe("output gate — numeric provenance and advisory structure", () => {
   const CHICKEN_COLUMNS: ColumnDef[] = [
     { name: "food_id", type: "string", description: "Catalog food ID" },
     { name: "food_name", type: "string", description: "Canonical name" },
-    { name: "portion_g", type: "number", unit: "g", description: "Portion size" },
+    {
+      name: "portion_g",
+      type: "number",
+      unit: "g",
+      description: "Portion size",
+    },
     { name: "kcal", type: "number", unit: "kcal", description: "Calories" },
     { name: "protein_g", type: "number", unit: "g", description: "Protein" },
     { name: "fat_g", type: "number", unit: "g", description: "Fat" },
@@ -1022,15 +1077,21 @@ describe("output gate — numeric provenance and advisory structure", () => {
   };
 
   it("emits passing output_numeric_provenance and output_advisory_structure gate verdicts for clean output", async () => {
-    const ports = createPorts(() => ({
-      content: CLEAN_CHICKEN_OUTPUT.prose,
-      stop: true,
-      output: CLEAN_CHICKEN_OUTPUT,
-    }), {
-      observations: [CHICKEN_OBSERVATION],
-      conflicts: [],
-    });
-    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+    const ports = createPorts(
+      () => ({
+        content: CLEAN_CHICKEN_OUTPUT.prose,
+        stop: true,
+        output: CLEAN_CHICKEN_OUTPUT,
+      }),
+      {
+        observations: [CHICKEN_OBSERVATION],
+        conflicts: [],
+      },
+    );
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "chicken nutrition?",
+    };
 
     const { events } = await collect(turn(input, ports));
 
@@ -1043,7 +1104,9 @@ describe("output gate — numeric provenance and advisory structure", () => {
 
     expect(numericVerdict).toBeDefined();
     expect(numericVerdict!.verdict).toBe("pass");
-    expect(numericVerdict!.evidence).toContain("All numeric facts trace to observations");
+    expect(numericVerdict!.evidence).toContain(
+      "All numeric facts trace to observations",
+    );
 
     expect(advisoryVerdict).toBeDefined();
     expect(advisoryVerdict!.verdict).toBe("pass");
@@ -1063,14 +1126,20 @@ describe("output gate — numeric provenance and advisory structure", () => {
       ruleRefs: [],
     };
 
-    const ports = createPorts(() => ({
-      content: badOutput.prose,
-      stop: true,
-      output: badOutput,
-    }), {
-      observations: [CHICKEN_OBSERVATION],
-    });
-    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+    const ports = createPorts(
+      () => ({
+        content: badOutput.prose,
+        stop: true,
+        output: badOutput,
+      }),
+      {
+        observations: [CHICKEN_OBSERVATION],
+      },
+    );
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "chicken nutrition?",
+    };
 
     const { events, result } = await collect(turn(input, ports));
 
@@ -1099,13 +1168,16 @@ describe("output gate — numeric provenance and advisory structure", () => {
       ruleRefs: [], // missing advisory for peanut allergy
     };
 
-    const ports = createPorts(() => ({
-      content: badOutput.prose,
-      stop: true,
-      output: badOutput,
-    }), {
-      conflicts: [PEANUT_CONFLICT],
-    });
+    const ports = createPorts(
+      () => ({
+        content: badOutput.prose,
+        stop: true,
+        output: badOutput,
+      }),
+      {
+        conflicts: [PEANUT_CONFLICT],
+      },
+    );
     const input: TurnInput = { tag: "utterance", content: "protein sources?" };
 
     const { events, result } = await collect(turn(input, ports));
@@ -1117,7 +1189,7 @@ describe("output gate — numeric provenance and advisory structure", () => {
     expect(result.stopReason).toBe("gate_blocked");
   });
 
-  it("skips numeric provenance gate when no observations are provided", async () => {
+  it("blocks numeric provenance gate when no observations ground prose numbers", async () => {
     const output: TypedOutput = {
       prose: "Eggs have about 6g of protein per large egg.",
       foodRefs: [
@@ -1140,15 +1212,14 @@ describe("output gate — numeric provenance and advisory structure", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Should pass — numeric gate skipped when no observations
-    expect(result.stopReason).toBe("end_turn");
+    expect(result.stopReason).toBe("gate_blocked");
 
     const numericVerdict = gateVerdicts(events).find(
       (gv) => gv.checkName === "output_numeric_provenance",
     );
     expect(numericVerdict).toBeDefined();
-    expect(numericVerdict!.verdict).toBe("pass");
-    expect(numericVerdict!.evidence).toContain("skipped");
+    expect(numericVerdict!.verdict).toBe("block");
+    expect(numericVerdict!.evidence).toContain("Ungrounded numeric fact");
   });
 
   it("retries then refuses when numeric provenance persistently fails", async () => {
@@ -1165,14 +1236,20 @@ describe("output gate — numeric provenance and advisory structure", () => {
       ruleRefs: [],
     };
 
-    const ports = createPorts(() => ({
-      content: badOutput.prose,
-      stop: true,
-      output: badOutput,
-    }), {
-      observations: [CHICKEN_OBSERVATION],
-    });
-    const input: TurnInput = { tag: "utterance", content: "chicken nutrition?" };
+    const ports = createPorts(
+      () => ({
+        content: badOutput.prose,
+        stop: true,
+        output: badOutput,
+      }),
+      {
+        observations: [CHICKEN_OBSERVATION],
+      },
+    );
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "chicken nutrition?",
+    };
 
     const { events, result } = await collect(turn(input, ports));
 
@@ -1190,7 +1267,8 @@ describe("output gate — numeric provenance and advisory structure", () => {
 
   it("passes when observations ground all numbers and conflicts have advisory ruleRefs (combined pass)", async () => {
     const cleanOutput: TypedOutput = {
-      prose: "Based on your profile, I recommend salmon. Note: 20g protein and 208 kcal.",
+      prose:
+        "Based on your profile, I recommend salmon. Note: 20g protein and 208 kcal.",
       foodRefs: [
         {
           foodId: "salmon-001",
@@ -1226,14 +1304,17 @@ describe("output gate — numeric provenance and advisory structure", () => {
       description: "Warfarin interacts with vitamin K",
     };
 
-    const ports = createPorts(() => ({
-      content: cleanOutput.prose,
-      stop: true,
-      output: cleanOutput,
-    }), {
-      observations: [salmonObs],
-      conflicts: [warfarinConflict],
-    });
+    const ports = createPorts(
+      () => ({
+        content: cleanOutput.prose,
+        stop: true,
+        output: cleanOutput,
+      }),
+      {
+        observations: [salmonObs],
+        conflicts: [warfarinConflict],
+      },
+    );
     const input: TurnInput = { tag: "utterance", content: "healthy dinner?" };
 
     const { events, result } = await collect(turn(input, ports));
@@ -1316,19 +1397,26 @@ describe("output gate — numeric provenance and advisory structure", () => {
 
   it("advisory gate passes when conflicts exist but output makes no food recommendations", async () => {
     const output: TypedOutput = {
-      prose: "I understand you have a peanut allergy. How can I help you today?",
+      prose:
+        "I understand you have a peanut allergy. How can I help you today?",
       foodRefs: [],
       ruleRefs: [],
     };
 
-    const ports = createPorts(() => ({
-      content: output.prose,
-      stop: true,
-      output,
-    }), {
-      conflicts: [PEANUT_CONFLICT],
-    });
-    const input: TurnInput = { tag: "utterance", content: "snack suggestions?" };
+    const ports = createPorts(
+      () => ({
+        content: output.prose,
+        stop: true,
+        output,
+      }),
+      {
+        conflicts: [PEANUT_CONFLICT],
+      },
+    );
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "snack suggestions?",
+    };
 
     const { events, result } = await collect(turn(input, ports));
 
@@ -1337,5 +1425,155 @@ describe("output gate — numeric provenance and advisory structure", () => {
       (gv) => gv.checkName === "output_advisory_structure",
     );
     expect(advisoryVerdict!.verdict).toBe("pass");
+  });
+});
+
+describe("write-proposal turn flow (issue #36)", () => {
+  function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      proposal_id: "proposal-001",
+      message: "Log 200g chicken breast for lunch? Confirm?",
+      proposal: {
+        id: "proposal-001",
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+        created_at: "2026-07-05T12:00:00.000Z",
+        nutrition: {
+          kcal: 330,
+          protein_g: 62,
+          fat_g: 7.2,
+          carbs_g: 0,
+        },
+        nutrition_source: "USDA FoodData Central",
+      },
+      nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
+      ...overrides,
+    });
+  }
+
+  it("parses resolved proposal data from a log_meal response", () => {
+    const data = parseWriteProposalData(makeLogMealResult());
+
+    expect(data).toEqual({
+      proposalId: "proposal-001",
+      foodName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+      createdAt: "2026-07-05T12:00:00.000Z",
+    });
+  });
+
+  it("returns undefined for malformed proposal tool responses", () => {
+    expect(parseWriteProposalData("not json")).toBeUndefined();
+    expect(
+      parseWriteProposalData(JSON.stringify({ error: "failed" })),
+    ).toBeUndefined();
+    expect(
+      parseWriteProposalData(
+        JSON.stringify({ proposal: { id: "proposal-001" } }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("ends successful log_meal turns with write_proposal terminal data", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that meal.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: {
+                food_name: "chicken breast",
+                portion_g: 200,
+                meal_type: "lunch",
+              },
+            },
+          ],
+        };
+      }
+
+      return {
+        content: "I've proposed logging that meal. Please confirm.",
+        stop: true,
+      };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "log 200g chicken breast for lunch",
+    };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("write_proposal");
+    expect(result.proposal?.proposalId).toBe("proposal-001");
+    expect(result.proposal?.foodName).toBe("chicken breast");
+    expect(result.proposal?.kcal).toBe(330);
+    expect(expectTerminalEvent(events).result).toEqual(result);
+
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("pass");
+    expect(commitVerdict.evidence).toContain("no meal ledger mutation");
+  });
+
+  it("recognizes write_proposal as a terminal stop reason", () => {
+    expect(STOP_REASONS).toContain("write_proposal");
+  });
+
+  it("does not let a captured proposal override an output gate block", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Let me log that meal.",
+          stop: false,
+          toolCalls: [
+            {
+              name: "log_meal",
+              args: { food_name: "chicken breast", portion_g: 200 },
+            },
+          ],
+        };
+      }
+
+      return {
+        content: "Chicken breast has 999g protein.",
+        stop: true,
+        output: {
+          prose: "Chicken breast has 999g protein.",
+          foodRefs: [
+            {
+              foodId: "chicken-breast-001",
+              foodName: "Chicken breast, raw",
+              matchType: "exact" as const,
+            },
+          ],
+          ruleRefs: [],
+        },
+      };
+    });
+    const tools = new Map([["log_meal", async () => makeLogMealResult()]]);
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "log chicken and tell me protein",
+    };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.proposal).toBeUndefined();
   });
 });

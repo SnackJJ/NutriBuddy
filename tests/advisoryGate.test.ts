@@ -7,10 +7,7 @@ import type { TypedOutput } from "../src/harness/turn";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function typedOutput(
-  prose: string,
-  extra?: Partial<TypedOutput>,
-): TypedOutput {
+function typedOutput(prose: string, extra?: Partial<TypedOutput>): TypedOutput {
   return {
     prose,
     foodRefs: extra?.foodRefs ?? [],

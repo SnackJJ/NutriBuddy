@@ -1,25 +1,58 @@
-// log_meal 工具处理器（issue #14 / PRD v2 §3.1「ToolRegistry」）。
+// log_meal 工具处理器（issue #14 / PRD v2 §3.1「ToolRegistry」/ issue #36）。
 //
-// 记录用户的一餐到 Supabase：接受食物名称 + 份量 + 用餐时间，调用
-// get_food_nutrition 获取营养数据，存入 meal_logs 表，返回确认消息 + 营养摘要。
+// Proposal-only writes: resolves food entities and computes nutrition
+// server-side, then stores an immutable proposal rather than a meal ledger
+// row. The turn ends with a write-proposal terminal event; the user confirms
+// in a later turn before any mutation occurs.
 //
-// 所有副作用依赖（营养查询 / 存储）皆可注入，单测不触网。
+// 所有副作用依赖（营养查询 / 提案存储）皆可注入，单测不触网。
 
 import type { ToolHandler } from "./types";
 import type { GetFoodNutrition } from "./foodNutrition";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
-const VALID_MEAL_TYPES = new Set([
-  "breakfast",
-  "lunch",
-  "dinner",
-  "snack",
-]);
+const VALID_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
 
 const DEFAULT_MEAL_TYPE = "snack";
 
-// ─── 存储端口 ─────────────────────────────────────────────────────────────
+// ── 提案写入端口（issue #36 / PRD v2 §3.4 / ADD §Tools）──
+
+/** 写入提案所需的不可变数据。 */
+export interface ProposalInput {
+  readonly userId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
+  readonly kcal: number;
+  readonly proteinG: number;
+  readonly fatG: number;
+  readonly carbsG: number;
+  readonly nutritionSource: string;
+}
+
+/** 已持久化的不可变提案。 */
+export interface Proposal {
+  readonly id: string;
+  readonly userId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
+  readonly kcal: number;
+  readonly proteinG: number;
+  readonly fatG: number;
+  readonly carbsG: number;
+  readonly nutritionSource: string;
+  readonly status: "proposed";
+  readonly createdAt: string;
+}
+
+/** 提案存储端口。可注入 Supabase 实现或单测 mock。 */
+export interface ProposalStore {
+  store(input: ProposalInput): Promise<Proposal>;
+}
+
+// ─── 遗留膳食存储端口（仅用于 proposal_confirm 提交路径）─────────────────
 
 /** 一条已持久化的饮食记录。 */
 export interface MealLogEntry {
@@ -57,8 +90,8 @@ export interface MealLogStore {
 export interface LogMealDeps {
   /** 营养数据查询（可注入内置 stub 或 USDA API）。 */
   readonly getFoodNutrition: GetFoodNutrition;
-  /** 餐食持久化存储。 */
-  readonly mealLogStore: MealLogStore;
+  /** 不可变提案存储（不直接写入 meal ledger — issue #36）。 */
+  readonly proposalStore: ProposalStore;
   /** 当前用户 ID（由调用方注入，不暴露给模型）。 */
   readonly userId: string;
 }
@@ -71,20 +104,29 @@ interface ParsedArgs {
   readonly mealType: string;
 }
 
-function parseArgs(args: Readonly<Record<string, unknown>>): ParsedArgs | string {
+function parseArgs(
+  args: Readonly<Record<string, unknown>>,
+): ParsedArgs | string {
   const foodName = args.food_name;
   if (typeof foodName !== "string" || foodName.trim().length === 0) {
     return "missing or invalid food_name: must be a non-empty string";
   }
 
   const portionG = args.portion_g;
-  if (typeof portionG !== "number" || !Number.isFinite(portionG) || portionG <= 0) {
+  if (
+    typeof portionG !== "number" ||
+    !Number.isFinite(portionG) ||
+    portionG <= 0
+  ) {
     return "missing or invalid portion_g: must be a positive number (grams)";
   }
 
   let mealType = DEFAULT_MEAL_TYPE;
   if (args.meal_type !== undefined) {
-    if (typeof args.meal_type !== "string" || !VALID_MEAL_TYPES.has(args.meal_type)) {
+    if (
+      typeof args.meal_type !== "string" ||
+      !VALID_MEAL_TYPES.has(args.meal_type)
+    ) {
       return (
         `invalid meal_type "${String(args.meal_type)}": ` +
         `must be one of ${[...VALID_MEAL_TYPES].join(", ")}`
@@ -98,28 +140,29 @@ function parseArgs(args: Readonly<Record<string, unknown>>): ParsedArgs | string
 
 // ─── 响应构建 ─────────────────────────────────────────────────────────────
 
-function successResponse(entry: MealLogEntry): string {
+function proposalResponse(proposal: Proposal): string {
   return JSON.stringify({
-    success: true,
-    message: `Logged ${entry.portionG}g ${entry.foodName} for ${entry.mealType}.`,
-    meal: {
-      id: entry.id,
-      food_name: entry.foodName,
-      portion_g: entry.portionG,
-      meal_type: entry.mealType,
-      logged_at: entry.loggedAt,
+    proposal_id: proposal.id,
+    message: `Log ${proposal.portionG}g ${proposal.foodName} for ${proposal.mealType}? (${proposal.kcal} kcal, ${proposal.proteinG}g protein) — Confirm?`,
+    proposal: {
+      id: proposal.id,
+      food_name: proposal.foodName,
+      portion_g: proposal.portionG,
+      meal_type: proposal.mealType,
+      created_at: proposal.createdAt,
       nutrition: {
-        kcal: entry.kcal,
-        protein_g: entry.proteinG,
-        fat_g: entry.fatG,
-        carbs_g: entry.carbsG,
+        kcal: proposal.kcal,
+        protein_g: proposal.proteinG,
+        fat_g: proposal.fatG,
+        carbs_g: proposal.carbsG,
       },
+      nutrition_source: proposal.nutritionSource,
     },
     nutrition_summary: {
-      kcal: entry.kcal,
-      protein_g: entry.proteinG,
-      fat_g: entry.fatG,
-      carbs_g: entry.carbsG,
+      kcal: proposal.kcal,
+      protein_g: proposal.proteinG,
+      fat_g: proposal.fatG,
+      carbs_g: proposal.carbsG,
     },
   });
 }
@@ -136,9 +179,11 @@ export const LOG_MEAL_SCHEMA = {
   function: {
     name: "log_meal",
     description:
-      "Log a meal to the user's food diary. Provide food name, portion in grams, " +
-      "and meal type (breakfast/lunch/dinner/snack). The tool automatically looks up " +
-      "USDA nutrition data and stores the entry. Returns a confirmation message with " +
+      "Propose logging a meal to the user's food diary. Provide food name, " +
+      "portion in grams, and meal type (breakfast/lunch/dinner/snack). " +
+      "The tool resolves food entities and computes nutrition from USDA data, " +
+      "then stores an immutable proposal. The user must confirm before any " +
+      "data is written to the meal ledger. Returns a confirmation prompt with " +
       "a nutrition summary (kcal, protein, fat, carbs).",
     parameters: {
       type: "object" as const,
@@ -155,8 +200,7 @@ export const LOG_MEAL_SCHEMA = {
         meal_type: {
           type: "string",
           enum: ["breakfast", "lunch", "dinner", "snack"],
-          description:
-            "Meal type. Defaults to 'snack' if omitted.",
+          description: "Meal type. Defaults to 'snack' if omitted.",
         },
       },
       required: ["food_name", "portion_g"],
@@ -171,9 +215,12 @@ export const LOG_MEAL_SCHEMA = {
  *
  * 依赖全部可注入以便单测不触网；对应的 function-calling schema 导出为
  * LOG_MEAL_SCHEMA。
+ *
+ * Issue #36：处理器存储不可变提案而非直接写入膳食账本。
+ * 模型输出路径无法触及 MealLogStore。
  */
 export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
-  const { getFoodNutrition, mealLogStore, userId } = deps;
+  const { getFoodNutrition, proposalStore, userId } = deps;
 
   return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
     try {
@@ -190,7 +237,7 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
         return errorResponse(`nutrition lookup failed: ${message}`);
       }
 
-      const entry = await mealLogStore.insert({
+      const proposal = await proposalStore.store({
         userId,
         foodName: nutrition.foodName,
         portionG: nutrition.portionG,
@@ -199,12 +246,13 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
         proteinG: nutrition.proteinG,
         fatG: nutrition.fatG,
         carbsG: nutrition.carbsG,
+        nutritionSource: nutrition.source,
       });
 
-      return successResponse(entry);
+      return proposalResponse(proposal);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return errorResponse(`failed to log meal: ${message}`);
+      return errorResponse(`failed to create meal proposal: ${message}`);
     }
   };
 }
