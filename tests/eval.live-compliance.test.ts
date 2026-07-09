@@ -1,13 +1,11 @@
 import { describe, it, expect } from "vitest";
-import {
-  runLiveComplianceEval,
-  type ComplianceReport,
-} from "../src/eval/live-compliance";
+import { runLiveComplianceEval } from "../src/eval/live-compliance";
 import type { EvalCase } from "../src/eval/types";
 import type {
   ModelAdapter,
   ModelRequest,
   ModelResponse,
+  ToolHandler,
   ToolCall,
 } from "../src/harness/types";
 import type {
@@ -29,6 +27,16 @@ function fakeInteractionStore(
   return { all: async () => rows };
 }
 
+function emptyTools(): ReadonlyMap<string, ToolHandler> {
+  return new Map<string, ToolHandler>();
+}
+
+function searchFoodTools(
+  result = "chicken: 31g protein/100g",
+): ReadonlyMap<string, ToolHandler> {
+  return new Map([["search_food", async () => result]]);
+}
+
 // ─── runLiveComplianceEval ────────────────────────────────────────────────
 
 describe("runLiveComplianceEval", () => {
@@ -38,10 +46,15 @@ describe("runLiveComplianceEval", () => {
       stop: true,
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
-      { id: "t1", query: "How much protein in chicken?", category: "simple", expected: {} },
+      {
+        id: "t1",
+        query: "How much protein in chicken?",
+        category: "simple",
+        expected: {},
+      },
     ];
 
     const report = await runLiveComplianceEval(cases, adapter, tools);
@@ -61,7 +74,7 @@ describe("runLiveComplianceEval", () => {
       stop: true,
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "simple", expected: {} },
@@ -86,15 +99,18 @@ describe("runLiveComplianceEval", () => {
         return {
           content: "Looking up food...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+          toolCalls: [
+            {
+              name: "search_food",
+              args: { food: "chicken" },
+            } satisfies ToolCall,
+          ],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
     });
 
-    const tools = new Map([
-      ["search_food", async () => "chicken: 31g protein/100g"],
-    ]);
+    const tools = searchFoodTools();
 
     const cases: EvalCase[] = [
       {
@@ -118,7 +134,7 @@ describe("runLiveComplianceEval", () => {
       stop: true,
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       {
@@ -143,13 +159,18 @@ describe("runLiveComplianceEval", () => {
       output: {
         prose: "Chicken breast is a lean protein source.",
         foodRefs: [
-          { foodId: "f1", foodName: "chicken breast", matchType: "exact" as const, allergens: [] },
+          {
+            foodId: "f1",
+            foodName: "chicken breast",
+            matchType: "exact" as const,
+            allergens: [],
+          },
         ],
         ruleRefs: [],
       },
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "simple", expected: {} },
@@ -175,7 +196,7 @@ describe("runLiveComplianceEval", () => {
       },
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "cross_domain", expected: {} },
@@ -192,10 +213,9 @@ describe("runLiveComplianceEval", () => {
     const adapter = stubAdapter(() => ({
       content: "Just some prose advice.",
       stop: true,
-      // No output field
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "simple", expected: {} },
@@ -216,18 +236,26 @@ describe("runLiveComplianceEval", () => {
         return {
           content: "Looking up food...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+          toolCalls: [
+            {
+              name: "search_food",
+              args: { food: "chicken" },
+            } satisfies ToolCall,
+          ],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
     });
 
-    const tools = new Map([
-      ["search_food", async () => "chicken: 31g protein/100g"],
-    ]);
+    const tools = searchFoodTools();
 
     const cases: EvalCase[] = [
-      { id: "t1", query: "How much protein in chicken?", category: "simple", expected: {} },
+      {
+        id: "t1",
+        query: "How much protein in chicken?",
+        category: "simple",
+        expected: {},
+      },
     ];
 
     const report = await runLiveComplianceEval(cases, adapter, tools);
@@ -243,7 +271,7 @@ describe("runLiveComplianceEval", () => {
       stop: true,
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "q1", category: "simple", expected: {} },
@@ -257,7 +285,6 @@ describe("runLiveComplianceEval", () => {
     expect(report.summary.typedOutputRate).toBeGreaterThanOrEqual(0);
     expect(report.summary.terminalSuccessRate).toBeGreaterThanOrEqual(0);
     expect(report.summary.overallPassRate).toBeGreaterThanOrEqual(0);
-    // Both end_turn, so terminalSuccessRate should be 1.0
     expect(report.summary.terminalSuccessRate).toBe(1.0);
     expect(report.summary.overallPassRate).toBe(1.0);
   });
@@ -268,7 +295,7 @@ describe("runLiveComplianceEval", () => {
       stop: true,
     }));
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "simple", expected: {} },
@@ -288,7 +315,7 @@ describe("runLiveComplianceEval", () => {
       throw new Error("network timeout");
     });
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "test", category: "simple", expected: {} },
@@ -307,14 +334,15 @@ describe("runLiveComplianceEval", () => {
     const adapter = stubAdapter(() => {
       callCount++;
       if (callCount === 1) {
-        // First response mentions milk → should be blocked by post-gate
         return { content: "Drink more milk for calcium!", stop: true };
       }
-      // Retry response is safe
-      return { content: "Try calcium-fortified orange juice instead.", stop: true };
+      return {
+        content: "Try calcium-fortified orange juice instead.",
+        stop: true,
+      };
     });
 
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
     const store = fakeInteractionStore([]);
 
     const cases: EvalCase[] = [
@@ -330,34 +358,17 @@ describe("runLiveComplianceEval", () => {
     const report = await runLiveComplianceEval(cases, adapter, tools, store);
     const signal = report.signals[0];
 
-    // Should have a "block" verdict somewhere (from output gate or commit gate after retry exhausted?)
-    // Actually, the post-gate blocks and retries — the second response is safe,
-    // so output/commit gates should pass.
-    // The retry is internal to loop.ts — gate_block tracer events but no "block" gate_verdict
-    // from turn.ts since the eventual result end_turns normally after retry.
-    // So the output gate verdict for a retried case that eventually passes will be "pass".
-    // We at least verify gate verdicts were collected.
-    const blockVerdicts = signal.gateVerdicts.filter((v) => v.verdict === "block");
-    // If the retry succeeded, we may have 0 block verdicts — that's fine, gate did its job internally.
-    // Verify at least that gate verdicts exist and the final result is safe.
     expect(signal.gateVerdicts.length).toBeGreaterThanOrEqual(3);
-    // Final response should be safe (not the blocked one)
     expect(signal.response).toBe("Try calcium-fortified orange juice instead.");
-    // Should have passed the mustNotContain check
     expect(signal.passed).toBe(true);
   });
 
   it("records output gate block verdict when gate is exhausted", async () => {
-    // Gate retries are MAX_POST_GATE_RETRIES = 2, so 3 total attempts (initial + 2 retries).
-    // If all 3 mention "milk", the gate is exhausted and stopReason = "gate_blocked".
-    let callCount = 0;
     const adapter = stubAdapter(() => {
-      callCount++;
-      // Always return milk → gate blocks every time, eventually exhausted
       return { content: "Drink more milk for calcium!", stop: true };
     });
 
-    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+    const tools = emptyTools();
     const store = fakeInteractionStore([]);
 
     const cases: EvalCase[] = [
@@ -373,14 +384,13 @@ describe("runLiveComplianceEval", () => {
     const report = await runLiveComplianceEval(cases, adapter, tools, store);
     const signal = report.signals[0];
 
-    // stopReason should be gate_blocked
     expect(signal.terminalOutcome.stopReason).toBe("gate_blocked");
 
-    // Should have at least one "block" gate verdict
-    const blockVerdicts = signal.gateVerdicts.filter((v) => v.verdict === "block");
+    const blockVerdicts = signal.gateVerdicts.filter(
+      (v) => v.verdict === "block",
+    );
     expect(blockVerdicts.length).toBeGreaterThanOrEqual(1);
 
-    // gateBlockRate in summary should reflect this
     expect(report.summary.gateBlockRate).toBeGreaterThan(0);
   });
 
@@ -389,14 +399,12 @@ describe("runLiveComplianceEval", () => {
     const adapter = stubAdapter(() => {
       callCount++;
       if (callCount === 1) {
-        // First case: succeeds
         return { content: "OK", stop: true };
       }
-      // Second case: crashes (throws)
       throw new Error("crash");
     });
 
-    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "q1", category: "simple", expected: {} },
@@ -406,9 +414,7 @@ describe("runLiveComplianceEval", () => {
     const report = await runLiveComplianceEval(cases, adapter, tools);
 
     expect(report.summary.total).toBe(2);
-    // One end_turn, one crash → terminalSuccessRate = 0.5
     expect(report.summary.terminalSuccessRate).toBe(0.5);
-    // One passed, one failed → overallPassRate = 0.5
     expect(report.summary.overallPassRate).toBe(0.5);
   });
 
@@ -420,25 +426,34 @@ describe("runLiveComplianceEval", () => {
         return {
           content: "Looking up chicken...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+          toolCalls: [
+            {
+              name: "search_food",
+              args: { food: "chicken" },
+            } satisfies ToolCall,
+          ],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
     });
 
-    const tools = new Map([
-      ["search_food", async () => "chicken: 31g protein/100g"],
-    ]);
+    const tools = searchFoodTools();
 
     const cases: EvalCase[] = [
-      { id: "t1", query: "How much protein in chicken?", category: "simple", expected: {} },
+      {
+        id: "t1",
+        query: "How much protein in chicken?",
+        category: "simple",
+        expected: {},
+      },
     ];
 
     const report = await runLiveComplianceEval(cases, adapter, tools);
     const signal = report.signals[0];
 
-    // Should have a tool gate verdict (emitted after each tool observation in turn.ts)
-    const toolVerdicts = signal.gateVerdicts.filter((v) => v.checkpoint === "tool");
+    const toolVerdicts = signal.gateVerdicts.filter(
+      (v) => v.checkpoint === "tool",
+    );
     expect(toolVerdicts.length).toBeGreaterThanOrEqual(1);
     expect(toolVerdicts[0].verdict).toBe("pass");
     expect(toolVerdicts[0].checkName).toBe("tool_gate_check");
@@ -450,21 +465,22 @@ describe("runLiveComplianceEval", () => {
 describe("ComplianceReport", () => {
   it("summary rates are bounded between 0 and 1", async () => {
     const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const cases: EvalCase[] = [
       { id: "t1", query: "q1", category: "simple", expected: {} },
-      { id: "t2", query: "q2", category: "simple", expected: { mustCallTools: ["search_food"] } },
+      {
+        id: "t2",
+        query: "q2",
+        category: "simple",
+        expected: { mustCallTools: ["search_food"] },
+      },
     ];
 
     const report = await runLiveComplianceEval(cases, adapter, tools);
 
-    // t1 has no tool expectation → compliant by default
-    // t2 expects search_food but none called → non-compliant
-    // So toolComplianceRate should be 0.5
     expect(report.summary.toolComplianceRate).toBe(0.5);
 
-    // All rates should be within [0, 1]
     const { summary } = report;
     expect(summary.toolComplianceRate).toBeGreaterThanOrEqual(0);
     expect(summary.toolComplianceRate).toBeLessThanOrEqual(1);
@@ -480,12 +496,11 @@ describe("ComplianceReport", () => {
 
   it("handles empty case list gracefully", async () => {
     const adapter = stubAdapter(() => ({ content: "OK", stop: true }));
-    const tools = new Map<string, (args: Record<string, unknown>) => Promise<string>>();
+    const tools = emptyTools();
 
     const report = await runLiveComplianceEval([], adapter, tools);
     expect(report.signals).toHaveLength(0);
     expect(report.summary.total).toBe(0);
-    // With 0 total, all rates should be 0 (division by zero guard)
     expect(report.summary.toolComplianceRate).toBe(0);
     expect(report.summary.overallPassRate).toBe(0);
     const text = report.renderText();

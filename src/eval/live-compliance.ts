@@ -19,9 +19,20 @@
 //   typedOutput — 模型是否返回了结构化 TypedOutput（foodRefs + ruleRefs）
 //   terminalOutcome — 终端状态（stopReason / steps / duration）
 
-import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
+import {
+  consumeTurn,
+  turn,
+  type AnyTurnEvent,
+  type GateCheckpoint,
+  type GateVerdict,
+} from "../harness/turn";
 import { Tracer } from "../harness/tracer";
-import type { ModelAdapter, ToolHandler, StopReason } from "../harness/types";
+import type {
+  ModelAdapter,
+  ToolHandler,
+  StopReason,
+  TypedOutput,
+} from "../harness/types";
 import type { EvalCase, EvalExpected } from "./types";
 import type { InteractionStore } from "../lib/drugInteractions";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
@@ -40,8 +51,8 @@ export interface ToolUseSignal {
 
 /** A single gate verdict observation from the Turn Seam event stream. */
 export interface GateVerdictSignal {
-  readonly checkpoint: string;
-  readonly verdict: string;
+  readonly checkpoint: GateCheckpoint;
+  readonly verdict: GateVerdict;
   readonly checkName: string;
 }
 
@@ -88,23 +99,90 @@ export interface ComplianceReport {
   renderText(): string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-function computeMissingTools(
-  expected: EvalExpected,
-  called: readonly string[],
-): string[] {
-  return (expected.mustCallTools ?? []).filter((t) => !called.includes(t));
+interface TurnEventSignals {
+  readonly toolCalls: string[];
+  readonly gateVerdicts: GateVerdictSignal[];
+  gateVerdictBlocks: number;
+  steps: number;
 }
 
-function computeToolCompliance(
+const REPORT_WIDTH = 72;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function buildToolUseSignal(
   expected: EvalExpected,
   called: readonly string[],
-): boolean {
-  if (!expected.mustCallTools || expected.mustCallTools.length === 0) {
-    return true;
+): ToolUseSignal {
+  const expectedToolNames = expected.mustCallTools ?? [];
+
+  return {
+    called,
+    expected: expectedToolNames,
+    missing: expectedToolNames.filter((tool) => !called.includes(tool)),
+    compliant: expectedToolNames.every((tool) => called.includes(tool)),
+  };
+}
+
+function buildTypedOutputSignal(
+  output: TypedOutput | undefined,
+): TypedOutputSignal {
+  if (!output) {
+    return {
+      returned: false,
+      hasFoodRefs: false,
+      hasRuleRefs: false,
+    };
   }
-  return expected.mustCallTools.every((t) => called.includes(t));
+
+  return {
+    returned: true,
+    hasFoodRefs: output.foodRefs.length > 0,
+    hasRuleRefs: output.ruleRefs.length > 0,
+  };
+}
+
+function createTurnEventSignals(): TurnEventSignals {
+  return {
+    toolCalls: [],
+    gateVerdicts: [],
+    gateVerdictBlocks: 0,
+    steps: 0,
+  };
+}
+
+function recordTurnEvent(signals: TurnEventSignals, event: AnyTurnEvent): void {
+  if (event.type === "gate_verdict") {
+    signals.gateVerdicts.push({
+      checkpoint: event.checkpoint,
+      verdict: event.verdict,
+      checkName: event.checkName,
+    });
+
+    if (event.verdict === "block") {
+      signals.gateVerdictBlocks++;
+    }
+
+    return;
+  }
+
+  if (event.type !== "step") {
+    return;
+  }
+
+  const { agentEvent } = event;
+  signals.steps = agentEvent.step;
+  if (agentEvent.type === "act" && agentEvent.toolCall) {
+    signals.toolCalls.push(agentEvent.toolCall.name);
+  }
+}
+
+function countGateBlocks(gateVerdictBlocks: number, tracer: Tracer): number {
+  return Math.max(gateVerdictBlocks, countTracerGateBlocks(tracer));
+}
+
+function countTracerGateBlocks(tracer: Tracer): number {
+  return tracer.events().filter((event) => event.type === "gate_block").length;
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────
@@ -131,16 +209,12 @@ export async function runLiveComplianceEval(
   for (const c of cases) {
     const tracer = new Tracer();
     const start = Date.now();
+    const eventSignals = createTurnEventSignals();
 
     let reply = "";
     let steps = 0;
     let stopReason: StopReason = "end_turn";
-    const toolCalls: string[] = [];
-    let gateVerdictBlocks = 0;
-    const gateVerdicts: GateVerdictSignal[] = [];
-    let typedOutputReturned = false;
-    let typedHasFoodRefs = false;
-    let typedHasRuleRefs = false;
+    let typedOutput = buildTypedOutputSignal(undefined);
 
     const shouldRunGate =
       c.userContext !== undefined && interactionStore !== undefined;
@@ -157,59 +231,25 @@ export async function runLiveComplianceEval(
             interactionStore: shouldRunGate ? interactionStore : undefined,
           },
         ),
-        (event: AnyTurnEvent) => {
-          // Collect all gate verdicts (not just blocks)
-          if (event.type === "gate_verdict") {
-            gateVerdicts.push({
-              checkpoint: event.checkpoint,
-              verdict: event.verdict,
-              checkName: event.checkName,
-            });
-            if (event.verdict === "block") {
-              gateVerdictBlocks++;
-            }
-          }
-
-          if (event.type !== "step") {
-            return;
-          }
-
-          const { agentEvent } = event;
-          steps = agentEvent.step;
-          if (agentEvent.type === "act" && agentEvent.toolCall) {
-            toolCalls.push(agentEvent.toolCall.name);
-          }
-        },
+        (event: AnyTurnEvent) => recordTurnEvent(eventSignals, event),
       );
 
       reply = result.reply;
       steps = result.steps;
       stopReason = result.stopReason;
-
-      // Typed output compliance
-      if (result.output) {
-        typedOutputReturned = true;
-        typedHasFoodRefs = result.output.foodRefs.length > 0;
-        typedHasRuleRefs = result.output.ruleRefs.length > 0;
-      }
+      typedOutput = buildTypedOutputSignal(result.output);
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
-      gateVerdictBlocks = Math.max(
-        gateVerdictBlocks,
-        tracer.events().filter((e) => e.type === "gate_block").length,
-      );
+      steps = eventSignals.steps;
     }
 
     const durationMs = Date.now() - start;
-    const gateBlocks = Math.max(
-      gateVerdictBlocks,
-      tracer.events().filter((e) => e.type === "gate_block").length,
-    );
+    const gateBlocks = countGateBlocks(eventSignals.gateVerdictBlocks, tracer);
 
     const scored = scoreHarness(
       reply,
-      toolCalls,
+      eventSignals.toolCalls,
       c.expected,
       c.userContext,
       gateBlocks,
@@ -218,18 +258,9 @@ export async function runLiveComplianceEval(
     signals.push({
       caseId: c.id,
       response: reply,
-      toolUse: {
-        called: scored.toolCalls,
-        expected: c.expected.mustCallTools ?? [],
-        missing: computeMissingTools(c.expected, toolCalls),
-        compliant: computeToolCompliance(c.expected, toolCalls),
-      },
-      gateVerdicts,
-      typedOutput: {
-        returned: typedOutputReturned,
-        hasFoodRefs: typedHasFoodRefs,
-        hasRuleRefs: typedHasRuleRefs,
-      },
+      toolUse: buildToolUseSignal(c.expected, scored.toolCalls),
+      gateVerdicts: eventSignals.gateVerdicts,
+      typedOutput,
       terminalOutcome: {
         stopReason,
         steps,
@@ -284,9 +315,11 @@ function renderComplianceText(
 ): string {
   const lines: string[] = [];
 
-  lines.push("═".repeat(72));
-  lines.push("  NutriBuddy Live Compliance Eval (observational / non-CI-gating)");
-  lines.push("═".repeat(72));
+  lines.push("═".repeat(REPORT_WIDTH));
+  lines.push(
+    "  NutriBuddy Live Compliance Eval (observational / non-CI-gating)",
+  );
+  lines.push("═".repeat(REPORT_WIDTH));
   lines.push("");
 
   // ─── Per-Case Compliance Signals ──────────────────────────────────────
@@ -300,20 +333,7 @@ function renderComplianceText(
   );
 
   for (const s of signals) {
-    const tool = s.toolUse.compliant ? "✓" : "✗";
-    const blk = s.gateVerdicts.some((v) => v.verdict === "block") ? "BLK" : "—";
-    const typed = s.typedOutput.returned
-      ? `✓${s.typedOutput.hasFoodRefs ? "F" : ""}${s.typedOutput.hasRuleRefs ? "R" : ""}`
-      : "✗";
-    const term = s.terminalOutcome.stopReason === "end_turn"
-      ? `${s.terminalOutcome.steps}s`
-      : s.terminalOutcome.stopReason;
-    const pass = s.passed ? "✓" : "✗";
-    const vCount = s.violations.length;
-
-    lines.push(
-      `  ${s.caseId.padEnd(4)} ${tool.padEnd(9)} ${blk.padEnd(8)} ${typed.padEnd(9)} ${term.toString().padEnd(10)} ${pass.padEnd(6)} ${vCount}`,
-    );
+    lines.push(renderComplianceRow(s));
   }
 
   lines.push("");
@@ -322,17 +342,76 @@ function renderComplianceText(
   lines.push("─ Compliance Summary ─");
   lines.push("");
   lines.push(`  Total cases:               ${summary.total}`);
-  lines.push(`  Tool compliance rate:       ${(summary.toolComplianceRate * 100).toFixed(1)}%`);
-  lines.push(`  Gate block rate:            ${(summary.gateBlockRate * 100).toFixed(1)}%`);
-  lines.push(`  Typed output rate:          ${(summary.typedOutputRate * 100).toFixed(1)}%`);
-  lines.push(`  Terminal success rate:      ${(summary.terminalSuccessRate * 100).toFixed(1)}%`);
-  lines.push(`  Overall pass rate:          ${(summary.overallPassRate * 100).toFixed(1)}%`);
+  lines.push(
+    `  Tool compliance rate:       ${formatRate(summary.toolComplianceRate)}`,
+  );
+  lines.push(
+    `  Gate block rate:            ${formatRate(summary.gateBlockRate)}`,
+  );
+  lines.push(
+    `  Typed output rate:          ${formatRate(summary.typedOutputRate)}`,
+  );
+  lines.push(
+    `  Terminal success rate:      ${formatRate(summary.terminalSuccessRate)}`,
+  );
+  lines.push(
+    `  Overall pass rate:          ${formatRate(summary.overallPassRate)}`,
+  );
   lines.push("");
   lines.push("  ⚠️  Observational only — does NOT gate CI.");
   lines.push("");
-  lines.push("═".repeat(72));
+  lines.push("═".repeat(REPORT_WIDTH));
 
   return lines.join("\n");
+}
+
+function renderComplianceRow(signal: CaseComplianceSignals): string {
+  const tool = formatBooleanMark(signal.toolUse.compliant);
+  const gateBlock = formatGateBlock(signal.gateVerdicts);
+  const typed = formatTypedOutput(signal.typedOutput);
+  const terminal = formatTerminalOutcome(signal.terminalOutcome);
+  const pass = formatBooleanMark(signal.passed);
+  const violations = signal.violations.length;
+
+  return `  ${signal.caseId.padEnd(4)} ${tool.padEnd(9)} ${gateBlock.padEnd(8)} ${typed.padEnd(9)} ${terminal.padEnd(10)} ${pass.padEnd(6)} ${violations}`;
+}
+
+function formatBooleanMark(value: boolean): string {
+  return value ? "✓" : "✗";
+}
+
+function formatGateBlock(verdicts: readonly GateVerdictSignal[]): string {
+  if (verdicts.some((verdict) => verdict.verdict === "block")) {
+    return "BLK";
+  }
+  return "—";
+}
+
+function formatTypedOutput(signal: TypedOutputSignal): string {
+  if (!signal.returned) {
+    return "✗";
+  }
+
+  let refs = "";
+  if (signal.hasFoodRefs) {
+    refs += "F";
+  }
+  if (signal.hasRuleRefs) {
+    refs += "R";
+  }
+
+  return `✓${refs}`;
+}
+
+function formatTerminalOutcome(signal: TerminalOutcomeSignal): string {
+  if (signal.stopReason === "end_turn") {
+    return `${signal.steps}s`;
+  }
+  return signal.stopReason;
+}
+
+function formatRate(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────
@@ -344,7 +423,8 @@ function renderComplianceText(
 function stubAdapter(): ModelAdapter {
   return {
     generate: async () => ({
-      content: "This is a simulated nutritional response for framework validation.",
+      content:
+        "This is a simulated nutritional response for framework validation.",
       stop: true,
     }),
   };
@@ -355,12 +435,14 @@ function stubTools(): Map<string, ToolHandler> {
   const handler: ToolHandler = async (args) => {
     const food = String(args.food ?? "");
     const canned: Record<string, string> = {
-      "chicken breast": "chicken breast (100g): 165 kcal, 31g protein, 0g carbs",
-      "avocado": "avocado (medium, 150g): 240 kcal, 3g protein, 13g carbs",
-      "white rice": "white rice, cooked (1 cup, 158g): 205 kcal, 4g protein, 45g carbs",
-      "salmon": "salmon (100g): 208 kcal, 20g protein, 0g carbs, rich in omega-3",
-      "egg": "large egg (50g): 72 kcal, 6g protein, 0.4g carbs",
-      "rice": "rice, cooked (1 cup, 158g): 205 kcal, 4g protein, 45g carbs",
+      "chicken breast":
+        "chicken breast (100g): 165 kcal, 31g protein, 0g carbs",
+      avocado: "avocado (medium, 150g): 240 kcal, 3g protein, 13g carbs",
+      "white rice":
+        "white rice, cooked (1 cup, 158g): 205 kcal, 4g protein, 45g carbs",
+      salmon: "salmon (100g): 208 kcal, 20g protein, 0g carbs, rich in omega-3",
+      egg: "large egg (50g): 72 kcal, 6g protein, 0.4g carbs",
+      rice: "rice, cooked (1 cup, 158g): 205 kcal, 4g protein, 45g carbs",
     };
 
     const key = food.toLowerCase();
@@ -378,14 +460,20 @@ function stubInteractionStore(): InteractionStore {
   return { all: async () => [] };
 }
 
+function parseLimit(args: readonly string[]): number | undefined {
+  const limitIdx = args.indexOf("--limit");
+
+  if (limitIdx < 0 || limitIdx + 1 >= args.length) {
+    return undefined;
+  }
+
+  return Number(args[limitIdx + 1]);
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const live = args.includes("--live");
-  const limitIdx = args.indexOf("--limit");
-  const limit =
-    limitIdx >= 0 && limitIdx + 1 < args.length
-      ? Number(args[limitIdx + 1])
-      : undefined;
+  const limit = parseLimit(args);
 
   console.log(
     live
@@ -399,20 +487,22 @@ async function main(): Promise<void> {
 
   let adapter: ModelAdapter;
   let tools: ReadonlyMap<string, ToolHandler>;
-  let interactionStore: InteractionStore;
 
   if (live) {
     adapter = new DeepSeekAdapter();
-    tools = new Map(); // No real tools yet
-    interactionStore = stubInteractionStore();
+    tools = new Map<string, ToolHandler>();
   } else {
     adapter = stubAdapter();
     tools = stubTools();
-    interactionStore = stubInteractionStore();
   }
 
   const start = Date.now();
-  const report = await runLiveComplianceEval(cases, adapter, tools, interactionStore);
+  const report = await runLiveComplianceEval(
+    cases,
+    adapter,
+    tools,
+    stubInteractionStore(),
+  );
   const duration = Date.now() - start;
 
   console.log(report.renderText());
@@ -422,7 +512,8 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-const invokedDirectly = process.argv[1]?.endsWith("live-compliance.ts") ?? false;
+const invokedDirectly =
+  process.argv[1]?.endsWith("live-compliance.ts") ?? false;
 if (invokedDirectly) {
   main().catch((err) => {
     console.error("Live compliance eval failed:", err);
