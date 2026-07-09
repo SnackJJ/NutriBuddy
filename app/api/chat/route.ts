@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { turn, type AnyTurnEvent, type TurnPorts } from "@/harness/turn";
+import { turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
@@ -12,12 +12,14 @@ import { supabaseInteractionStore } from "@/lib/drugInteractions";
 import type { UserContext } from "@/harness/gate";
 import type { InteractionStore } from "@/lib/drugInteractions";
 import {
+  SESSION_USER_ID_HEADER,
   parseChatBody,
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "@/lib/chatApi";
 import { createLogMealHandler } from "@/harness/logMeal";
 import { createGetFoodNutrition } from "@/harness/foodNutrition";
+import type { ChatMessage, ToolHandler } from "@/harness/types";
 import type {
   ProposalStore,
   Proposal,
@@ -30,8 +32,6 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SESSION_USER_ID_HEADER = "X-User-Id";
-
 // ─── In-memory proposal store (M1 — replaces with Supabase in M2) ───────
 
 interface MemStoreState {
@@ -39,8 +39,29 @@ interface MemStoreState {
   ledger: MealLogEntry[];
 }
 
+function transitionProposal(
+  state: MemStoreState,
+  id: string,
+  status: "committed" | "rejected",
+): Proposal {
+  const index = state.proposals.findIndex((proposal) => proposal.id === id);
+  if (index === -1) {
+    throw new Error(`Proposal ${id} not found`);
+  }
+
+  const proposal = state.proposals[index];
+  if (proposal.status !== "proposed") {
+    throw new Error(`Proposal ${id} is ${proposal.status}`);
+  }
+
+  const nextProposal: Proposal = { ...proposal, status };
+  state.proposals[index] = nextProposal;
+  return nextProposal;
+}
+
 function createMemProposalStore(state: MemStoreState): ProposalStore {
   let nextId = 1000;
+
   return {
     async store(params: ProposalInput): Promise<Proposal> {
       const id = `proposal-${(nextId++).toString().padStart(4, "0")}`;
@@ -65,22 +86,10 @@ function createMemProposalStore(state: MemStoreState): ProposalStore {
       return state.proposals.find((p) => p.id === id);
     },
     async commit(id: string): Promise<Proposal> {
-      const idx = state.proposals.findIndex((p) => p.id === id);
-      if (idx === -1) throw new Error(`Proposal ${id} not found`);
-      if (state.proposals[idx].status !== "proposed") {
-        throw new Error(`Proposal ${id} is ${state.proposals[idx].status}`);
-      }
-      state.proposals[idx] = { ...state.proposals[idx], status: "committed" };
-      return state.proposals[idx];
+      return transitionProposal(state, id, "committed");
     },
     async decline(id: string): Promise<Proposal> {
-      const idx = state.proposals.findIndex((p) => p.id === id);
-      if (idx === -1) throw new Error(`Proposal ${id} not found`);
-      if (state.proposals[idx].status !== "proposed") {
-        throw new Error(`Proposal ${id} is ${state.proposals[idx].status}`);
-      }
-      state.proposals[idx] = { ...state.proposals[idx], status: "rejected" };
-      return state.proposals[idx];
+      return transitionProposal(state, id, "rejected");
     },
   };
 }
@@ -114,7 +123,7 @@ const memMealLogStore = createMemMealLogStore(memState);
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
-function buildToolMap(sessionUserId: string): Map<string, unknown> {
+function buildToolMap(sessionUserId: string): ReadonlyMap<string, ToolHandler> {
   const getFoodNutrition = createGetFoodNutrition();
   const logMealHandler = createLogMealHandler({
     getFoodNutrition,
@@ -123,6 +132,17 @@ function buildToolMap(sessionUserId: string): Map<string, unknown> {
   });
 
   return new Map([["log_meal", logMealHandler]]);
+}
+
+function getRequestHistory(
+  body: ChatRequestBody,
+  turnInput: TurnInput,
+): readonly ChatMessage[] | undefined {
+  if (turnInput.tag !== "utterance" || body.tag === "proposal_confirm") {
+    return undefined;
+  }
+
+  return body.history;
 }
 
 // ─── User context loading ──────────────────────────────────────────────
@@ -155,21 +175,6 @@ async function loadUserContext(
   }
 }
 
-// ─── Event serialization ───────────────────────────────────────────────
-
-/**
- * Flatten a turn event for the NDJSON stream.
- *
- * Step events carry the agentEvent as their primary payload so the client
- * can handle them the same way as the legacy AgentEvent stream.
- * The full turn event wrapper (schema, seq, timestamp) is preserved.
- */
-function serializeTurnEvent(event: AnyTurnEvent): Record<string, unknown> {
-  // Pass through gate_verdict and turn_start/turn_end directly — they're
-  // self-describing and carry all needed fields.
-  return event as unknown as Record<string, unknown>;
-}
-
 // ─── Route handler ─────────────────────────────────────────────────────
 
 /**
@@ -194,7 +199,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
   }
 
-  let turnInput;
+  let turnInput: TurnInput;
   try {
     turnInput = parseChatBody(body);
   } catch (err) {
@@ -219,34 +224,25 @@ export async function POST(request: NextRequest): Promise<Response> {
   const sessionId = sessionUserId ?? "anonymous";
   const eventLog = new EventLog(sessionId);
 
-  // For utterance turns, extract history from the body
-  const history =
-    turnInput.tag === "utterance"
-      ? (body as { history?: readonly { role: string; content: string }[] })
-          .history
-      : undefined;
-
   let ports = buildChatTurnPorts({
     adapter,
     tracer,
     eventLog,
     sessionUserId,
-    history: history as
-      | readonly import("@/harness/types").ChatMessage[]
-      | undefined,
+    history: getRequestHistory(body, turnInput),
   });
 
-  // ── Wire tools for authenticated utterance turns ─────────────────
-  if (turnInput.tag === "utterance" && sessionUserId) {
-    const tools = buildToolMap(sessionUserId);
-    ports = { ...ports, tools: tools as unknown as TurnPorts["tools"] };
-
-    // Wire proposal + meal stores for the commit path (issue #37)
+  if (sessionUserId) {
     ports = {
       ...ports,
       proposalStore: memProposalStore,
       mealLogStore: memMealLogStore,
     };
+  }
+
+  // ── Wire tools for authenticated utterance turns ─────────────────
+  if (turnInput.tag === "utterance" && sessionUserId) {
+    ports = { ...ports, tools: buildToolMap(sessionUserId) };
   }
 
   // ── Load user safety context (fail-soft) ──────────────────────────
@@ -275,7 +271,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         let result = await gen.next();
         while (!result.done) {
-          enqueue(serializeTurnEvent(result.value));
+          enqueue(result.value);
           result = await gen.next();
         }
 

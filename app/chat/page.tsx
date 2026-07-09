@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { ChatMessage } from "@/harness/types";
-import type { WriteProposalData } from "@/harness/types";
+import type { ChatMessage, WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
+import { SESSION_USER_ID_HEADER } from "@/lib/chatApi";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -32,46 +32,263 @@ interface ToolCallEntry {
   readonly result?: string;
 }
 
+interface StreamToolCall {
+  readonly name: string;
+  readonly args: Readonly<Record<string, unknown>>;
+}
+
+interface StreamToolResult {
+  readonly name: string;
+  readonly result: string;
+}
+
+interface StreamAgentEvent {
+  readonly type: "thought" | "act" | "observe";
+  readonly step?: number;
+  readonly content?: string;
+  readonly toolCall?: StreamToolCall;
+  readonly toolResult?: StreamToolResult;
+}
+
+interface StreamTerminalResult {
+  readonly reply?: string;
+  readonly steps?: number;
+  readonly stopReason?: string;
+  readonly proposal?: WriteProposalData;
+}
+
 /** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
 interface StreamEvent {
   readonly type: string;
   readonly step?: number;
   readonly content?: string;
-  readonly toolCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
-  readonly toolResult?: { readonly name: string; readonly result: string };
-  /** Agent event carried inside a step event from the Turn Seam. */
-  readonly agentEvent?: {
-    readonly type: "thought" | "act" | "observe";
-    readonly step: number;
-    readonly content?: string;
-    readonly toolCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
-    readonly toolResult?: { readonly name: string; readonly result: string };
-  };
-  /** Terminal result fields (from turn_end result + terminal event). */
+  readonly toolCall?: StreamToolCall;
+  readonly toolResult?: StreamToolResult;
+  readonly agentEvent?: StreamAgentEvent;
   readonly reply?: string;
   readonly steps?: number;
   readonly stopReason?: string;
   readonly output?: unknown;
   readonly proposal?: WriteProposalData;
-  /** Gate verdict fields. */
   readonly checkpoint?: string;
   readonly verdict?: string;
   readonly checkName?: string;
   readonly evidence?: string;
-  /** Result object carried by turn_end events. */
-  readonly result?: {
-    readonly reply: string;
-    readonly steps: number;
-    readonly stopReason: string;
-    readonly proposal?: WriteProposalData;
-  };
+  readonly result?: StreamTerminalResult;
   readonly error?: string;
+}
+
+interface AssistantStreamState {
+  content: string;
+  toolCalls: ToolCallEntry[];
+  stopReason: string;
+  gateReasons: string[];
+  writeProposal?: WriteProposalData;
+}
+
+interface AssistantStreamHandlers {
+  readonly setCurrentTool: (tool: string | null) => void;
+  readonly setPartialResponse: (content: string) => void;
+}
+
+function createAssistantStreamState(): AssistantStreamState {
+  return {
+    content: "",
+    toolCalls: [],
+    stopReason: "",
+    gateReasons: [],
+  };
+}
+
+function chatHeaders(userId: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (userId) {
+    headers[SESSION_USER_ID_HEADER] = userId;
+  }
+
+  return headers;
+}
+
+async function responseErrorMessage(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body.error === "string" && body.error.length > 0
+      ? body.error
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseStreamLine(line: string): StreamEvent | undefined {
+  if (!line.trim()) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(line) as StreamEvent;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readChatStream(
+  response: Response,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Streaming is not supported by your browser.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const event = parseStreamLine(line);
+      if (event) {
+        onEvent(event);
+      }
+    }
+  }
+}
+
+function terminalResultFromEvent(
+  event: StreamEvent,
+): StreamTerminalResult | undefined {
+  if (event.type === "turn_end") {
+    return event.result;
+  }
+
+  if (event.type === "terminal") {
+    return event;
+  }
+
+  return undefined;
+}
+
+function agentEventFromStreamEvent(
+  event: StreamEvent,
+): StreamAgentEvent | undefined {
+  if (event.type === "step") {
+    return event.agentEvent;
+  }
+
+  if (
+    event.type === "thought" ||
+    event.type === "act" ||
+    event.type === "observe"
+  ) {
+    return {
+      type: event.type,
+      step: event.step,
+      content: event.content,
+      toolCall: event.toolCall,
+      toolResult: event.toolResult,
+    };
+  }
+
+  return undefined;
+}
+
+function applyAgentEvent(
+  agentEvent: StreamAgentEvent,
+  state: AssistantStreamState,
+  handlers: AssistantStreamHandlers,
+): void {
+  switch (agentEvent.type) {
+    case "thought":
+      return;
+    case "act":
+      if (agentEvent.toolCall) {
+        handlers.setCurrentTool(friendlyToolName(agentEvent.toolCall.name));
+      }
+      return;
+    case "observe":
+      if (agentEvent.toolResult) {
+        state.toolCalls.push({
+          name: agentEvent.toolResult.name,
+          args: {},
+          result: agentEvent.toolResult.result,
+        });
+        handlers.setCurrentTool(null);
+      }
+
+      if (agentEvent.content) {
+        state.content = agentEvent.content;
+        handlers.setPartialResponse(agentEvent.content);
+      }
+      return;
+  }
+}
+
+function applyTerminalResult(
+  event: StreamEvent,
+  state: AssistantStreamState,
+): void {
+  const result = terminalResultFromEvent(event);
+  if (!result) {
+    return;
+  }
+
+  state.stopReason = result.stopReason ?? state.stopReason;
+
+  if (result.reply) {
+    state.content = result.reply;
+  }
+
+  if (result.stopReason === "write_proposal" && result.proposal) {
+    state.writeProposal = result.proposal;
+  }
+}
+
+function applyAssistantStreamEvent(
+  event: StreamEvent,
+  state: AssistantStreamState,
+  handlers: AssistantStreamHandlers,
+): void {
+  if (event.type === "gate_verdict") {
+    if (event.verdict === "block" && event.checkpoint === "output") {
+      state.gateReasons.push(
+        `${event.checkName ?? "output_gate"}: ${event.evidence ?? "blocked"}`,
+      );
+    }
+    return;
+  }
+
+  const agentEvent = agentEventFromStreamEvent(event);
+  if (agentEvent) {
+    applyAgentEvent(agentEvent, state, handlers);
+    return;
+  }
+
+  applyTerminalResult(event, state);
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
 
 /** Shown when there are no messages yet. */
-function EmptyState({ onSelectPrompt }: { onSelectPrompt: (q: string) => void }) {
+function EmptyState({
+  onSelectPrompt,
+}: {
+  onSelectPrompt: (q: string) => void;
+}) {
   const suggestions = [
     "How much protein is in a chicken breast?",
     "What foods are rich in vitamin D?",
@@ -103,9 +320,9 @@ function EmptyState({ onSelectPrompt }: { onSelectPrompt: (q: string) => void })
         Welcome to NutriBuddy
       </h2>
       <p className="mb-8 max-w-md text-sm leading-relaxed text-gray-500">
-        Your personal AI nutrition assistant. Ask about food nutrition,
-        meal planning, dietary guidelines, or get evidence-based answers
-        to your nutrition questions.
+        Your personal AI nutrition assistant. Ask about food nutrition, meal
+        planning, dietary guidelines, or get evidence-based answers to your
+        nutrition questions.
       </p>
 
       <div className="grid w-full max-w-md gap-2">
@@ -210,8 +427,19 @@ function MessageBubble({
                 key={src}
                 className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-200"
               >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  className="h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
                 Source: {src}
               </span>
@@ -226,9 +454,25 @@ function MessageBubble({
               <details key={i} className="group text-xs">
                 <summary className="cursor-pointer text-gray-400 hover:text-gray-600">
                   <span className="inline-flex items-center gap-1">
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <svg
+                      className="h-3 w-3"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
                     </svg>
                     {friendlyToolName(tc.name)}
                   </span>
@@ -281,8 +525,19 @@ function ProposalCard({
   return (
     <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
       <div className="mb-3 flex items-center gap-2">
-        <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        <svg
+          className="h-5 w-5 text-blue-600"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+          />
         </svg>
         <span className="text-sm font-semibold text-blue-800">
           Confirm Meal Log
@@ -295,15 +550,11 @@ function ProposalCard({
           {proposal.portionG}g ({proposal.mealType})
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-blue-700">
-          {proposal.kcal !== undefined && (
-            <span>{proposal.kcal} kcal</span>
-          )}
+          {proposal.kcal !== undefined && <span>{proposal.kcal} kcal</span>}
           {proposal.proteinG !== undefined && (
             <span>{proposal.proteinG}g protein</span>
           )}
-          {proposal.fatG !== undefined && (
-            <span>{proposal.fatG}g fat</span>
-          )}
+          {proposal.fatG !== undefined && <span>{proposal.fatG}g fat</span>}
           {proposal.carbsG !== undefined && (
             <span>{proposal.carbsG}g carbs</span>
           )}
@@ -362,8 +613,6 @@ function ProposalCard({
 
 // ─── Page ──────────────────────────────────────────────────────────────
 
-const SESSION_USER_ID_HEADER = "X-User-Id";
-
 /** Generate a stable client-side userId (M1 — no auth yet).
  *  Returns empty string during SSR; the component hydrates via useEffect. */
 function readUserId(): string {
@@ -389,8 +638,8 @@ export default function ChatPage() {
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [partialResponse, setPartialResponse] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  /** Pending proposal awaiting user confirmation. */
-  const [pendingProposal, setPendingProposal] = useState<WriteProposalData | null>(null);
+  const [pendingProposal, setPendingProposal] =
+    useState<WriteProposalData | null>(null);
   const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -443,194 +692,62 @@ export default function ChatPage() {
       const history = buildHistory(messages);
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(userId ? { [SESSION_USER_ID_HEADER]: userId } : {}),
-        },
+        headers: chatHeaders(userId),
         body: JSON.stringify({ message: trimmed, history }),
       });
 
       if (!response.ok) {
-        let errorMsg = "Failed to get a response. Please try again.";
-        try {
-          const err = (await response.json()) as { error?: string };
-          if (err.error) errorMsg = err.error;
-        } catch {
-          // Can't parse error body — use default
-        }
-        setError(errorMsg);
-        setStreaming(false);
+        setError(
+          await responseErrorMessage(
+            response,
+            "Failed to get a response. Please try again.",
+          ),
+        );
         return;
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setError("Streaming is not supported by your browser.");
-        setStreaming(false);
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let assistantContent = "";
-      const toolCalls: ToolCallEntry[] = [];
-      let stopReason = "";
-      let gateReasons: string[] = [];
-      let writeProposal: WriteProposalData | undefined;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        // Keep the last partial line in the buffer
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let event: StreamEvent;
-          try {
-            event = JSON.parse(line) as StreamEvent;
-          } catch {
-            continue; // Skip malformed JSON lines
-          }
-
-          // ── Handle Turn Seam enriched events ──────────────────
-          switch (event.type) {
-            case "error":
-              setError(event.error ?? "An unexpected error occurred.");
-              setStreaming(false);
-              return;
-
-            case "turn_start":
-              // Turn start — no visible update needed
-              break;
-
-            case "gate_verdict":
-              // Gate verdict checkpoints — collect evidence
-              if (event.verdict === "block" && event.checkpoint === "output") {
-                gateReasons.push(
-                  `${event.checkName ?? "output_gate"}: ${event.evidence ?? "blocked"}`,
-                );
-              }
-              break;
-
-            case "step": {
-              // Step events carry agentEvent (thought/act/observe)
-              if (!event.agentEvent) break;
-
-              switch (event.agentEvent.type) {
-                case "thought":
-                  // thought events are intermediate — no visible update
-                  break;
-
-                case "act":
-                  if (event.agentEvent.toolCall) {
-                    setCurrentTool(
-                      friendlyToolName(event.agentEvent.toolCall.name),
-                    );
-                  }
-                  break;
-
-                case "observe":
-                  if (event.agentEvent.toolResult) {
-                    toolCalls.push({
-                      name: event.agentEvent.toolResult.name,
-                      args: {},
-                      result: event.agentEvent.toolResult.result,
-                    });
-                    setCurrentTool(null);
-                  }
-                  if (event.agentEvent.content) {
-                    assistantContent = event.agentEvent.content;
-                    setPartialResponse(event.agentEvent.content);
-                  }
-                  break;
-              }
-              break;
-            }
-
-            case "turn_end":
-              // turn_end carries the terminal result — extract key fields
-              if (event.result) {
-                stopReason = event.result.stopReason ?? stopReason;
-                if (event.result.reply) {
-                  assistantContent = event.result.reply;
-                }
-                if (
-                  event.result.stopReason === "write_proposal" &&
-                  event.result.proposal
-                ) {
-                  writeProposal = event.result.proposal;
-                }
-              }
-              break;
-
-            case "terminal":
-              // Legacy terminal event (compat with TurnResult return value)
-              stopReason = event.stopReason ?? stopReason;
-              if (event.reply) {
-                assistantContent = event.reply;
-              }
-              if (
-                event.stopReason === "write_proposal" &&
-                event.proposal
-              ) {
-                writeProposal = event.proposal;
-              }
-              break;
-
-            // ── Legacy AgentEvent compat (thought/act/observe at top level) ─
-            case "thought":
-              break;
-
-            case "act":
-              if (event.toolCall) {
-                setCurrentTool(friendlyToolName(event.toolCall.name));
-              }
-              break;
-
-            case "observe":
-              if (event.toolResult) {
-                toolCalls.push({
-                  name: event.toolResult.name,
-                  args: {},
-                  result: event.toolResult.result,
-                });
-                setCurrentTool(null);
-              }
-              if (event.content) {
-                assistantContent = event.content;
-                setPartialResponse(event.content);
-              }
-              break;
-
-            default:
-              break;
-          }
+      const streamState = createAssistantStreamState();
+      await readChatStream(response, (event) => {
+        if (event.type === "error") {
+          throw new Error(event.error ?? "An unexpected error occurred.");
         }
-      }
 
-      // Finalize the assistant message
-      if (assistantContent || stopReason === "gate_blocked" || stopReason === "write_proposal") {
-        const { cleanText, sources } = extractSources(assistantContent);
+        applyAssistantStreamEvent(event, streamState, {
+          setCurrentTool,
+          setPartialResponse,
+        });
+      });
+
+      if (
+        streamState.content ||
+        streamState.stopReason === "gate_blocked" ||
+        streamState.stopReason === "write_proposal"
+      ) {
+        const { cleanText, sources } = extractSources(streamState.content);
 
         const assistantMsg: DisplayMessage = {
           role: "assistant",
-          content: cleanText || assistantContent || "Write proposal awaiting confirmation.",
+          content:
+            cleanText ||
+            streamState.content ||
+            "Write proposal awaiting confirmation.",
           sources: sources.length > 0 ? sources : undefined,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          gateBlocked: stopReason === "gate_blocked",
-          gateReasons: gateReasons.length > 0 ? gateReasons : undefined,
-          stopReason: stopReason || undefined,
-          proposal: writeProposal,
+          toolCalls:
+            streamState.toolCalls.length > 0
+              ? streamState.toolCalls
+              : undefined,
+          gateBlocked: streamState.stopReason === "gate_blocked",
+          gateReasons:
+            streamState.gateReasons.length > 0
+              ? streamState.gateReasons
+              : undefined,
+          stopReason: streamState.stopReason || undefined,
+          proposal: streamState.writeProposal,
         };
         setMessages((prev) => [...prev, assistantMsg]);
 
-        // Show proposal confirmation card
-        if (writeProposal) {
-          setPendingProposal(writeProposal);
+        if (streamState.writeProposal) {
+          setPendingProposal(streamState.writeProposal);
         }
       }
 
@@ -656,10 +773,7 @@ export default function ChatPage() {
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(userId ? { [SESSION_USER_ID_HEADER]: userId } : {}),
-          },
+          headers: chatHeaders(userId),
           body: JSON.stringify({
             tag: "proposal_confirm",
             proposalId: pendingProposal.proposalId,
@@ -669,66 +783,27 @@ export default function ChatPage() {
         });
 
         if (!response.ok) {
-          let errorMsg = "Failed to process confirmation.";
-          try {
-            const err = (await response.json()) as { error?: string };
-            if (err.error) errorMsg = err.error;
-          } catch {
-            // Use default
-          }
-          setError(errorMsg);
-          setConfirming(false);
+          setError(
+            await responseErrorMessage(
+              response,
+              "Failed to process confirmation.",
+            ),
+          );
           return;
         }
 
-        const reader = response.body?.getReader();
-        if (!reader) {
-          setError("Streaming is not supported by your browser.");
-          setConfirming(false);
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
         let reply = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            let event: StreamEvent;
-            try {
-              event = JSON.parse(line) as StreamEvent;
-            } catch {
-              continue;
-            }
-
-            if (event.type === "error") {
-              setError(event.error ?? "Confirmation failed.");
-              setConfirming(false);
-              return;
-            }
-
-            if (
-              event.type === "turn_end" &&
-              event.result?.reply
-            ) {
-              reply = event.result.reply;
-            }
-
-            if (event.type === "terminal" && event.reply) {
-              reply = event.reply;
-            }
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "Confirmation failed.");
           }
-        }
 
-        // Add the confirmation result as an assistant message
+          const result = terminalResultFromEvent(event);
+          if (result?.reply) {
+            reply = result.reply;
+          }
+        });
+
         const confirmMsg: DisplayMessage = {
           role: "assistant",
           content: reply || `Proposal ${confirmed ? "confirmed" : "rejected"}.`,
@@ -738,7 +813,9 @@ export default function ChatPage() {
         setPendingProposal(null);
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Network error during confirmation.",
+          err instanceof Error
+            ? err.message
+            : "Network error during confirmation.",
         );
       } finally {
         setConfirming(false);
@@ -773,9 +850,7 @@ export default function ChatPage() {
       <header className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">
-              NutriBuddy
-            </h1>
+            <h1 className="text-lg font-semibold text-gray-900">NutriBuddy</h1>
             <p className="text-xs text-gray-500">AI Nutrition Assistant</p>
           </div>
           <nav className="flex items-center gap-4">
@@ -785,10 +860,7 @@ export default function ChatPage() {
             >
               Profile
             </a>
-            <a
-              href="/"
-              className="text-sm text-gray-500 hover:text-gray-700"
-            >
+            <a href="/" className="text-sm text-gray-500 hover:text-gray-700">
               Home
             </a>
           </nav>

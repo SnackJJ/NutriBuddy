@@ -1,14 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { extractSources, friendlyToolName } from "../src/lib/chatHelpers";
 import {
+  SESSION_USER_ID_HEADER,
   parseChatBody,
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "../src/lib/chatApi";
-import type { TurnInput } from "../src/harness/turn";
 import { Tracer } from "../src/harness/tracer";
-import { DeepSeekAdapter } from "../src/harness/modelAdapter";
-import type { ChatMessage } from "../src/harness/types";
+import type { ChatMessage, ModelAdapter } from "../src/harness/types";
+
+const TEST_ADAPTER: ModelAdapter = {
+  generate: async () => ({ content: "OK", stop: true }),
+};
 
 // ─── extractSources ────────────────────────────────────────────────────
 
@@ -53,9 +56,7 @@ describe("extractSources", () => {
   });
 
   it("returns empty string when text is only sources", () => {
-    const result = extractSources(
-      "[Source: USDA] [Source: NIH ODS]",
-    );
+    const result = extractSources("[Source: USDA] [Source: NIH ODS]");
     expect(result.sources).toEqual(["USDA", "NIH ODS"]);
     expect(result.cleanText).toBe("");
   });
@@ -168,9 +169,8 @@ describe("chat route request shape", () => {
     expect(history[1]).toEqual({ role: "assistant", content: "Hi there!" });
   });
 
-  it("passes userId when user is identified", () => {
-    const body = { message: "Hello", userId: "abc-123", history: [] };
-    expect(body.userId).toBe("abc-123");
+  it("uses a caller-bound header for user identity", () => {
+    expect(SESSION_USER_ID_HEADER).toBe("X-User-Id");
   });
 });
 
@@ -253,6 +253,36 @@ describe("parseChatBody", () => {
     expect(() => parseChatBody(body)).toThrow(/proposalId/);
   });
 
+  it("rejects a proposal_confirm body that is missing confirmed", () => {
+    const body = {
+      tag: "proposal_confirm",
+      proposalId: "proposal-003",
+    } as unknown as ChatRequestBody;
+
+    expect(() => parseChatBody(body)).toThrow(/confirmed/);
+  });
+
+  it("rejects a proposal_confirm body with non-boolean confirmed", () => {
+    const body = {
+      tag: "proposal_confirm",
+      proposalId: "proposal-004",
+      confirmed: "true",
+    } as unknown as ChatRequestBody;
+
+    expect(() => parseChatBody(body)).toThrow(/confirmed/);
+  });
+
+  it("rejects a proposal_confirm body with non-string feedback", () => {
+    const body = {
+      tag: "proposal_confirm",
+      proposalId: "proposal-005",
+      confirmed: true,
+      feedback: 123,
+    } as unknown as ChatRequestBody;
+
+    expect(() => parseChatBody(body)).toThrow(/feedback/);
+  });
+
   it("rejects an utterance body with empty message", () => {
     const body: ChatRequestBody = {
       message: "   ",
@@ -275,14 +305,10 @@ describe("parseChatBody", () => {
 
 describe("buildChatTurnPorts", () => {
   it("builds ports with sessionUserId extracted from header (not from body)", () => {
-    const adapter = new DeepSeekAdapter({
-      apiKey: "test-key",
-      fetchImpl: async () => new Response(),
-    });
     const tracer = new Tracer();
 
     const ports = buildChatTurnPorts({
-      adapter,
+      adapter: TEST_ADAPTER,
       tracer,
       sessionUserId: "user-from-header-001",
       history: [],
@@ -299,14 +325,10 @@ describe("buildChatTurnPorts", () => {
   });
 
   it("builds ports without sessionUserId when user is anonymous", () => {
-    const adapter = new DeepSeekAdapter({
-      apiKey: "test-key",
-      fetchImpl: async () => new Response(),
-    });
     const tracer = new Tracer();
 
     const ports = buildChatTurnPorts({
-      adapter,
+      adapter: TEST_ADAPTER,
       tracer,
       sessionUserId: undefined,
       history: [],
@@ -317,10 +339,6 @@ describe("buildChatTurnPorts", () => {
   });
 
   it("passes history through ports", () => {
-    const adapter = new DeepSeekAdapter({
-      apiKey: "test-key",
-      fetchImpl: async () => new Response(),
-    });
     const tracer = new Tracer();
     const history: ChatMessage[] = [
       { role: "user", content: "Q1" },
@@ -328,7 +346,7 @@ describe("buildChatTurnPorts", () => {
     ];
 
     const ports = buildChatTurnPorts({
-      adapter,
+      adapter: TEST_ADAPTER,
       tracer,
       sessionUserId: "user-1",
       history,
@@ -416,11 +434,19 @@ describe("turn event stream compatibility", () => {
       { adapter, tracer: new Tracer(), tools },
     );
 
-    const stepEvents: Array<{ type: string; agentEvent: { type: string; step: number } }> = [];
+    const stepEvents: Array<{
+      type: string;
+      agentEvent: { type: string; step: number };
+    }> = [];
     let next = await gen.next();
     while (!next.done) {
       if (next.value.type === "step") {
-        stepEvents.push(next.value as { type: string; agentEvent: { type: string; step: number } });
+        stepEvents.push(
+          next.value as {
+            type: string;
+            agentEvent: { type: string; step: number };
+          },
+        );
       }
       next = await gen.next();
     }

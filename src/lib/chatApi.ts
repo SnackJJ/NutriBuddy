@@ -12,6 +12,8 @@ import type { EventLog } from "../harness/eventLog";
 
 // ─── Request body types ───────────────────────────────────────────────
 
+export const SESSION_USER_ID_HEADER = "X-User-Id";
+
 export interface UtteranceChatBody {
   readonly tag?: "utterance";
   readonly message: string;
@@ -29,39 +31,66 @@ export type ChatRequestBody = UtteranceChatBody | ProposalConfirmChatBody;
 
 // ─── Body parsing ─────────────────────────────────────────────────────
 
-/**
- * Parse a chat request body into a TurnInput for the Turn Seam.
- *
- * When tag is "proposal_confirm", produces a ProposalConfirmInput that
- * short-circuits the model call. When tag is "utterance" or omitted,
- * produces an UtteranceInput for a full model turn.
- */
-export function parseChatBody(body: ChatRequestBody): TurnInput {
-  if (body.tag === "proposal_confirm") {
-    const { tag: _tag, proposalId, confirmed, feedback } = body;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-    if (!proposalId || typeof proposalId !== "string") {
-      throw new Error(
-        "proposalId is required and must be a string for proposal_confirm turns",
-      );
-    }
+function parseProposalConfirmBody(body: Record<string, unknown>): TurnInput {
+  const proposalId = body.proposalId;
+  const confirmed = body.confirmed;
+  const feedback = body.feedback;
 
-    return { tag: "proposal_confirm", proposalId, confirmed, feedback };
-  }
-
-  if (body.tag && body.tag !== "utterance") {
+  if (typeof proposalId !== "string" || proposalId.length === 0) {
     throw new Error(
-      `Unknown turn tag: "${String(body.tag)}". Expected "utterance" or "proposal_confirm".`,
+      "proposalId is required and must be a string for proposal_confirm turns",
     );
   }
 
-  const { message } = body as UtteranceChatBody;
+  if (typeof confirmed !== "boolean") {
+    throw new Error(
+      "confirmed is required and must be a boolean for proposal_confirm turns",
+    );
+  }
 
-  if (!message || typeof message !== "string" || message.trim().length === 0) {
-    throw new Error("message is required and must be non-empty for utterance turns");
+  if (feedback !== undefined && typeof feedback !== "string") {
+    throw new Error(
+      "feedback must be a string when provided for proposal_confirm turns",
+    );
+  }
+
+  return { tag: "proposal_confirm", proposalId, confirmed, feedback };
+}
+
+function parseUtteranceBody(body: Record<string, unknown>): TurnInput {
+  const message = body.message;
+
+  if (typeof message !== "string" || message.trim().length === 0) {
+    throw new Error(
+      "message is required and must be non-empty for utterance turns",
+    );
   }
 
   return { tag: "utterance", content: message.trim() };
+}
+
+export function parseChatBody(body: unknown): TurnInput {
+  if (!isRecord(body)) {
+    throw new Error("request body must be a JSON object");
+  }
+
+  const tag = body.tag;
+
+  if (tag === "proposal_confirm") {
+    return parseProposalConfirmBody(body);
+  }
+
+  if (tag !== undefined && tag !== "utterance") {
+    throw new Error(
+      `Unknown turn tag: "${String(tag)}". Expected "utterance" or "proposal_confirm".`,
+    );
+  }
+
+  return parseUtteranceBody(body);
 }
 
 // ─── Port construction ───────────────────────────────────────────────
@@ -84,9 +113,7 @@ export interface BuildChatTurnPortsInput {
  * This is the boundary where user identity enters the harness
  * outside of model-fillable input (issue #39 / PRD v2 §3.1).
  */
-export function buildChatTurnPorts(
-  input: BuildChatTurnPortsInput,
-): TurnPorts {
+export function buildChatTurnPorts(input: BuildChatTurnPortsInput): TurnPorts {
   return {
     adapter: input.adapter,
     tracer: input.tracer,
