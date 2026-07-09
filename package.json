@@ -10,7 +10,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude **/.sandcastle/**",
-    "eval": "npx tsx src/eval/index.ts"
+    "eval": "npx tsx src/eval/index.ts",
+    "eval:live": "npx tsx src/eval/live-compliance.ts"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.10.0",
