@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { run } from "@/harness/loop";
+import { turn, type AnyTurnEvent, type TurnPorts } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
@@ -9,25 +9,124 @@ import {
   createSupabaseProfileGateway,
 } from "@/lib/memoryStore";
 import { supabaseInteractionStore } from "@/lib/drugInteractions";
-import type { ChatMessage, AgentEvent } from "@/harness/types";
 import type { UserContext } from "@/harness/gate";
 import type { InteractionStore } from "@/lib/drugInteractions";
+import {
+  parseChatBody,
+  buildChatTurnPorts,
+  type ChatRequestBody,
+} from "@/lib/chatApi";
+import { createLogMealHandler } from "@/harness/logMeal";
+import { createGetFoodNutrition } from "@/harness/foodNutrition";
+import type {
+  ProposalStore,
+  Proposal,
+  ProposalInput,
+  MealLogStore,
+  MealLogEntry,
+  MealLogInsert,
+} from "@/harness/logMeal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Expected POST body. */
-interface ChatRequestBody {
-  readonly message: string;
-  readonly history?: readonly ChatMessage[];
-  readonly userId?: string;
+const SESSION_USER_ID_HEADER = "X-User-Id";
+
+// ─── In-memory proposal store (M1 — replaces with Supabase in M2) ───────
+
+interface MemStoreState {
+  proposals: Proposal[];
+  ledger: MealLogEntry[];
 }
 
-/**
- * Try to load the user's safety context (allergies + medications) from
- * Supabase.  Returns undefined when the DB isn't available or the user
- * has no profile yet — the agent simply runs without the pre/post gate.
- */
+function createMemProposalStore(state: MemStoreState): ProposalStore {
+  let nextId = 1000;
+  return {
+    async store(params: ProposalInput): Promise<Proposal> {
+      const id = `proposal-${(nextId++).toString().padStart(4, "0")}`;
+      const proposal: Proposal = {
+        id,
+        userId: params.userId,
+        foodName: params.foodName,
+        portionG: params.portionG,
+        mealType: params.mealType,
+        kcal: params.kcal,
+        proteinG: params.proteinG,
+        fatG: params.fatG,
+        carbsG: params.carbsG,
+        nutritionSource: params.nutritionSource,
+        status: "proposed",
+        createdAt: new Date().toISOString(),
+      };
+      state.proposals.push(proposal);
+      return proposal;
+    },
+    async get(id: string): Promise<Proposal | undefined> {
+      return state.proposals.find((p) => p.id === id);
+    },
+    async commit(id: string): Promise<Proposal> {
+      const idx = state.proposals.findIndex((p) => p.id === id);
+      if (idx === -1) throw new Error(`Proposal ${id} not found`);
+      if (state.proposals[idx].status !== "proposed") {
+        throw new Error(`Proposal ${id} is ${state.proposals[idx].status}`);
+      }
+      state.proposals[idx] = { ...state.proposals[idx], status: "committed" };
+      return state.proposals[idx];
+    },
+    async decline(id: string): Promise<Proposal> {
+      const idx = state.proposals.findIndex((p) => p.id === id);
+      if (idx === -1) throw new Error(`Proposal ${id} not found`);
+      if (state.proposals[idx].status !== "proposed") {
+        throw new Error(`Proposal ${id} is ${state.proposals[idx].status}`);
+      }
+      state.proposals[idx] = { ...state.proposals[idx], status: "rejected" };
+      return state.proposals[idx];
+    },
+  };
+}
+
+function createMemMealLogStore(state: MemStoreState): MealLogStore {
+  return {
+    async insert(params: MealLogInsert): Promise<MealLogEntry> {
+      const entry: MealLogEntry = {
+        id: state.ledger.length + 1,
+        userId: params.userId,
+        foodName: params.foodName,
+        portionG: params.portionG,
+        mealType: params.mealType,
+        loggedAt: new Date().toISOString(),
+        kcal: params.kcal,
+        proteinG: params.proteinG,
+        fatG: params.fatG,
+        carbsG: params.carbsG,
+        proposalId: params.proposalId,
+      };
+      state.ledger.push(entry);
+      return entry;
+    },
+  };
+}
+
+// Module-level state (resets on cold start; M2 replaces with Supabase)
+const memState: MemStoreState = { proposals: [], ledger: [] };
+const memProposalStore = createMemProposalStore(memState);
+const memMealLogStore = createMemMealLogStore(memState);
+
+// ─── Tool wiring ───────────────────────────────────────────────────────
+
+function buildToolMap(sessionUserId: string): Map<string, unknown> {
+  const getFoodNutrition = createGetFoodNutrition();
+  const logMealHandler = createLogMealHandler({
+    getFoodNutrition,
+    proposalStore: memProposalStore,
+    userId: sessionUserId,
+  });
+
+  return new Map([["log_meal", logMealHandler]]);
+}
+
+// ─── User context loading ──────────────────────────────────────────────
+
 async function loadUserContext(
   userId: string,
 ): Promise<
@@ -52,17 +151,39 @@ async function loadUserContext(
       interactionStore: supabaseInteractionStore(client),
     };
   } catch {
-    // DB / table not yet provisioned — proceed without gate
     return undefined;
   }
 }
 
+// ─── Event serialization ───────────────────────────────────────────────
+
 /**
- * POST /api/chat — run the agent loop and stream events back as NDJSON
- * (one JSON object per line).  The client reads the stream progressively
- * to render thought / tool / observe events and the final reply.
+ * Flatten a turn event for the NDJSON stream.
+ *
+ * Step events carry the agentEvent as their primary payload so the client
+ * can handle them the same way as the legacy AgentEvent stream.
+ * The full turn event wrapper (schema, seq, timestamp) is preserved.
+ */
+function serializeTurnEvent(event: AnyTurnEvent): Record<string, unknown> {
+  // Pass through gate_verdict and turn_start/turn_end directly — they're
+  // self-describing and carry all needed fields.
+  return event as unknown as Record<string, unknown>;
+}
+
+// ─── Route handler ─────────────────────────────────────────────────────
+
+/**
+ * POST /api/chat — drive one turn through the Turn Seam.
+ *
+ * Accepts tagged inputs: either an utterance (model turn with full gate
+ * pipeline) or a proposal_confirm (short-circuited confirmation turn).
+ *
+ * Streams typed AnyTurnEvents as NDJSON (one JSON object per line).
+ * The session user identity is read from the X-User-Id header — never
+ * from the model-fillable request body.
  */
 export async function POST(request: NextRequest): Promise<Response> {
+  // ── Parse body ────────────────────────────────────────────────────
   let body: ChatRequestBody;
   try {
     body = (await request.json()) as ChatRequestBody;
@@ -73,31 +194,74 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
   }
 
-  const { message, history = [], userId } = body;
-
-  if (!message || typeof message !== "string" || message.trim().length === 0) {
+  let turnInput;
+  try {
+    turnInput = parseChatBody(body);
+  } catch (err) {
     return new Response(
-      JSON.stringify({ error: "message is required and must be non-empty" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "Invalid request body",
+      }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      },
     );
   }
 
-  // Load safety context before streaming (fail-soft: gate is optional)
-  let userContext: UserContext | undefined;
-  let interactionStore: InteractionStore | undefined;
-  if (userId && typeof userId === "string") {
-    const ctx = await loadUserContext(userId);
+  // ── Extract session user identity from header ─────────────────────
+  const sessionUserId =
+    request.headers.get(SESSION_USER_ID_HEADER)?.trim() || undefined;
+
+  // ── Build ports ───────────────────────────────────────────────────
+  const adapter = new DeepSeekAdapter();
+  const tracer = new Tracer();
+  const sessionId = sessionUserId ?? "anonymous";
+  const eventLog = new EventLog(sessionId);
+
+  // For utterance turns, extract history from the body
+  const history =
+    turnInput.tag === "utterance"
+      ? (body as { history?: readonly { role: string; content: string }[] })
+          .history
+      : undefined;
+
+  let ports = buildChatTurnPorts({
+    adapter,
+    tracer,
+    eventLog,
+    sessionUserId,
+    history: history as
+      | readonly import("@/harness/types").ChatMessage[]
+      | undefined,
+  });
+
+  // ── Wire tools for authenticated utterance turns ─────────────────
+  if (turnInput.tag === "utterance" && sessionUserId) {
+    const tools = buildToolMap(sessionUserId);
+    ports = { ...ports, tools: tools as unknown as TurnPorts["tools"] };
+
+    // Wire proposal + meal stores for the commit path (issue #37)
+    ports = {
+      ...ports,
+      proposalStore: memProposalStore,
+      mealLogStore: memMealLogStore,
+    };
+  }
+
+  // ── Load user safety context (fail-soft) ──────────────────────────
+  if (sessionUserId) {
+    const ctx = await loadUserContext(sessionUserId);
     if (ctx) {
-      userContext = ctx.userContext;
-      interactionStore = ctx.interactionStore;
+      ports = {
+        ...ports,
+        userContext: ctx.userContext,
+        interactionStore: ctx.interactionStore,
+      };
     }
   }
 
-  const adapter = new DeepSeekAdapter();
-  const tracer = new Tracer();
-  const sessionId = userId ?? "anonymous";
-  const eventLog = new EventLog(sessionId);
-
+  // ── Stream ────────────────────────────────────────────────────────
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -107,24 +271,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
-        const gen = run({
-          userInput: message,
-          adapter,
-          tracer,
-          eventLog,
-          history,
-          userContext,
-          interactionStore,
-          tools: undefined,
-        });
+        const gen = turn(turnInput, ports);
 
         let result = await gen.next();
         while (!result.done) {
-          enqueue(result.value as AgentEvent);
+          enqueue(serializeTurnEvent(result.value));
           result = await gen.next();
         }
 
-        // Terminal result is the return value of the generator
+        // The generator return value is the TurnResult — emit as terminal
         enqueue({ type: "terminal", ...result.value });
         controller.close();
       } catch (err) {

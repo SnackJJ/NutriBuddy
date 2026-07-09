@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChatMessage } from "@/harness/types";
+import type { WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ interface DisplayMessage {
   readonly gateReasons?: readonly string[];
   /** The stopReason from the terminal event. */
   readonly stopReason?: string;
+  /** Write-proposal payload (when stopReason is "write_proposal"). */
+  readonly proposal?: WriteProposalData;
 }
 
 interface ToolCallEntry {
@@ -29,16 +32,39 @@ interface ToolCallEntry {
   readonly result?: string;
 }
 
-/** A streaming event from the /api/chat NDJSON stream. */
+/** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
 interface StreamEvent {
   readonly type: string;
   readonly step?: number;
   readonly content?: string;
   readonly toolCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
   readonly toolResult?: { readonly name: string; readonly result: string };
+  /** Agent event carried inside a step event from the Turn Seam. */
+  readonly agentEvent?: {
+    readonly type: "thought" | "act" | "observe";
+    readonly step: number;
+    readonly content?: string;
+    readonly toolCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
+    readonly toolResult?: { readonly name: string; readonly result: string };
+  };
+  /** Terminal result fields (from turn_end result + terminal event). */
   readonly reply?: string;
   readonly steps?: number;
   readonly stopReason?: string;
+  readonly output?: unknown;
+  readonly proposal?: WriteProposalData;
+  /** Gate verdict fields. */
+  readonly checkpoint?: string;
+  readonly verdict?: string;
+  readonly checkName?: string;
+  readonly evidence?: string;
+  /** Result object carried by turn_end events. */
+  readonly result?: {
+    readonly reply: string;
+    readonly steps: number;
+    readonly stopReason: string;
+    readonly proposal?: WriteProposalData;
+  };
   readonly error?: string;
 }
 
@@ -237,7 +263,106 @@ function MessageBubble({
   );
 }
 
+/** Write-proposal confirmation card (issue #39). */
+function ProposalCard({
+  proposal,
+  onConfirm,
+  onReject,
+  confirming,
+}: {
+  proposal: WriteProposalData;
+  onConfirm: (feedback?: string) => void;
+  onReject: () => void;
+  confirming: boolean;
+}) {
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedback, setFeedback] = useState("");
+
+  return (
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        <span className="text-sm font-semibold text-blue-800">
+          Confirm Meal Log
+        </span>
+      </div>
+
+      <div className="mb-3 space-y-1 text-sm text-blue-900">
+        <p>
+          <span className="font-medium">{proposal.foodName}</span> —{" "}
+          {proposal.portionG}g ({proposal.mealType})
+        </p>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-blue-700">
+          {proposal.kcal !== undefined && (
+            <span>{proposal.kcal} kcal</span>
+          )}
+          {proposal.proteinG !== undefined && (
+            <span>{proposal.proteinG}g protein</span>
+          )}
+          {proposal.fatG !== undefined && (
+            <span>{proposal.fatG}g fat</span>
+          )}
+          {proposal.carbsG !== undefined && (
+            <span>{proposal.carbsG}g carbs</span>
+          )}
+        </div>
+        {proposal.nutritionSource && (
+          <p className="text-xs text-blue-500">
+            Source: {proposal.nutritionSource}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onConfirm(showFeedback ? feedback : undefined)}
+          disabled={confirming}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {confirming ? "Confirming…" : "✓ Confirm"}
+        </button>
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={confirming}
+          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ✗ Reject
+        </button>
+        {!showFeedback && (
+          <button
+            type="button"
+            onClick={() => setShowFeedback(true)}
+            disabled={confirming}
+            className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+          >
+            + Add feedback
+          </button>
+        )}
+      </div>
+
+      {showFeedback && (
+        <div className="mt-3">
+          <textarea
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="Optional feedback (e.g. reduce portion, change meal type)…"
+            rows={2}
+            disabled={confirming}
+            className="w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ──────────────────────────────────────────────────────────────
+
+const SESSION_USER_ID_HEADER = "X-User-Id";
 
 /** Generate a stable client-side userId (M1 — no auth yet).
  *  Returns empty string during SSR; the component hydrates via useEffect. */
@@ -264,6 +389,9 @@ export default function ChatPage() {
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [partialResponse, setPartialResponse] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  /** Pending proposal awaiting user confirmation. */
+  const [pendingProposal, setPendingProposal] = useState<WriteProposalData | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -274,7 +402,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, partialResponse, currentTool, scrollToBottom]);
+  }, [messages, partialResponse, currentTool, pendingProposal, scrollToBottom]);
 
   // Auto-resize the textarea (single row, no manual resize)
   useEffect(() => {
@@ -303,6 +431,7 @@ export default function ChatPage() {
     setError(null);
     setCurrentTool(null);
     setPartialResponse("");
+    setPendingProposal(null);
 
     const userMsg: DisplayMessage = {
       role: "user",
@@ -314,8 +443,11 @@ export default function ChatPage() {
       const history = buildHistory(messages);
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, history, userId }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(userId ? { [SESSION_USER_ID_HEADER]: userId } : {}),
+        },
+        body: JSON.stringify({ message: trimmed, history }),
       });
 
       if (!response.ok) {
@@ -344,6 +476,7 @@ export default function ChatPage() {
       const toolCalls: ToolCallEntry[] = [];
       let stopReason = "";
       let gateReasons: string[] = [];
+      let writeProposal: WriteProposalData | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -363,14 +496,93 @@ export default function ChatPage() {
             continue; // Skip malformed JSON lines
           }
 
+          // ── Handle Turn Seam enriched events ──────────────────
           switch (event.type) {
             case "error":
               setError(event.error ?? "An unexpected error occurred.");
               setStreaming(false);
               return;
 
+            case "turn_start":
+              // Turn start — no visible update needed
+              break;
+
+            case "gate_verdict":
+              // Gate verdict checkpoints — collect evidence
+              if (event.verdict === "block" && event.checkpoint === "output") {
+                gateReasons.push(
+                  `${event.checkName ?? "output_gate"}: ${event.evidence ?? "blocked"}`,
+                );
+              }
+              break;
+
+            case "step": {
+              // Step events carry agentEvent (thought/act/observe)
+              if (!event.agentEvent) break;
+
+              switch (event.agentEvent.type) {
+                case "thought":
+                  // thought events are intermediate — no visible update
+                  break;
+
+                case "act":
+                  if (event.agentEvent.toolCall) {
+                    setCurrentTool(
+                      friendlyToolName(event.agentEvent.toolCall.name),
+                    );
+                  }
+                  break;
+
+                case "observe":
+                  if (event.agentEvent.toolResult) {
+                    toolCalls.push({
+                      name: event.agentEvent.toolResult.name,
+                      args: {},
+                      result: event.agentEvent.toolResult.result,
+                    });
+                    setCurrentTool(null);
+                  }
+                  if (event.agentEvent.content) {
+                    assistantContent = event.agentEvent.content;
+                    setPartialResponse(event.agentEvent.content);
+                  }
+                  break;
+              }
+              break;
+            }
+
+            case "turn_end":
+              // turn_end carries the terminal result — extract key fields
+              if (event.result) {
+                stopReason = event.result.stopReason ?? stopReason;
+                if (event.result.reply) {
+                  assistantContent = event.result.reply;
+                }
+                if (
+                  event.result.stopReason === "write_proposal" &&
+                  event.result.proposal
+                ) {
+                  writeProposal = event.result.proposal;
+                }
+              }
+              break;
+
+            case "terminal":
+              // Legacy terminal event (compat with TurnResult return value)
+              stopReason = event.stopReason ?? stopReason;
+              if (event.reply) {
+                assistantContent = event.reply;
+              }
+              if (
+                event.stopReason === "write_proposal" &&
+                event.proposal
+              ) {
+                writeProposal = event.proposal;
+              }
+              break;
+
+            // ── Legacy AgentEvent compat (thought/act/observe at top level) ─
             case "thought":
-              // thought events are intermediate — no visible update needed
               break;
 
             case "act":
@@ -379,7 +591,7 @@ export default function ChatPage() {
               }
               break;
 
-            case "observe": {
+            case "observe":
               if (event.toolResult) {
                 toolCalls.push({
                   name: event.toolResult.name,
@@ -393,15 +605,6 @@ export default function ChatPage() {
                 setPartialResponse(event.content);
               }
               break;
-            }
-
-            case "terminal":
-              stopReason = event.stopReason ?? stopReason;
-              if (event.reply) {
-                assistantContent = event.reply;
-              }
-              // If gate_blocked, the reply is the gate-exhausted message
-              break;
 
             default:
               break;
@@ -410,21 +613,25 @@ export default function ChatPage() {
       }
 
       // Finalize the assistant message
-      if (assistantContent || stopReason === "gate_blocked") {
+      if (assistantContent || stopReason === "gate_blocked" || stopReason === "write_proposal") {
         const { cleanText, sources } = extractSources(assistantContent);
 
-        // Gate-exhausted messages already contain the reasons inline,
-        // so gateReasons may be empty in the typical case.
         const assistantMsg: DisplayMessage = {
           role: "assistant",
-          content: cleanText || assistantContent,
+          content: cleanText || assistantContent || "Write proposal awaiting confirmation.",
           sources: sources.length > 0 ? sources : undefined,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           gateBlocked: stopReason === "gate_blocked",
           gateReasons: gateReasons.length > 0 ? gateReasons : undefined,
           stopReason: stopReason || undefined,
+          proposal: writeProposal,
         };
         setMessages((prev) => [...prev, assistantMsg]);
+
+        // Show proposal confirmation card
+        if (writeProposal) {
+          setPendingProposal(writeProposal);
+        }
       }
 
       setPartialResponse("");
@@ -437,6 +644,108 @@ export default function ChatPage() {
       setStreaming(false);
     }
   }, [input, streaming, messages, userId, buildHistory]);
+
+  /** Confirm a write proposal through a structured turn input. */
+  const handleConfirmProposal = useCallback(
+    async (confirmed: boolean, feedback?: string) => {
+      if (!pendingProposal || confirming) return;
+
+      setConfirming(true);
+      setError(null);
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(userId ? { [SESSION_USER_ID_HEADER]: userId } : {}),
+          },
+          body: JSON.stringify({
+            tag: "proposal_confirm",
+            proposalId: pendingProposal.proposalId,
+            confirmed,
+            ...(feedback ? { feedback } : {}),
+          }),
+        });
+
+        if (!response.ok) {
+          let errorMsg = "Failed to process confirmation.";
+          try {
+            const err = (await response.json()) as { error?: string };
+            if (err.error) errorMsg = err.error;
+          } catch {
+            // Use default
+          }
+          setError(errorMsg);
+          setConfirming(false);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          setError("Streaming is not supported by your browser.");
+          setConfirming(false);
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let reply = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let event: StreamEvent;
+            try {
+              event = JSON.parse(line) as StreamEvent;
+            } catch {
+              continue;
+            }
+
+            if (event.type === "error") {
+              setError(event.error ?? "Confirmation failed.");
+              setConfirming(false);
+              return;
+            }
+
+            if (
+              event.type === "turn_end" &&
+              event.result?.reply
+            ) {
+              reply = event.result.reply;
+            }
+
+            if (event.type === "terminal" && event.reply) {
+              reply = event.reply;
+            }
+          }
+        }
+
+        // Add the confirmation result as an assistant message
+        const confirmMsg: DisplayMessage = {
+          role: "assistant",
+          content: reply || `Proposal ${confirmed ? "confirmed" : "rejected"}.`,
+          stopReason: "end_turn",
+        };
+        setMessages((prev) => [...prev, confirmMsg]);
+        setPendingProposal(null);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Network error during confirmation.",
+        );
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [pendingProposal, confirming, userId],
+  );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */
   const handleKeyDown = useCallback(
@@ -508,6 +817,20 @@ export default function ChatPage() {
 
             {streaming && !currentTool && !partialResponse && (
               <ThinkingIndicator />
+            )}
+
+            {/* Write-proposal confirmation card */}
+            {pendingProposal && !streaming && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] sm:max-w-[75%]">
+                  <ProposalCard
+                    proposal={pendingProposal}
+                    onConfirm={(fb) => handleConfirmProposal(true, fb)}
+                    onReject={() => handleConfirmProposal(false)}
+                    confirming={confirming}
+                  />
+                </div>
+              </div>
             )}
 
             {/* Error banner */}

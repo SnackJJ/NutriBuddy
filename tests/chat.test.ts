@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { extractSources, friendlyToolName } from "../src/lib/chatHelpers";
+import {
+  parseChatBody,
+  buildChatTurnPorts,
+  type ChatRequestBody,
+} from "../src/lib/chatApi";
+import type { TurnInput } from "../src/harness/turn";
+import { Tracer } from "../src/harness/tracer";
+import { DeepSeekAdapter } from "../src/harness/modelAdapter";
+import type { ChatMessage } from "../src/harness/types";
 
 // ─── extractSources ────────────────────────────────────────────────────
 
@@ -162,5 +171,321 @@ describe("chat route request shape", () => {
   it("passes userId when user is identified", () => {
     const body = { message: "Hello", userId: "abc-123", history: [] };
     expect(body.userId).toBe("abc-123");
+  });
+});
+
+// ── Turn Seam body parsing (issue #39) ─────────────────────────────────
+
+describe("parseChatBody", () => {
+  it("parses a default (untagged) body into an utterance TurnInput", () => {
+    const body: ChatRequestBody = {
+      message: "How much protein in chicken?",
+      history: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "Hi!" },
+      ],
+    };
+
+    const input = parseChatBody(body);
+
+    expect(input.tag).toBe("utterance");
+    if (input.tag === "utterance") {
+      expect(input.content).toBe("How much protein in chicken?");
+    }
+  });
+
+  it("parses an explicit utterance-tagged body", () => {
+    const body: ChatRequestBody = {
+      tag: "utterance",
+      message: "What can I eat?",
+      history: [],
+    };
+
+    const input = parseChatBody(body);
+
+    expect(input.tag).toBe("utterance");
+    if (input.tag === "utterance") {
+      expect(input.content).toBe("What can I eat?");
+    }
+  });
+
+  it("parses a proposal_confirm body into a ProposalConfirmInput", () => {
+    const body: ChatRequestBody = {
+      tag: "proposal_confirm",
+      proposalId: "proposal-001",
+      confirmed: true,
+      feedback: "Looks good!",
+    };
+
+    const input = parseChatBody(body);
+
+    expect(input.tag).toBe("proposal_confirm");
+    if (input.tag === "proposal_confirm") {
+      expect(input.proposalId).toBe("proposal-001");
+      expect(input.confirmed).toBe(true);
+      expect(input.feedback).toBe("Looks good!");
+    }
+  });
+
+  it("parses a rejection proposal_confirm body", () => {
+    const body: ChatRequestBody = {
+      tag: "proposal_confirm",
+      proposalId: "proposal-002",
+      confirmed: false,
+    };
+
+    const input = parseChatBody(body);
+
+    expect(input.tag).toBe("proposal_confirm");
+    if (input.tag === "proposal_confirm") {
+      expect(input.proposalId).toBe("proposal-002");
+      expect(input.confirmed).toBe(false);
+      expect(input.feedback).toBeUndefined();
+    }
+  });
+
+  it("rejects a proposal_confirm body that is missing proposalId", () => {
+    const body = {
+      tag: "proposal_confirm",
+      confirmed: true,
+    } as unknown as ChatRequestBody;
+
+    expect(() => parseChatBody(body)).toThrow(/proposalId/);
+  });
+
+  it("rejects an utterance body with empty message", () => {
+    const body: ChatRequestBody = {
+      message: "   ",
+    };
+
+    expect(() => parseChatBody(body)).toThrow(/message/);
+  });
+
+  it("rejects an unrecognised tag", () => {
+    const body = {
+      tag: "unknown_tag",
+      message: "hi",
+    } as unknown as ChatRequestBody;
+
+    expect(() => parseChatBody(body)).toThrow(/unknown turn tag/i);
+  });
+});
+
+// ── Chat Turn Ports with sessionUserId (issue #39) ─────────────────────
+
+describe("buildChatTurnPorts", () => {
+  it("builds ports with sessionUserId extracted from header (not from body)", () => {
+    const adapter = new DeepSeekAdapter({
+      apiKey: "test-key",
+      fetchImpl: async () => new Response(),
+    });
+    const tracer = new Tracer();
+
+    const ports = buildChatTurnPorts({
+      adapter,
+      tracer,
+      sessionUserId: "user-from-header-001",
+      history: [],
+    });
+
+    // sessionUserId should be present on the ports
+    expect(ports.sessionUserId).toBe("user-from-header-001");
+
+    // userId should come from sessionUserId (caller-bound, not model-fillable)
+    expect(ports.userId).toBe("user-from-header-001");
+
+    // The body should not carry userId (it's not even a parameter to the build function)
+    // sessionUserId is the only path user identity enters the harness
+  });
+
+  it("builds ports without sessionUserId when user is anonymous", () => {
+    const adapter = new DeepSeekAdapter({
+      apiKey: "test-key",
+      fetchImpl: async () => new Response(),
+    });
+    const tracer = new Tracer();
+
+    const ports = buildChatTurnPorts({
+      adapter,
+      tracer,
+      sessionUserId: undefined,
+      history: [],
+    });
+
+    expect(ports.sessionUserId).toBeUndefined();
+    expect(ports.userId).toBeUndefined();
+  });
+
+  it("passes history through ports", () => {
+    const adapter = new DeepSeekAdapter({
+      apiKey: "test-key",
+      fetchImpl: async () => new Response(),
+    });
+    const tracer = new Tracer();
+    const history: ChatMessage[] = [
+      { role: "user", content: "Q1" },
+      { role: "assistant", content: "A1" },
+    ];
+
+    const ports = buildChatTurnPorts({
+      adapter,
+      tracer,
+      sessionUserId: "user-1",
+      history,
+    });
+
+    expect(ports.history).toEqual(history);
+  });
+});
+
+// ── Chat API enriched event stream shape (issue #39) ────────────────────
+
+describe("turn event stream compatibility", () => {
+  it("enriched stream has turn_start at seq 0", async () => {
+    const { turn } = await import("../src/harness/turn");
+
+    const adapter = {
+      generate: async () => ({ content: "Hello!", stop: true }),
+    };
+
+    const gen = turn(
+      { tag: "utterance", content: "hi" },
+      { adapter, tracer: new Tracer() },
+    );
+
+    const first = await gen.next();
+    expect(first.done).toBe(false);
+    if (!first.done) {
+      expect(first.value.type).toBe("turn_start");
+      expect(first.value.seq).toBe(0);
+      expect(first.value.schema).toBeTruthy();
+    }
+  });
+
+  it("enriched stream ends with turn_end carrying the terminal result", async () => {
+    const { turn } = await import("../src/harness/turn");
+
+    const adapter = {
+      generate: async () => ({ content: "Hello!", stop: true }),
+    };
+
+    const gen = turn(
+      { tag: "utterance", content: "hi" },
+      { adapter, tracer: new Tracer() },
+    );
+
+    let lastEvent: { type: string } | null = null;
+    let finalResult: unknown;
+    let next = await gen.next();
+    while (!next.done) {
+      lastEvent = next.value as { type: string };
+      next = await gen.next();
+    }
+    finalResult = next.value;
+
+    // Last yielded event is turn_end
+    expect(lastEvent?.type).toBe("turn_end");
+    // Generator return value is the TurnResult
+    expect(finalResult).toBeDefined();
+    expect((finalResult as { reply: string }).reply).toBe("Hello!");
+  });
+
+  it("step events carry agentEvent with expected vocabulary", async () => {
+    const { turn } = await import("../src/harness/turn");
+
+    let callCount = 0;
+    const adapter = {
+      generate: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up...",
+            stop: false,
+            toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+          };
+        }
+        return { content: "Chicken has 31g protein per 100g.", stop: true };
+      },
+    };
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+
+    const gen = turn(
+      { tag: "utterance", content: "chicken protein?" },
+      { adapter, tracer: new Tracer(), tools },
+    );
+
+    const stepEvents: Array<{ type: string; agentEvent: { type: string; step: number } }> = [];
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type === "step") {
+        stepEvents.push(next.value as { type: string; agentEvent: { type: string; step: number } });
+      }
+      next = await gen.next();
+    }
+
+    // Should have thought → act → observe → thought → observe
+    expect(stepEvents.length).toBeGreaterThanOrEqual(3);
+    const agentTypes = stepEvents.map((s) => s.agentEvent.type);
+    expect(agentTypes).toContain("thought");
+    expect(agentTypes).toContain("act");
+    expect(agentTypes).toContain("observe");
+  });
+
+  it("gate_verdict events are present in the enriched stream", async () => {
+    const { turn } = await import("../src/harness/turn");
+
+    const adapter = {
+      generate: async () => ({ content: "OK", stop: true }),
+    };
+
+    const gen = turn(
+      { tag: "utterance", content: "hi" },
+      { adapter, tracer: new Tracer() },
+    );
+
+    const events: Array<{ type: string }> = [];
+    let next = await gen.next();
+    while (!next.done) {
+      events.push(next.value as { type: string });
+      next = await gen.next();
+    }
+
+    const gateEvents = events.filter((e) => e.type === "gate_verdict");
+    expect(gateEvents.length).toBeGreaterThanOrEqual(3); // input, output, commit
+  });
+
+  it("proposal_confirm short-circuits: no step events, no adapter call", async () => {
+    const { turn } = await import("../src/harness/turn");
+
+    let adapterCalled = false;
+    const adapter = {
+      generate: async () => {
+        adapterCalled = true;
+        return { content: "unused", stop: true };
+      },
+    };
+
+    const gen = turn(
+      { tag: "proposal_confirm", proposalId: "p1", confirmed: true },
+      { adapter, tracer: new Tracer() },
+    );
+
+    const events: Array<{ type: string }> = [];
+    let next = await gen.next();
+    while (!next.done) {
+      events.push(next.value as { type: string });
+      next = await gen.next();
+    }
+
+    expect(adapterCalled).toBe(false);
+    expect(events.some((e) => e.type === "step")).toBe(false);
+    expect(events.map((e) => e.type)).toEqual([
+      "turn_start",
+      "gate_verdict",
+      "gate_verdict",
+      "turn_end",
+    ]);
   });
 });
