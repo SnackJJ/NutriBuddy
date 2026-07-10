@@ -77,6 +77,14 @@ export interface ModelUsage {
   readonly cacheMissTokens?: number;
 }
 
+/** Trace payload recorded after each provider model call. */
+export interface ModelCallUsageTracePayload {
+  readonly model: ModelTier;
+  readonly thinking: boolean;
+  readonly latencyMs: number;
+  readonly usage: ModelUsage | null;
+}
+
 export interface ModelResponse {
   readonly content: string;
   /**

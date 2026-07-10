@@ -3828,8 +3828,7 @@ describe("turn event enrichment (issue #51)", () => {
     }
   });
 
-  it("adapter stub responses can carry usage metadata", async () => {
-    // Verify that ModelResponse.usage field is type-compatible
+  it("model_call events carry usage metadata from adapter responses", async () => {
     const adapter: ModelAdapter = {
       generate: async () => ({
         content: "ok",
@@ -3846,8 +3845,17 @@ describe("turn event enrichment (issue #51)", () => {
     const input: TurnInput = { tag: "utterance", content: "test" };
     const ports = createPorts(undefined, { adapter });
 
-    const { result } = await collect(turn(input, ports));
+    const { events, result } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
     expect(result.reply).toBe("ok");
+    expect(modelCallEvents[0]?.usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      cacheHitTokens: 80,
+      cacheMissTokens: 20,
+    });
   });
 });
 

@@ -5,11 +5,15 @@ import { run, type RunTurnInput } from "./loop";
 import type {
   AgentEvent,
   ChatMessage,
+  ModelCallUsageTracePayload,
+  ModelTier,
+  ModelUsage,
   TerminalResult,
   ToolResult,
   TypedOutput,
   WriteProposalData,
 } from "./types";
+import type { TraceEvent } from "./tracer";
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
 import { checkPostGate, type UserContext } from "./gate";
@@ -110,10 +114,10 @@ export interface TurnStepEvent extends TurnEvent {
 export interface TurnModelCallEvent extends TurnEvent {
   readonly type: "model_call";
   readonly step: number;
-  readonly model: import("./types").ModelTier;
+  readonly model: ModelTier;
   readonly thinking: boolean;
   /** Token usage from the provider response (issue #51). */
-  readonly usage?: import("./types").ModelUsage;
+  readonly usage?: ModelUsage;
   /** Round-trip latency in milliseconds (issue #51). */
   readonly latencyMs?: number;
 }
@@ -195,17 +199,71 @@ function createGateVerdictEvent(
   };
 }
 
-interface ModelCallPayload {
-  readonly model: string;
-  readonly thinking: boolean;
-  readonly latencyMs: number;
-  readonly usage: Record<string, unknown> | null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function parseModelCallPayload(payload: string): ModelCallPayload | null {
+function readNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function isModelTier(value: unknown): value is ModelTier {
+  return value === "flash" || value === "pro";
+}
+
+function readNumberAlias(
+  record: Record<string, unknown>,
+  ...keys: readonly string[]
+): number | undefined {
+  for (const key of keys) {
+    const value = readNumber(record, key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function parseModelUsage(value: unknown): ModelUsage | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    promptTokens: readNumberAlias(value, "promptTokens", "prompt_tokens") ?? 0,
+    completionTokens:
+      readNumberAlias(value, "completionTokens", "completion_tokens") ?? 0,
+    totalTokens: readNumberAlias(value, "totalTokens", "total_tokens") ?? 0,
+    cacheHitTokens: readNumberAlias(
+      value,
+      "cacheHitTokens",
+      "prompt_cache_hit_tokens",
+    ),
+    cacheMissTokens: readNumberAlias(
+      value,
+      "cacheMissTokens",
+      "prompt_cache_miss_tokens",
+    ),
+  };
+}
+
+function parseModelCallPayload(
+  payload: string,
+): ModelCallUsageTracePayload | null {
   try {
     const parsed: unknown = JSON.parse(payload);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return null;
     }
     const obj = parsed as Record<string, unknown>;
@@ -216,18 +274,36 @@ function parseModelCallPayload(payload: string): ModelCallPayload | null {
     ) {
       return null;
     }
+
+    if (!isModelTier(obj.model)) {
+      return null;
+    }
+
     return {
       model: obj.model,
       thinking: obj.thinking,
       latencyMs: obj.latencyMs,
-      usage:
-        typeof obj.usage === "object" && obj.usage !== null
-          ? (obj.usage as Record<string, unknown>)
-          : null,
+      usage: parseModelUsage(obj.usage) ?? null,
     };
   } catch {
     return null;
   }
+}
+
+function findModelCallUsageTrace(
+  step: number,
+  tracer: TurnPorts["tracer"],
+): TraceEvent | undefined {
+  const traceEvents = tracer.events();
+
+  for (let index = traceEvents.length - 1; index >= 0; index--) {
+    const event = traceEvents[index];
+    if (event.type === "model_call_usage" && event.step === step) {
+      return event;
+    }
+  }
+
+  return undefined;
 }
 
 function createTurnModelCallEvent(
@@ -235,12 +311,7 @@ function createTurnModelCallEvent(
   tracer: TurnPorts["tracer"],
   nextMetadata: NextEventMetadata,
 ): TurnModelCallEvent | undefined {
-  // Find the most recent model_call_usage trace event for this step
-  const traceEvents = tracer.events();
-  const usageEvent = [...traceEvents]
-    .reverse()
-    .find((e) => e.type === "model_call_usage" && e.step === step);
-
+  const usageEvent = findModelCallUsageTrace(step, tracer);
   if (!usageEvent) {
     return undefined;
   }
@@ -250,48 +321,13 @@ function createTurnModelCallEvent(
     return undefined;
   }
 
-  const usage = payload.usage
-    ? {
-        promptTokens:
-          typeof payload.usage.promptTokens === "number"
-            ? payload.usage.promptTokens
-            : typeof payload.usage.prompt_tokens === "number"
-              ? payload.usage.prompt_tokens
-              : 0,
-        completionTokens:
-          typeof payload.usage.completionTokens === "number"
-            ? payload.usage.completionTokens
-            : typeof payload.usage.completion_tokens === "number"
-              ? payload.usage.completion_tokens
-              : 0,
-        totalTokens:
-          typeof payload.usage.totalTokens === "number"
-            ? payload.usage.totalTokens
-            : typeof payload.usage.total_tokens === "number"
-              ? payload.usage.total_tokens
-              : 0,
-        cacheHitTokens:
-          typeof payload.usage.cacheHitTokens === "number"
-            ? payload.usage.cacheHitTokens
-            : typeof payload.usage.prompt_cache_hit_tokens === "number"
-              ? payload.usage.prompt_cache_hit_tokens
-              : undefined,
-        cacheMissTokens:
-          typeof payload.usage.cacheMissTokens === "number"
-            ? payload.usage.cacheMissTokens
-            : typeof payload.usage.prompt_cache_miss_tokens === "number"
-              ? payload.usage.prompt_cache_miss_tokens
-              : undefined,
-      }
-    : undefined;
-
   return {
     ...nextMetadata(),
     type: "model_call",
     step,
-    model: payload.model as import("./types").ModelTier,
+    model: payload.model,
     thinking: payload.thinking,
-    usage,
+    usage: payload.usage ?? undefined,
     latencyMs: payload.latencyMs,
   };
 }
@@ -483,10 +519,6 @@ function createOutputGateBlockedResult(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function isObservationQueryResult(value: unknown): value is {
   readonly type: "observation";
   readonly observation: Observation;
@@ -515,16 +547,6 @@ function readString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function readNumber(
-  record: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
 }
 
 function readStringArray(

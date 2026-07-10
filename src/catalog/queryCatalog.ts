@@ -339,6 +339,12 @@ export const MAX_OBSERVATION_ROWS = 25;
 /** Default max bytes in the canonical observation text sent to the model. */
 export const MAX_OBSERVATION_BYTES = 4096;
 
+const OBSERVATION_TRACE_NOTICE = "full data available in session trace";
+
+function omittedRowsNotice(omittedRows: number): string {
+  return `[${omittedRows} row(s) omitted — ${OBSERVATION_TRACE_NOTICE}]`;
+}
+
 /**
  * Render a single observation row as a canonical text line.
  * Columns are rendered as "name: value unit" for the model to read.
@@ -390,20 +396,21 @@ export function renderObservationText(
   for (let i = 0; i < cappedRows; i++) {
     const line = renderObservationRow(obs.rows[i], obs.columns);
     if (i === 0 && line.length > maxBytes) {
-      // First row alone exceeds byte ceiling — render just the first row truncated
       const short = line.slice(0, maxBytes - 3) + "...";
       renderedRows.push(
         `[row 1 of ${obs.rowCount} truncated at ${maxBytes}B] ${short}`,
       );
-      return { text: renderedRows.join("\n"), truncated: true, renderedRows: 1 };
+      return {
+        text: renderedRows.join("\n"),
+        truncated: true,
+        renderedRows: 1,
+      };
     }
 
     const candidate = [...renderedRows, line].join("\n");
     if (candidate.length > maxBytes) {
       const omitted = obs.rowCount - i;
-      renderedRows.push(
-        `[${omitted} row(s) omitted — full data available in session trace]`,
-      );
+      renderedRows.push(omittedRowsNotice(omitted));
       return {
         text: renderedRows.join("\n"),
         truncated: true,
@@ -416,9 +423,7 @@ export function renderObservationText(
 
   if (truncatedByRows) {
     const omitted = obs.rowCount - cappedRows;
-    renderedRows.push(
-      `[${omitted} row(s) omitted — full data available in session trace]`,
-    );
+    renderedRows.push(omittedRowsNotice(omitted));
   }
 
   return {

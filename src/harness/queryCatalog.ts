@@ -6,9 +6,11 @@
 
 import type { ToolHandler, ToolSchema } from "./types";
 import type {
+  Observation,
   QueryCatalog,
   QueryResult,
   QueryRunner,
+  RenderedObservation,
 } from "../catalog/queryCatalog";
 import {
   executeQuery,
@@ -98,6 +100,38 @@ function templateParams(
   return params;
 }
 
+function recordObservationTrace(
+  tracer: Tracer | undefined,
+  observation: Observation,
+  rendered: RenderedObservation,
+): void {
+  tracer?.record({
+    // Tool handlers are step-agnostic; loop tool_call traces carry the dispatch step.
+    step: 0,
+    type: "observation",
+    payload: JSON.stringify({
+      observation,
+      truncated: rendered.truncated,
+      renderedRows: rendered.renderedRows,
+    }),
+  });
+}
+
+function observationResponse(
+  observation: Observation,
+  rendered: RenderedObservation,
+): {
+  readonly type: "observation";
+  readonly text: string;
+  readonly observation: Observation;
+} {
+  return {
+    type: "observation",
+    text: rendered.text,
+    observation,
+  };
+}
+
 // ─── 工具工厂 ─────────────────────────────────────────────────────────────
 
 /**
@@ -133,28 +167,13 @@ export function createQueryCatalogHandler(
         runner,
       );
 
-      // ── Issue #51: Context-split observations ──────────────────────────
-      // Model gets canonical (possibly capped) text; full fidelity goes to
-      // the session trace via the tracer for offline consumers (eval, RL).
       if (result.type === "observation") {
         const rendered = renderObservationText(result.observation);
+        recordObservationTrace(tracer, result.observation, rendered);
 
-        // Record full-fidelity observation in the tracer for eval/RL.
-        tracer?.record({
-          step: 0, // step set by the turn layer when consumed
-          type: "observation",
-          payload: JSON.stringify({
-            observation: result.observation,
-            truncated: rendered.truncated,
-            renderedRows: rendered.renderedRows,
-          }),
-        });
-
-        return JSON.stringify({
-          type: "observation",
-          text: rendered.text,
-          observation: result.observation,
-        });
+        return JSON.stringify(
+          observationResponse(result.observation, rendered),
+        );
       }
 
       return JSON.stringify(result);

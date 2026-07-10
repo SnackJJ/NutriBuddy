@@ -24,6 +24,7 @@ import {
 import type {
   AgentEvent,
   ChatMessage,
+  ModelCallUsageTracePayload,
   ModelAdapter,
   ModelTier,
   TerminalResult,
@@ -364,17 +365,17 @@ export async function* run(
 
     tracer.record({ step, type: "model_return", payload: response.content });
 
-    // Issue #51: Record model call usage and latency in the tracer
-    // so the turn layer can emit TurnModelCallEvent for the event stream.
+    const usagePayload: ModelCallUsageTracePayload = {
+      model: tier,
+      thinking,
+      latencyMs,
+      usage: response.usage ?? null,
+    };
+
     tracer.record({
       step,
       type: "model_call_usage",
-      payload: JSON.stringify({
-        model: tier,
-        thinking,
-        latencyMs,
-        usage: response.usage ?? null,
-      }),
+      payload: JSON.stringify(usagePayload),
     });
 
     if (response.toolCalls && response.toolCalls.length > 0) {
