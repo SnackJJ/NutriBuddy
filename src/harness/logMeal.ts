@@ -1,14 +1,20 @@
-// log_meal 工具处理器（issue #14 / PRD v2 §3.1「ToolRegistry」/ issue #36）。
+// log_meal 工具处理器（issue #14 / PRD v2 §3.1「ToolRegistry」/ issue #36 / issue #44）。
 //
-// Proposal-only writes: resolves food entities and computes nutrition
-// server-side, then stores an immutable proposal rather than a meal ledger
-// row. The turn ends with a write-proposal terminal event; the user confirms
+// Proposal-only writes: resolves food strings through the deterministic catalog
+// resolver cascade (exact → alias → fuzzy), computes nutrition from per-100g
+// catalog values server-side, and stores an immutable proposal. A resolver miss
+// (ambiguous / low-confidence / unknown) returns a typed clarification error so
+// the turn ends asking for clarification instead of guessing.
+//
+// The turn ends with a write-proposal terminal event; the user confirms
 // in a later turn before any mutation occurs.
 //
-// 所有副作用依赖（营养查询 / 提案存储）皆可注入，单测不触网。
+// 所有副作用依赖（catalog / 提案存储）皆可注入，单测不触网。
 
 import type { ToolHandler } from "./types";
-import type { GetFoodNutrition } from "./foodNutrition";
+import type { Catalog } from "../catalog/catalog";
+import { resolveFood } from "../catalog/resolver";
+import type { FoodRef, ResolveResult } from "../catalog/catalog";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -30,7 +36,9 @@ export type ProposalStatus =
 /** 写入提案所需的不可变数据。 */
 export interface ProposalInput {
   readonly userId: string;
+  readonly foodId: string;
   readonly foodName: string;
+  readonly canonicalName: string;
   readonly portionG: number;
   readonly mealType: string;
   readonly kcal: number;
@@ -38,13 +46,17 @@ export interface ProposalInput {
   readonly fatG: number;
   readonly carbsG: number;
   readonly nutritionSource: string;
+  readonly matchType: string;
+  readonly allergenTags: readonly string[];
 }
 
 /** 已持久化的不可变提案。 */
 export interface Proposal {
   readonly id: string;
   readonly userId: string;
+  readonly foodId: string;
   readonly foodName: string;
+  readonly canonicalName: string;
   readonly portionG: number;
   readonly mealType: string;
   readonly kcal: number;
@@ -52,6 +64,8 @@ export interface Proposal {
   readonly fatG: number;
   readonly carbsG: number;
   readonly nutritionSource: string;
+  readonly matchType: string;
+  readonly allergenTags: readonly string[];
   readonly status: ProposalStatus;
   readonly createdAt: string;
 }
@@ -111,8 +125,8 @@ export interface MealLogStore {
 // ─── 工具依赖 ─────────────────────────────────────────────────────────────
 
 export interface LogMealDeps {
-  /** 营养数据查询（可注入内置 stub 或 USDA API）。 */
-  readonly getFoodNutrition: GetFoodNutrition;
+  /** Local food catalog for resolver lookup (issue #44). */
+  readonly catalog: Catalog;
   /** 不可变提案存储（不直接写入 meal ledger — issue #36）。 */
   readonly proposalStore: ProposalStore;
   /** 当前用户 ID（由调用方注入，不暴露给模型）。 */
@@ -161,6 +175,23 @@ function parseArgs(
   return { foodName: foodName.trim(), portionG, mealType };
 }
 
+// ─── 营养缩放 ─────────────────────────────────────────────────────────────
+
+/** Scale per-100g nutrition values to the requested portion. */
+function scaleNutrition(
+  per100g: FoodRef["per100g"],
+  portionG: number,
+): { kcal: number; proteinG: number; fatG: number; carbsG: number } {
+  const scale = portionG / 100;
+  const round = (v: number) => Math.round(v * scale * 10) / 10;
+  return {
+    kcal: round(per100g.kcal),
+    proteinG: round(per100g.proteinG),
+    fatG: round(per100g.fatG),
+    carbsG: round(per100g.carbsG),
+  };
+}
+
 // ─── 响应构建 ─────────────────────────────────────────────────────────────
 
 function proposalResponse(proposal: Proposal): string {
@@ -169,7 +200,9 @@ function proposalResponse(proposal: Proposal): string {
     message: `Log ${proposal.portionG}g ${proposal.foodName} for ${proposal.mealType}? (${proposal.kcal} kcal, ${proposal.proteinG}g protein) — Confirm?`,
     proposal: {
       id: proposal.id,
+      food_id: proposal.foodId,
       food_name: proposal.foodName,
+      canonical_name: proposal.canonicalName,
       portion_g: proposal.portionG,
       meal_type: proposal.mealType,
       created_at: proposal.createdAt,
@@ -180,6 +213,8 @@ function proposalResponse(proposal: Proposal): string {
         carbs_g: proposal.carbsG,
       },
       nutrition_source: proposal.nutritionSource,
+      match_type: proposal.matchType,
+      allergen_tags: proposal.allergenTags,
     },
     nutrition_summary: {
       kcal: proposal.kcal,
@@ -188,6 +223,51 @@ function proposalResponse(proposal: Proposal): string {
       carbs_g: proposal.carbsG,
     },
   });
+}
+
+function missResponse(result: ResolveResult): string {
+  const base = {
+    error: `food not found in catalog: "${result.input}"`,
+    match_type: result.matchType,
+    catalog_snapshot: result.catalogSnapshotId,
+    message: clarificationMessage(result),
+  };
+
+  if (result.candidates && result.candidates.length > 0) {
+    return JSON.stringify({
+      ...base,
+      candidates: result.candidates.map((c) => ({
+        food_id: c.foodId,
+        food_name: c.canonicalName,
+        match_score: Math.round(c.matchScore * 100) / 100,
+        allergen_tags: c.allergenTags,
+      })),
+    });
+  }
+
+  return JSON.stringify(base);
+}
+
+function clarificationMessage(result: ResolveResult): string {
+  switch (result.matchType) {
+    case "miss_ambiguous":
+      return (
+        `"${result.input}" matched multiple foods with similar scores. ` +
+        "Could you be more specific?"
+      );
+    case "miss_low_confidence":
+      return (
+        `"${result.input}" had a low-confidence match. ` +
+        "Did you mean one of the candidates?"
+      );
+    case "miss_unknown":
+      return (
+        `"${result.input}" is not in the food catalog. ` +
+        "Try a different name or check the spelling."
+      );
+    default:
+      return `"${result.input}" could not be resolved.`;
+  }
 }
 
 function errorResponse(message: string): string {
@@ -204,10 +284,12 @@ export const LOG_MEAL_SCHEMA = {
     description:
       "Propose logging a meal to the user's food diary. Provide food name, " +
       "portion in grams, and meal type (breakfast/lunch/dinner/snack). " +
-      "The tool resolves food entities and computes nutrition from USDA data, " +
-      "then stores an immutable proposal. The user must confirm before any " +
-      "data is written to the meal ledger. Returns a confirmation prompt with " +
-      "a nutrition summary (kcal, protein, fat, carbs).",
+      "The tool resolves food entities through the local catalog resolver " +
+      "(exact → alias → fuzzy cascade) and computes nutrition from catalog " +
+      "per-100g values, then stores an immutable proposal. The user must " +
+      "confirm before any data is written to the meal ledger. Returns a " +
+      "confirmation prompt with a nutrition summary (kcal, protein, fat, " +
+      "carbs) and resolved entity lineage (food id, match type, allergens).",
     parameters: {
       type: "object" as const,
       properties: {
@@ -241,9 +323,12 @@ export const LOG_MEAL_SCHEMA = {
  *
  * Issue #36：处理器存储不可变提案而非直接写入膳食账本。
  * 模型输出路径无法触及 MealLogStore。
+ *
+ * Issue #44：食物通过 catalog resolver 解析，营养从 catalog per-100g
+ * 值按份量缩放。resolver miss 时返回 typed clarification 而非猜测。
  */
 export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
-  const { getFoodNutrition, proposalStore, userId } = deps;
+  const { catalog, proposalStore, userId } = deps;
 
   return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
     try {
@@ -252,24 +337,30 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
         return errorResponse(parsed);
       }
 
-      let nutrition;
-      try {
-        nutrition = await getFoodNutrition(parsed.foodName, parsed.portionG);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return errorResponse(`nutrition lookup failed: ${message}`);
+      const resolved = resolveFood(catalog, parsed.foodName);
+
+      // ── Resolver miss → clarification ──────────────────────────────────
+      if (resolved.foodRef === null) {
+        return missResponse(resolved);
       }
+
+      const foodRef = resolved.foodRef;
+      const scaled = scaleNutrition(foodRef.per100g, parsed.portionG);
 
       const proposal = await proposalStore.store({
         userId,
-        foodName: nutrition.foodName,
-        portionG: nutrition.portionG,
+        foodId: foodRef.foodId,
+        foodName: parsed.foodName,
+        canonicalName: foodRef.canonicalName,
+        portionG: parsed.portionG,
         mealType: parsed.mealType,
-        kcal: nutrition.kcal,
-        proteinG: nutrition.proteinG,
-        fatG: nutrition.fatG,
-        carbsG: nutrition.carbsG,
-        nutritionSource: nutrition.source,
+        kcal: scaled.kcal,
+        proteinG: scaled.proteinG,
+        fatG: scaled.fatG,
+        carbsG: scaled.carbsG,
+        nutritionSource: resolved.catalogSnapshotId,
+        matchType: foodRef.matchType,
+        allergenTags: foodRef.allergenTags,
       });
 
       return proposalResponse(proposal);

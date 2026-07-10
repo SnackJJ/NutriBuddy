@@ -6,10 +6,7 @@ import {
   type Proposal,
   type ProposalInput,
 } from "../src/harness/logMeal";
-import type {
-  GetFoodNutrition,
-  NutritionData,
-} from "../src/harness/foodNutrition";
+import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,23 +18,9 @@ function nextProposalId(): string {
   return `proposal-${proposalCounter.toString().padStart(3, "0")}`;
 }
 
-function fakeNutrition(data: Partial<NutritionData> = {}): GetFoodNutrition {
-  return vi.fn(async (_foodName: string, _portionG: number) => ({
-    foodName: "chicken breast",
-    portionG: 200,
-    kcal: 330,
-    proteinG: 62,
-    fatG: 7.2,
-    carbsG: 0,
-    source: "test stub",
-    ...data,
-  }));
-}
-
-function throwingNutrition(message: string): GetFoodNutrition {
-  return async () => {
-    throw new Error(message);
-  };
+/** Build a small test catalog from the seed — the handler resolves against it. */
+function testCatalog(): Catalog {
+  return createCatalog(SEED_FOODS);
 }
 
 interface MemProposalState {
@@ -56,7 +39,9 @@ function memProposalStore(state?: MemProposalState): {
         const proposal: Proposal = {
           id: nextProposalId(),
           userId: params.userId,
+          foodId: params.foodId,
           foodName: params.foodName,
+          canonicalName: params.canonicalName,
           portionG: params.portionG,
           mealType: params.mealType,
           kcal: params.kcal,
@@ -64,6 +49,8 @@ function memProposalStore(state?: MemProposalState): {
           fatG: params.fatG,
           carbsG: params.carbsG,
           nutritionSource: params.nutritionSource,
+          matchType: params.matchType,
+          allergenTags: params.allergenTags,
           status: "proposed",
           createdAt: new Date("2026-06-26T12:00:00Z").toISOString(),
         };
@@ -126,7 +113,7 @@ describe("createLogMealHandler", () => {
   it("returns a function", () => {
     const { store } = memProposalStore();
     const handler = createLogMealHandler({
-      getFoodNutrition: fakeNutrition(),
+      catalog: testCatalog(),
       proposalStore: store,
       userId: TEST_USER,
     });
@@ -139,7 +126,7 @@ describe("createLogMealHandler", () => {
     it("rejects missing food_name", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -153,7 +140,7 @@ describe("createLogMealHandler", () => {
     it("rejects empty food_name", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -167,7 +154,7 @@ describe("createLogMealHandler", () => {
     it("rejects whitespace-only food_name", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -181,7 +168,7 @@ describe("createLogMealHandler", () => {
     it("rejects missing portion_g", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -195,7 +182,7 @@ describe("createLogMealHandler", () => {
     it("rejects zero portion_g", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -212,7 +199,7 @@ describe("createLogMealHandler", () => {
     it("rejects negative portion_g", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -229,7 +216,7 @@ describe("createLogMealHandler", () => {
     it("rejects non-numeric portion_g", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -246,7 +233,7 @@ describe("createLogMealHandler", () => {
     it("rejects invalid meal_type", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -264,7 +251,7 @@ describe("createLogMealHandler", () => {
     it("accepts valid meal_types: breakfast, lunch, dinner, snack", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -288,7 +275,7 @@ describe("createLogMealHandler", () => {
     it('defaults to "snack" when meal_type is omitted', async () => {
       const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -304,14 +291,249 @@ describe("createLogMealHandler", () => {
     });
   });
 
+  // ─── Catalog Resolver (issue #44) ───────────────────────────────────────
+
+  describe("catalog resolver", () => {
+    it("resolves via exact match on canonical name", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
+      expect(parsed.proposal.canonical_name).toBe("chicken breast");
+      expect(parsed.proposal.match_type).toBe("exact");
+      expect(parsed.proposal.allergen_tags).toEqual([]);
+
+      expect(state.proposals[0].foodId).toBe("food-chicken-breast-001");
+      expect(state.proposals[0].canonicalName).toBe("chicken breast");
+      expect(state.proposals[0].matchType).toBe("exact");
+    });
+
+    it("resolves via alias (case-insensitive)", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // "steak" is an alias for "beef steak"
+      const result = await handler({
+        food_name: "steak",
+        portion_g: 150,
+        meal_type: "dinner",
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.food_id).toBe("food-beef-steak-001");
+      expect(parsed.proposal.canonical_name).toBe("beef steak");
+      expect(parsed.proposal.match_type).toBe("alias");
+
+      expect(state.proposals[0].foodId).toBe("food-beef-steak-001");
+      expect(state.proposals[0].matchType).toBe("alias");
+    });
+
+    it("fuzzy-resolves a typo input and names the resolved entity", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // "chicken brest" (single char omission in "breast") → fuzzy match to "chicken breast"
+      const result = await handler({
+        food_name: "chicken brest",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
+      expect(parsed.proposal.canonical_name).toBe("chicken breast");
+      expect(parsed.proposal.match_type).toBe("fuzzy");
+      expect(parsed.proposal.food_name).toBe("chicken brest"); // original input preserved
+    });
+
+    it("returns clarification for unknown food (miss_unknown)", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "xyzzy_nonexistent_food_12345",
+        portion_g: 100,
+      });
+      const parsed = JSON.parse(result);
+
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toContain("not found in catalog");
+      expect(parsed.match_type).toBe("miss_unknown");
+      expect(parsed.message).toBeDefined();
+      expect(parsed.message).toContain("not in the food catalog");
+      // No proposal was stored
+      expect(state.proposals.length).toBe(0);
+    });
+
+    it("returns candidates for ambiguous miss", async () => {
+      // Create a catalog with two very similar foods to trigger ambiguity
+      const ambCatalog = createCatalog([
+        {
+          id: "food-test-a",
+          canonicalName: "test food alpha",
+          aliases: [],
+          per100g: { kcal: 100, proteinG: 10, fatG: 5, carbsG: 5, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+          allergenTags: [],
+          portionAliases: {},
+          category: "test",
+        },
+        {
+          id: "food-test-b",
+          canonicalName: "test food bravo",
+          aliases: [],
+          per100g: { kcal: 150, proteinG: 15, fatG: 8, carbsG: 3, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+          allergenTags: ["milk"],
+          portionAliases: {},
+          category: "test",
+        },
+      ]);
+
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: ambCatalog,
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // "test food" should fuzzy-match both with similar scores → ambiguous
+      const result = await handler({
+        food_name: "test food",
+        portion_g: 100,
+      });
+      const parsed = JSON.parse(result);
+
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error).toContain("not found in catalog");
+      // Either ambiguous or low_confidence — both mean miss
+      expect(["miss_ambiguous", "miss_low_confidence"]).toContain(parsed.match_type);
+      // No proposal was stored
+      expect(state.proposals.length).toBe(0);
+    });
+
+    it("preserves allergen tags from the resolved catalog entry", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // "salmon" has allergenTags ["fish"]
+      const result = await handler({
+        food_name: "salmon",
+        portion_g: 150,
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.allergen_tags).toContain("fish");
+      expect(state.proposals[0].allergenTags).toContain("fish");
+    });
+
+    it("computes nutrition from catalog per-100g values scaled by portion", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      // Chicken breast per 100g: kcal=165, protein=31, fat=3.6, carbs=0
+      // 200g → kcal=330, protein=62, fat=7.2, carbs=0
+      const result = await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+        meal_type: "lunch",
+      });
+      const parsed = JSON.parse(result);
+
+      expect(parsed.nutrition_summary.kcal).toBe(330);
+      expect(parsed.nutrition_summary.protein_g).toBe(62);
+      expect(parsed.nutrition_summary.fat_g).toBe(7.2);
+      expect(parsed.nutrition_summary.carbs_g).toBe(0);
+    });
+
+    it("uses the catalog snapshot version as nutrition_source", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      await handler({
+        food_name: "chicken breast",
+        portion_g: 200,
+      });
+
+      expect(state.proposals[0].nutritionSource).toContain("usda-sr-legacy");
+    });
+
+    it("matches case-insensitively", async () => {
+      const { store } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "CHICKEN BREAST",
+        portion_g: 200,
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.canonical_name).toBe("chicken breast");
+    });
+
+    it("resolves 'rice' as alias for 'white rice'", async () => {
+      const { store, state } = memProposalStore();
+      const handler = createLogMealHandler({
+        catalog: testCatalog(),
+        proposalStore: store,
+        userId: TEST_USER,
+      });
+
+      const result = await handler({
+        food_name: "rice",
+        portion_g: 150,
+      });
+      const parsed = JSON.parse(result);
+      expect(parsed.proposal_id).toBeDefined();
+      expect(parsed.proposal.food_id).toBe("food-rice-white-001");
+      expect(state.proposals[0].matchType).toBe("alias");
+    });
+  });
+
   // ─── Proposal Creation ─────────────────────────────────────────────────
 
   describe("proposal creation", () => {
     it("stores a proposal and returns confirmation prompt + nutrition summary", async () => {
       const { store, state } = memProposalStore();
-      const nutrition = fakeNutrition();
       const handler = createLogMealHandler({
-        getFoodNutrition: nutrition,
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -347,26 +569,10 @@ describe("createLogMealHandler", () => {
       expect(state.proposals[0].status).toBe("proposed");
     });
 
-    it("stores the nutrition source in the proposal", async () => {
-      const { store, state } = memProposalStore();
-      const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition({ source: "USDA FoodData Central" }),
-        proposalStore: store,
-        userId: TEST_USER,
-      });
-
-      await handler({
-        food_name: "chicken breast",
-        portion_g: 200,
-      });
-
-      expect(state.proposals[0].nutritionSource).toBe("USDA FoodData Central");
-    });
-
     it("trims whitespace from food_name", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -380,24 +586,10 @@ describe("createLogMealHandler", () => {
       expect(parsed.proposal.food_name).toBe("chicken breast");
     });
 
-    it("calls getFoodNutrition with correct arguments", async () => {
-      const { store } = memProposalStore();
-      const nutrition = fakeNutrition();
-      const handler = createLogMealHandler({
-        getFoodNutrition: nutrition,
-        proposalStore: store,
-        userId: TEST_USER,
-      });
-
-      await handler({ food_name: "chicken breast", portion_g: 350 });
-
-      expect(nutrition).toHaveBeenCalledWith("chicken breast", 350);
-    });
-
     it("returns a unique proposal id for each call", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -406,7 +598,7 @@ describe("createLogMealHandler", () => {
         await handler({ food_name: "chicken breast", portion_g: 200 }),
       );
       const r2 = JSON.parse(
-        await handler({ food_name: "rice", portion_g: 150 }),
+        await handler({ food_name: "white rice", portion_g: 150 }),
       );
 
       expect(r1.proposal_id).not.toBe(r2.proposal_id);
@@ -417,17 +609,9 @@ describe("createLogMealHandler", () => {
     // The handler has no access to MealLogStore, so the meal ledger is
     // untouched by construction — no model-output path can mutate it.
     it("does not accept a MealLogStore dependency (structurally prevents meal ledger writes)", () => {
-      // TypeScript-level check: LogMealDeps only exposes proposalStore.
-      // This test documents the structural guarantee. There is no
-      // mealLogStore field on LogMealDeps, so no caller can pass one.
-      // The log_meal handler cannot mutate the meal ledger because it
-      // has no reference to it.
-      //
-      // We verify by constructing a handler with only proposalStore and
-      // confirming it works — proving MealLogStore is unnecessary.
       const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -439,7 +623,6 @@ describe("createLogMealHandler", () => {
     // Issue #36: explicit demonstration that a logging intent creates a
     // proposal and leaves the meal ledger untouched.
     it("creates a proposal without touching the meal ledger", async () => {
-      // Set up a mock meal ledger with a spy to detect any writes.
       let mealLedgerInserted = false;
       const _mealLogStore = {
         async insert() {
@@ -460,17 +643,13 @@ describe("createLogMealHandler", () => {
         },
       };
 
-      // The handler under test only accepts proposalStore (not mealLogStore).
-      // This is the structural guarantee: no model-output path can reach
-      // the meal ledger.
       const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
 
-      // Execute a valid log_meal call.
       const result = await handler({
         food_name: "chicken breast",
         portion_g: 200,
@@ -478,14 +657,12 @@ describe("createLogMealHandler", () => {
       });
       const parsed = JSON.parse(result);
 
-      // Proposal WAS created.
       expect(parsed.proposal_id).toBeDefined();
       expect(state.proposals.length).toBe(1);
       expect(state.proposals[0].foodName).toBe("chicken breast");
       expect(state.proposals[0].status).toBe("proposed");
 
-      // Meal ledger was NOT touched — the mock was never invoked because
-      // the handler has no reference to it.
+      // Meal ledger was NOT touched
       expect(mealLedgerInserted).toBe(false);
     });
   });
@@ -493,27 +670,9 @@ describe("createLogMealHandler", () => {
   // ─── Error Handling ─────────────────────────────────────────────────────
 
   describe("error handling", () => {
-    it("returns error when nutrition lookup fails", async () => {
-      const { store } = memProposalStore();
-      const handler = createLogMealHandler({
-        getFoodNutrition: throwingNutrition("Food not found in database"),
-        proposalStore: store,
-        userId: TEST_USER,
-      });
-
-      const result = await handler({
-        food_name: "unknown exotic food",
-        portion_g: 100,
-      });
-      const parsed = JSON.parse(result);
-      expect(parsed.error).toBeDefined();
-      expect(parsed.error).toContain("nutrition lookup failed");
-      expect(parsed.error).toContain("Food not found");
-    });
-
     it("returns error when proposal store fails", async () => {
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: throwingProposalStore("DB connection failed"),
         userId: TEST_USER,
       });
@@ -528,16 +687,16 @@ describe("createLogMealHandler", () => {
       expect(parsed.error).toContain("DB connection failed");
     });
 
-    it("does not store proposal when nutrition lookup fails", async () => {
+    it("does not store proposal when resolver returns a miss", async () => {
       const { store, state } = memProposalStore();
       const storeSpy = vi.fn(store.store);
       const handler = createLogMealHandler({
-        getFoodNutrition: throwingNutrition("not found"),
+        catalog: testCatalog(),
         proposalStore: { ...store, store: storeSpy },
         userId: TEST_USER,
       });
 
-      await handler({ food_name: "bad food", portion_g: 100 });
+      await handler({ food_name: "xyzzy_nonexistent_food_12345", portion_g: 100 });
       expect(storeSpy).not.toHaveBeenCalled();
       expect(state.proposals.length).toBe(0);
     });
@@ -549,7 +708,7 @@ describe("createLogMealHandler", () => {
     it("returns valid JSON", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -565,7 +724,7 @@ describe("createLogMealHandler", () => {
     it("error responses contain an error key", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -578,7 +737,7 @@ describe("createLogMealHandler", () => {
     it("proposal responses contain proposal_id, message, proposal, nutrition_summary", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -605,7 +764,7 @@ describe("createLogMealHandler", () => {
     it("message includes confirmation prompt wording", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -622,11 +781,11 @@ describe("createLogMealHandler", () => {
       expect(parsed.message).toContain("62g protein");
     });
 
-    // Issue #36: the response is shaped for the write-proposal terminal event
+    // Issue #36 / Issue #44: the response carries resolved entity lineage
     it("proposal object carries resolved entities for terminal event", async () => {
       const { store } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: TEST_USER,
       });
@@ -638,10 +797,10 @@ describe("createLogMealHandler", () => {
       });
       const parsed = JSON.parse(result);
 
-      // The proposal object in the response contains the data the turn
-      // will use to construct the write-proposal terminal event.
       expect(parsed.proposal.id).toBeDefined();
+      expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
       expect(parsed.proposal.food_name).toBe("chicken breast");
+      expect(parsed.proposal.canonical_name).toBe("chicken breast");
       expect(parsed.proposal.portion_g).toBe(200);
       expect(parsed.proposal.meal_type).toBe("lunch");
       expect(parsed.proposal.created_at).toBeDefined();
@@ -649,7 +808,9 @@ describe("createLogMealHandler", () => {
       expect(parsed.proposal.nutrition.protein_g).toBe(62);
       expect(parsed.proposal.nutrition.fat_g).toBe(7.2);
       expect(parsed.proposal.nutrition.carbs_g).toBe(0);
-      expect(parsed.proposal.nutrition_source).toBe("test stub");
+      expect(parsed.proposal.match_type).toBe("exact");
+      expect(parsed.proposal.allergen_tags).toEqual([]);
+      expect(parsed.proposal.nutrition_source).toContain("usda-sr-legacy");
     });
   });
 
@@ -669,6 +830,11 @@ describe("createLogMealHandler", () => {
       const desc = LOG_MEAL_SCHEMA.function.description;
       expect(desc.toLowerCase()).toContain("propos");
       expect(desc.toLowerCase()).toContain("confirm");
+    });
+
+    it("mentions the catalog resolver in its description", () => {
+      const desc = LOG_MEAL_SCHEMA.function.description;
+      expect(desc.toLowerCase()).toContain("catalog");
     });
 
     it("declares food_name as a required string parameter", () => {
@@ -706,7 +872,7 @@ describe("createLogMealHandler", () => {
     it("stores proposals under the injected userId, not model args", async () => {
       const { store, state } = memProposalStore();
       const handler = createLogMealHandler({
-        getFoodNutrition: fakeNutrition(),
+        catalog: testCatalog(),
         proposalStore: store,
         userId: "authenticated-user-A",
       });
@@ -730,7 +896,7 @@ describe("createLogMealHandler", () => {
       const state: MemProposalState = { proposals: [] };
       const { store: storeA } = memProposalStore(state);
       const handlerA = createLogMealHandler({
-        getFoodNutrition: fakeNutrition({ foodName: "chicken breast" }),
+        catalog: testCatalog(),
         proposalStore: storeA,
         userId: "user-A",
       });
@@ -742,7 +908,7 @@ describe("createLogMealHandler", () => {
 
       const { store: storeB } = memProposalStore(state);
       const handlerB = createLogMealHandler({
-        getFoodNutrition: fakeNutrition({ foodName: "salmon" }),
+        catalog: testCatalog(),
         proposalStore: storeB,
         userId: "user-B",
       });

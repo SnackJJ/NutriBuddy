@@ -261,7 +261,9 @@ export function parseWriteProposalData(
     const nutrition = isRecord(proposal.nutrition) ? proposal.nutrition : {};
     return {
       proposalId,
+      foodId: readString(proposal, "food_id"),
       foodName,
+      canonicalName: readString(proposal, "canonical_name"),
       portionG,
       mealType,
       kcal: readNumber(nutrition, "kcal"),
@@ -269,11 +271,21 @@ export function parseWriteProposalData(
       fatG: readNumber(nutrition, "fat_g"),
       carbsG: readNumber(nutrition, "carbs_g"),
       nutritionSource: readString(proposal, "nutrition_source") ?? "",
+      matchType: readString(proposal, "match_type"),
+      allergenTags: parseAllergenTags(proposal),
       createdAt: readString(proposal, "created_at") ?? "",
     };
   } catch {
     return undefined;
   }
+}
+
+function parseAllergenTags(proposal: Record<string, unknown>): readonly string[] | undefined {
+  const tags = proposal.allergen_tags;
+  if (Array.isArray(tags) && tags.every((t): t is string => typeof t === "string")) {
+    return tags;
+  }
+  return undefined;
 }
 
 interface UtteranceTurnOutput {

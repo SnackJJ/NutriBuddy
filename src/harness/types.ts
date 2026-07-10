@@ -122,7 +122,9 @@ export type StopReason = (typeof STOP_REASONS)[number];
  */
 export interface WriteProposalData {
   readonly proposalId: string;
+  readonly foodId?: string;
   readonly foodName: string;
+  readonly canonicalName?: string;
   readonly portionG: number;
   readonly mealType: string;
   readonly kcal?: number;
@@ -130,6 +132,8 @@ export interface WriteProposalData {
   readonly fatG?: number;
   readonly carbsG?: number;
   readonly nutritionSource: string;
+  readonly matchType?: string;
+  readonly allergenTags?: readonly string[];
   readonly createdAt: string;
 }
 
