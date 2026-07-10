@@ -12,15 +12,21 @@
 // 所有副作用依赖（catalog / 提案存储）皆可注入，单测不触网。
 
 import type { ToolHandler } from "./types";
-import type { Catalog } from "../catalog/catalog";
+import type {
+  Catalog,
+  FoodRef,
+  ResolveMissResult,
+  ResolveResult,
+} from "../catalog/catalog";
 import { resolveFood } from "../catalog/resolver";
-import type { FoodRef, ResolveResult } from "../catalog/catalog";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
 const VALID_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
 
 const DEFAULT_MEAL_TYPE = "snack";
+
+type ResolvedMatchType = FoodRef["matchType"];
 
 // ── 提案写入端口（issue #36 / PRD v2 §3.4 / ADD §Tools）──
 
@@ -46,7 +52,7 @@ export interface ProposalInput {
   readonly fatG: number;
   readonly carbsG: number;
   readonly nutritionSource: string;
-  readonly matchType: string;
+  readonly matchType: ResolvedMatchType;
   readonly allergenTags: readonly string[];
 }
 
@@ -64,11 +70,16 @@ export interface Proposal {
   readonly fatG: number;
   readonly carbsG: number;
   readonly nutritionSource: string;
-  readonly matchType: string;
+  readonly matchType: ResolvedMatchType;
   readonly allergenTags: readonly string[];
   readonly status: ProposalStatus;
   readonly createdAt: string;
 }
+
+type ScaledNutrition = Pick<
+  ProposalInput,
+  "kcal" | "proteinG" | "fatG" | "carbsG"
+>;
 
 /** 提案存储端口。可注入 Supabase 实现或单测 mock。 */
 export interface ProposalStore {
@@ -181,7 +192,7 @@ function parseArgs(
 function scaleNutrition(
   per100g: FoodRef["per100g"],
   portionG: number,
-): { kcal: number; proteinG: number; fatG: number; carbsG: number } {
+): ScaledNutrition {
   const scale = portionG / 100;
   const round = (v: number) => Math.round(v * scale * 10) / 10;
   return {
@@ -225,7 +236,11 @@ function proposalResponse(proposal: Proposal): string {
   });
 }
 
-function missResponse(result: ResolveResult): string {
+function isResolverMiss(result: ResolveResult): result is ResolveMissResult {
+  return result.foodRef === null;
+}
+
+function resolverMissResponse(result: ResolveMissResult): string {
   const base = {
     error: `food not found in catalog: "${result.input}"`,
     match_type: result.matchType,
@@ -233,22 +248,23 @@ function missResponse(result: ResolveResult): string {
     message: clarificationMessage(result),
   };
 
-  if (result.candidates && result.candidates.length > 0) {
-    return JSON.stringify({
-      ...base,
-      candidates: result.candidates.map((c) => ({
-        food_id: c.foodId,
-        food_name: c.canonicalName,
-        match_score: Math.round(c.matchScore * 100) / 100,
-        allergen_tags: c.allergenTags,
-      })),
-    });
+  const candidates = result.candidates ?? [];
+  if (candidates.length === 0) {
+    return JSON.stringify(base);
   }
 
-  return JSON.stringify(base);
+  return JSON.stringify({
+    ...base,
+    candidates: candidates.map((candidate) => ({
+      food_id: candidate.foodId,
+      food_name: candidate.canonicalName,
+      match_score: Math.round(candidate.matchScore * 100) / 100,
+      allergen_tags: candidate.allergenTags,
+    })),
+  });
 }
 
-function clarificationMessage(result: ResolveResult): string {
+function clarificationMessage(result: ResolveMissResult): string {
   switch (result.matchType) {
     case "miss_ambiguous":
       return (
@@ -340,8 +356,8 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
       const resolved = resolveFood(catalog, parsed.foodName);
 
       // ── Resolver miss → clarification ──────────────────────────────────
-      if (resolved.foodRef === null) {
-        return missResponse(resolved);
+      if (isResolverMiss(resolved)) {
+        return resolverMissResponse(resolved);
       }
 
       const foodRef = resolved.foodRef;

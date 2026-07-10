@@ -6,7 +6,12 @@ import {
   type Proposal,
   type ProposalInput,
 } from "../src/harness/logMeal";
-import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
+import {
+  createCatalog,
+  nutritionPer100g,
+  SEED_FOODS,
+  type Catalog,
+} from "../src/catalog/catalog";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -344,7 +349,7 @@ describe("createLogMealHandler", () => {
     });
 
     it("fuzzy-resolves a typo input and names the resolved entity", async () => {
-      const { store, state } = memProposalStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         catalog: testCatalog(),
         proposalStore: store,
@@ -395,7 +400,12 @@ describe("createLogMealHandler", () => {
           id: "food-test-a",
           canonicalName: "test food alpha",
           aliases: [],
-          per100g: { kcal: 100, proteinG: 10, fatG: 5, carbsG: 5, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+          per100g: nutritionPer100g({
+            kcal: 100,
+            proteinG: 10,
+            fatG: 5,
+            carbsG: 5,
+          }),
           allergenTags: [],
           portionAliases: {},
           category: "test",
@@ -404,7 +414,12 @@ describe("createLogMealHandler", () => {
           id: "food-test-b",
           canonicalName: "test food bravo",
           aliases: [],
-          per100g: { kcal: 150, proteinG: 15, fatG: 8, carbsG: 3, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+          per100g: nutritionPer100g({
+            kcal: 150,
+            proteinG: 15,
+            fatG: 8,
+            carbsG: 3,
+          }),
           allergenTags: ["milk"],
           portionAliases: {},
           category: "test",
@@ -428,7 +443,9 @@ describe("createLogMealHandler", () => {
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("not found in catalog");
       // Either ambiguous or low_confidence — both mean miss
-      expect(["miss_ambiguous", "miss_low_confidence"]).toContain(parsed.match_type);
+      expect(["miss_ambiguous", "miss_low_confidence"]).toContain(
+        parsed.match_type,
+      );
       // No proposal was stored
       expect(state.proposals.length).toBe(0);
     });
@@ -453,7 +470,7 @@ describe("createLogMealHandler", () => {
     });
 
     it("computes nutrition from catalog per-100g values scaled by portion", async () => {
-      const { store, state } = memProposalStore();
+      const { store } = memProposalStore();
       const handler = createLogMealHandler({
         catalog: testCatalog(),
         proposalStore: store,
@@ -696,7 +713,10 @@ describe("createLogMealHandler", () => {
         userId: TEST_USER,
       });
 
-      await handler({ food_name: "xyzzy_nonexistent_food_12345", portion_g: 100 });
+      await handler({
+        food_name: "xyzzy_nonexistent_food_12345",
+        portion_g: 100,
+      });
       expect(storeSpy).not.toHaveBeenCalled();
       expect(state.proposals.length).toBe(0);
     });

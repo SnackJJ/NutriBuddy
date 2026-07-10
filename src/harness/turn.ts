@@ -240,6 +240,20 @@ function readNumber(
     : undefined;
 }
 
+function readStringArray(
+  record: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined {
+  const value = record[key];
+  if (
+    Array.isArray(value) &&
+    value.every((item): item is string => typeof item === "string")
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 export function parseWriteProposalData(
   toolResult: string,
 ): WriteProposalData | undefined {
@@ -272,20 +286,12 @@ export function parseWriteProposalData(
       carbsG: readNumber(nutrition, "carbs_g"),
       nutritionSource: readString(proposal, "nutrition_source") ?? "",
       matchType: readString(proposal, "match_type"),
-      allergenTags: parseAllergenTags(proposal),
+      allergenTags: readStringArray(proposal, "allergen_tags"),
       createdAt: readString(proposal, "created_at") ?? "",
     };
   } catch {
     return undefined;
   }
-}
-
-function parseAllergenTags(proposal: Record<string, unknown>): readonly string[] | undefined {
-  const tags = proposal.allergen_tags;
-  if (Array.isArray(tags) && tags.every((t): t is string => typeof t === "string")) {
-    return tags;
-  }
-  return undefined;
 }
 
 interface UtteranceTurnOutput {
