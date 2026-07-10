@@ -3,7 +3,7 @@ import { turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
-import { createServerSupabase } from "@/lib/supabase";
+import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
 import {
   createMemoryStore,
   createSupabaseProfileGateway,
@@ -12,12 +12,15 @@ import { supabaseInteractionStore } from "@/lib/drugInteractions";
 import type { UserContext } from "@/harness/gate";
 import type { InteractionStore } from "@/lib/drugInteractions";
 import {
-  SESSION_USER_ID_HEADER,
   parseChatBody,
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "@/lib/chatApi";
-import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
+import {
+  createLogMealHandler,
+  LOG_MEAL_SCHEMA,
+  type ProposalStore,
+} from "@/harness/logMeal";
 import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
 import {
   createQueryCatalogHandler,
@@ -29,113 +32,15 @@ import {
   createQueryCatalog,
   FOOD_LOOKUP_TEMPLATE,
 } from "@/catalog/queryCatalog";
+import { createSupabaseProposalStore } from "@/lib/proposalStore";
+import { createSupabaseMealLogStore } from "@/lib/mealLogStore";
+import { getUserIdFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
-import type {
-  ProposalStore,
-  Proposal,
-  ProposalInput,
-  MealLogStore,
-  MealLogEntry,
-  MealLogInsert,
-} from "@/harness/logMeal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ─── In-memory proposal store (M1 — replaces with Supabase in M2) ───────
-
-interface MemStoreState {
-  proposals: Proposal[];
-  ledger: MealLogEntry[];
-}
-
-function transitionProposal(
-  state: MemStoreState,
-  id: string,
-  status: "committed" | "rejected",
-): Proposal {
-  const index = state.proposals.findIndex((proposal) => proposal.id === id);
-  if (index === -1) {
-    throw new Error(`Proposal ${id} not found`);
-  }
-
-  const proposal = state.proposals[index];
-  if (proposal.status !== "proposed") {
-    throw new Error(`Proposal ${id} is ${proposal.status}`);
-  }
-
-  const nextProposal: Proposal = { ...proposal, status };
-  state.proposals[index] = nextProposal;
-  return nextProposal;
-}
-
-function createMemProposalStore(state: MemStoreState): ProposalStore {
-  let nextId = 1000;
-
-  return {
-    async store(params: ProposalInput): Promise<Proposal> {
-      const id = `proposal-${(nextId++).toString().padStart(4, "0")}`;
-      const proposal: Proposal = {
-        id,
-        userId: params.userId,
-        foodId: params.foodId,
-        foodName: params.foodName,
-        canonicalName: params.canonicalName,
-        portionG: params.portionG,
-        mealType: params.mealType,
-        kcal: params.kcal,
-        proteinG: params.proteinG,
-        fatG: params.fatG,
-        carbsG: params.carbsG,
-        nutritionSource: params.nutritionSource,
-        matchType: params.matchType,
-        allergenTags: params.allergenTags,
-        status: "proposed",
-        createdAt: new Date().toISOString(),
-      };
-      state.proposals.push(proposal);
-      return proposal;
-    },
-    async get(id: string): Promise<Proposal | undefined> {
-      return state.proposals.find((p) => p.id === id);
-    },
-    async commit(id: string): Promise<Proposal> {
-      return transitionProposal(state, id, "committed");
-    },
-    async decline(id: string): Promise<Proposal> {
-      return transitionProposal(state, id, "rejected");
-    },
-  };
-}
-
-function createMemMealLogStore(state: MemStoreState): MealLogStore {
-  return {
-    async insert(params: MealLogInsert): Promise<MealLogEntry> {
-      const entry: MealLogEntry = {
-        id: state.ledger.length + 1,
-        userId: params.userId,
-        foodName: params.foodName,
-        portionG: params.portionG,
-        mealType: params.mealType,
-        loggedAt: new Date().toISOString(),
-        kcal: params.kcal,
-        proteinG: params.proteinG,
-        fatG: params.fatG,
-        carbsG: params.carbsG,
-        proposalId: params.proposalId,
-      };
-      state.ledger.push(entry);
-      return entry;
-    },
-  };
-}
-
-// Module-level state (resets on cold start; M2 replaces with Supabase)
-const memState: MemStoreState = { proposals: [], ledger: [] };
-const memProposalStore = createMemProposalStore(memState);
-const memMealLogStore = createMemMealLogStore(memState);
-
-// Module-level catalogs (built once at cold start from seed data)
+// Module-level catalog (built once at cold start from seed data)
 const catalog = createCatalog(SEED_FOODS);
 const queryCatalog = createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
 const queryRunner = createInMemoryQueryRunner(catalog);
@@ -147,10 +52,13 @@ const toolSchemas = [
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
-function buildToolMap(sessionUserId: string): ReadonlyMap<string, ToolHandler> {
+function buildToolMap(
+  sessionUserId: string,
+  proposalStore: ProposalStore,
+): ReadonlyMap<string, ToolHandler> {
   const logMealHandler = createLogMealHandler({
     catalog,
-    proposalStore: memProposalStore,
+    proposalStore,
     userId: sessionUserId,
   });
 
@@ -216,8 +124,10 @@ async function loadUserContext(
  * pipeline) or a proposal_confirm (short-circuited confirmation turn).
  *
  * Streams typed AnyTurnEvents as NDJSON (one JSON object per line).
- * The session user identity is read from the X-User-Id header — never
- * from the model-fillable request body.
+ *
+ * Identity derives from the authenticated Supabase session (Authorization
+ * header), not from a client-asserted header. The session user identity is
+ * verified server-side and never enters model-fillable input.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   // ── Parse body ────────────────────────────────────────────────────
@@ -246,9 +156,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // ── Extract session user identity from header ─────────────────────
-  const sessionUserId =
-    request.headers.get(SESSION_USER_ID_HEADER)?.trim() || undefined;
+  // ── Extract session user identity from Supabase auth session ─────
+  const sessionUserId = await getUserIdFromHeader(createUserSupabase, request);
 
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();
@@ -264,22 +173,27 @@ export async function POST(request: NextRequest): Promise<Response> {
     history: getRequestHistory(body, turnInput),
   });
 
+  // ── Wire Supabase-backed stores and tools for authenticated users ─
   if (sessionUserId) {
-    ports = {
-      ...ports,
-      proposalStore: memProposalStore,
-      mealLogStore: memMealLogStore,
-    };
-  }
+    const serverClient = createServerSupabase();
+    const proposalStore = createSupabaseProposalStore({
+      client: serverClient,
+    });
+    const mealLogStore = createSupabaseMealLogStore(serverClient);
 
-  // ── Wire tools for authenticated utterance turns ─────────────────
-  if (turnInput.tag === "utterance" && sessionUserId) {
     ports = {
       ...ports,
-      tools: buildToolMap(sessionUserId),
-      toolSchemas,
-      queryCatalog,
+      proposalStore,
+      mealLogStore,
     };
+
+    if (turnInput.tag === "utterance") {
+      ports = {
+        ...ports,
+        tools: buildToolMap(sessionUserId, proposalStore),
+        toolSchemas: [LOG_MEAL_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+      };
+    }
   }
 
   // ── Load user safety context (fail-soft) ──────────────────────────

@@ -62,3 +62,25 @@ export function createBrowserSupabase(
   const anonKey = requireEnv(env, "NEXT_PUBLIC_SUPABASE_ANON_KEY");
   return create(url, anonKey);
 }
+
+/**
+ * 用户上下文客户端：使用用户的 access token 创建 Supabase 客户端。
+ *
+ * 用于服务端验证用户身份（auth.getUser()），操作受 RLS 约束（如果启用）。
+ * 不持久化 session，因为 token 已由客户端管理。
+ *
+ * 注意：此客户端使用 anon key + 用户 token，所有查询受 RLS 约束。
+ * 对于需要绕过 RLS 的服务端操作，使用 createServerSupabase。
+ */
+export function createUserSupabase(
+  accessToken: string,
+  options: SupabaseFactoryOptions = {},
+): SupabaseClient {
+  const { env, create } = resolveDeps(options);
+  const url = requireEnv(env, "NEXT_PUBLIC_SUPABASE_URL");
+  const anonKey = requireEnv(env, "NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return create(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
+}
