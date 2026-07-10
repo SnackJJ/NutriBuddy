@@ -3,6 +3,7 @@ import {
   createCatalog,
   SEED_FOODS,
   CATALOG_SNAPSHOT_VERSION,
+  nutritionPer100g,
   type Catalog,
   type CatalogFood,
   type ResolveResult,
@@ -20,7 +21,7 @@ const PROTEIN_SHAKE_FOODS: readonly CatalogFood[] = [
     id: "ps-vanilla",
     canonicalName: "protein shake vanilla",
     aliases: [],
-    per100g: { kcal: 120, proteinG: 25, fatG: 2, carbsG: 5, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+    per100g: nutritionPer100g({ kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 }),
     allergenTags: [],
     portionAliases: { serving: 300 },
     category: "beverage",
@@ -29,7 +30,7 @@ const PROTEIN_SHAKE_FOODS: readonly CatalogFood[] = [
     id: "ps-chocolate",
     canonicalName: "protein shake chocolate",
     aliases: [],
-    per100g: { kcal: 130, proteinG: 25, fatG: 3, carbsG: 6, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+    per100g: nutritionPer100g({ kcal: 130, proteinG: 25, fatG: 3, carbsG: 6 }),
     allergenTags: [],
     portionAliases: { serving: 300 },
     category: "beverage",
@@ -60,6 +61,45 @@ function expectMiss(
   expect(result.catalogSnapshotId).toBe(CATALOG_SNAPSHOT_VERSION);
 }
 
+describe("nutritionPer100g", () => {
+  it("fills missing expanded nutrients with zero", () => {
+    expect(
+      nutritionPer100g({ kcal: 120, proteinG: 25, fatG: 2, carbsG: 5 }),
+    ).toEqual({
+      kcal: 120,
+      proteinG: 25,
+      fatG: 2,
+      carbsG: 5,
+      fiberG: 0,
+      sugarsG: 0,
+      saturatedFatG: 0,
+      cholesterolMg: 0,
+      sodiumMg: 0,
+      calciumMg: 0,
+      ironMg: 0,
+      potassiumMg: 0,
+      vitaminCMg: 0,
+      vitaminDMcg: 0,
+    });
+  });
+
+  it("preserves provided expanded nutrient values", () => {
+    expect(
+      nutritionPer100g({
+        kcal: 52,
+        proteinG: 0.3,
+        fatG: 0.2,
+        carbsG: 14,
+        fiberG: 2.4,
+        vitaminCMg: 4.6,
+      }),
+    ).toMatchObject({
+      fiberG: 2.4,
+      vitaminCMg: 4.6,
+    });
+  });
+});
+
 // ─── catalog construction ──────────────────────────────────────────────────
 
 describe("createCatalog", () => {
@@ -85,7 +125,12 @@ describe("createCatalog", () => {
         id: "test-001",
         canonicalName: "Test Food",
         aliases: ["test alias", "another alias"],
-        per100g: { kcal: 100, proteinG: 10, fatG: 5, carbsG: 5, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+        per100g: nutritionPer100g({
+          kcal: 100,
+          proteinG: 10,
+          fatG: 5,
+          carbsG: 5,
+        }),
         allergenTags: [],
         portionAliases: {},
         category: "test",
@@ -102,7 +147,12 @@ describe("createCatalog", () => {
         id: "solo-001",
         canonicalName: "Solo Food",
         aliases: [],
-        per100g: { kcal: 50, proteinG: 1, fatG: 1, carbsG: 10, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+        per100g: nutritionPer100g({
+          kcal: 50,
+          proteinG: 1,
+          fatG: 1,
+          carbsG: 10,
+        }),
         allergenTags: [],
         portionAliases: {},
         category: "test",
@@ -537,7 +587,12 @@ describe("resolveFood — custom config thresholds", () => {
         id: "a-joy",
         canonicalName: "almond joy",
         aliases: [],
-        per100g: { kcal: 500, proteinG: 5, fatG: 25, carbsG: 60, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+        per100g: nutritionPer100g({
+          kcal: 500,
+          proteinG: 5,
+          fatG: 25,
+          carbsG: 60,
+        }),
         allergenTags: ["tree_nut"],
         portionAliases: {},
         category: "snack",
@@ -546,7 +601,12 @@ describe("resolveFood — custom config thresholds", () => {
         id: "a-butter",
         canonicalName: "almond butter",
         aliases: [],
-        per100g: { kcal: 614, proteinG: 21, fatG: 56, carbsG: 19, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+        per100g: nutritionPer100g({
+          kcal: 614,
+          proteinG: 21,
+          fatG: 56,
+          carbsG: 19,
+        }),
         allergenTags: ["tree_nut"],
         portionAliases: {},
         category: "legume_nut",
@@ -575,7 +635,12 @@ describe("resolveFood — maxCandidates", () => {
       id: `multi-${i.toString().padStart(3, "0")}`,
       canonicalName: `protein shake flavor ${i}`,
       aliases: [],
-      per100g: { kcal: 50 + i, proteinG: 5, fatG: 1, carbsG: 5, fiberG: 0, sugarsG: 0, saturatedFatG: 0, cholesterolMg: 0, sodiumMg: 0, calciumMg: 0, ironMg: 0, potassiumMg: 0, vitaminCMg: 0, vitaminDMcg: 0 },
+      per100g: nutritionPer100g({
+        kcal: 50 + i,
+        proteinG: 5,
+        fatG: 1,
+        carbsG: 5,
+      }),
       allergenTags: [],
       portionAliases: {},
       category: "beverage",

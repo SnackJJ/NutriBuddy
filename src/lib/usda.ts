@@ -1,14 +1,12 @@
-// USDA FoodData Central API client + get_food_nutrition tool (issue #12 / PRD §4)。
+// USDA FoodData Central client and catalog-ingestion adapter.
 //
-// UsdaClient：DI-friendly REST 客户端，遵循与 DeepSeekAdapter 相同的 DI 约定。
-// 调用 USDA /fdc/v1/foods/search，把 14 种 USDA nutrient ID 映射到类型安全的
-// FoodNutrition 结构，按调用方指定的 portion_g 缩放（以 100g 为基准）。
+// UsdaClient calls USDA /fdc/v1/foods/search and maps the 14 tracked nutrient
+// IDs into FoodNutrition. It is used for offline ingestion; runtime nutrition
+// lookup goes through the local catalog and resolver.
 //
-// createGetFoodNutritionTool：产出 ToolHandler，供 Loop 的 tools Map 使用。
-// 成功返回 JSON-serialised FoodNutrition；失败返回可读错误字符串——绝不抛异常，
-// 确保失败的工具调用不会把 Loop 拖垮。
-//
-// Schema：GET_FOOD_NUTRITION_SCHEMA 符合 OpenAI function-calling 格式。
+// createGetFoodNutritionTool and GET_FOOD_NUTRITION_SCHEMA remain for legacy
+// tests around the old get_food_nutrition tool. The handler returns readable
+// error strings instead of throwing, matching the original tool contract.
 //
 // ── Ingestion adapter (issue #42 / ADD §Data Pipeline) ────────────────────────
 //
@@ -59,8 +57,35 @@ export interface FoodNutrition {
   readonly vitamin_d_mcg: number;
 }
 
+export interface FoodNutritionLookup {
+  getFoodNutrition(
+    foodName: string,
+    portionG?: number,
+  ): Promise<FoodNutrition | null>;
+}
+
+type NutrientField =
+  | "kcal"
+  | "protein_g"
+  | "fat_g"
+  | "carbs_g"
+  | "fiber_g"
+  | "sugars_g"
+  | "saturated_fat_g"
+  | "cholesterol_mg"
+  | "sodium_mg"
+  | "calcium_mg"
+  | "iron_mg"
+  | "potassium_mg"
+  | "vitamin_c_mg"
+  | "vitamin_d_mcg";
+
+type MutableFoodNutrition = {
+  -readonly [Key in keyof FoodNutrition]: FoodNutrition[Key];
+};
+
 /** USDA nutrient ID → FoodNutrition 字段映射。只映射 M1 需要的 14 种。 */
-const NUTRIENT_MAP: Record<number, keyof FoodNutrition> = {
+const NUTRIENT_MAP: Partial<Record<number, NutrientField>> = {
   1008: "kcal", // Energy
   1003: "protein_g", // Protein
   1004: "fat_g", // Total lipid (fat)
@@ -92,7 +117,7 @@ interface UsdaSearchResponse {
 function emptyFoodNutrition(
   food_name: string,
   portion_g: number,
-): FoodNutrition {
+): MutableFoodNutrition {
   return {
     food_name,
     portion_g,
@@ -122,7 +147,7 @@ function emptyFoodNutrition(
  *
  * DI-friendly (injectable fetch + env) for deterministic testing.
  */
-export class UsdaClient {
+export class UsdaClient implements FoodNutritionLookup {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchImpl;
@@ -198,10 +223,7 @@ export class UsdaClient {
       if (!field) continue;
       const rawValue = n.value;
       if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) continue;
-      // Cast through unknown: FoodNutrition → Record<string, number> for
-      // dynamic key access (field keys are guaranteed by NUTRIENT_MAP).
-      // eslint-disable-next-line
-      (result as unknown as Record<string, number>)[field] = rawValue * scale;
+      result[field] = rawValue * scale;
     }
 
     return result;
@@ -255,7 +277,9 @@ export const GET_FOOD_NUTRITION_SCHEMA = {
  * 返回的 ToolHandler 绝不抛异常——所有错误（输入校验、API 失败、无匹配）
  * 都转为可读的错误字符串，确保 Loop 不会因单次工具调用失败而崩溃。
  */
-export function createGetFoodNutritionTool(client: UsdaClient): ToolHandler {
+export function createGetFoodNutritionTool(
+  client: FoodNutritionLookup,
+): ToolHandler {
   return {
     schema: GET_FOOD_NUTRITION_SCHEMA,
 

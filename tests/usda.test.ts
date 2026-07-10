@@ -7,7 +7,7 @@ import {
   generateFoodId,
   createCatalogSnapshot,
 } from "../src/lib/usda";
-import type { FoodNutrition } from "../src/lib/usda";
+import type { FoodNutrition, FoodNutritionLookup } from "../src/lib/usda";
 
 // --- helpers ---
 
@@ -348,8 +348,8 @@ describe("GET_FOOD_NUTRITION_SCHEMA", () => {
 describe("createGetFoodNutritionTool", () => {
   function makeClient(
     impl: (food: string, portion?: number) => Promise<FoodNutrition | null>,
-  ): UsdaClient {
-    return { getFoodNutrition: impl } as UsdaClient;
+  ): FoodNutritionLookup {
+    return { getFoodNutrition: impl };
   }
 
   it("exposes the schema on the returned handler", () => {

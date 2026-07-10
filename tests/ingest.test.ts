@@ -1,7 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { ingestFoods, runIngestion } from "../src/ingest/usda";
-import { UsdaClient } from "../src/lib/usda";
-import type { FoodNutrition } from "../src/lib/usda";
+import type { FoodNutrition, FoodNutritionLookup } from "../src/lib/usda";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -102,11 +101,11 @@ function salmonNutrition(): FoodNutrition {
 
 function makeClient(
   impl: (food: string) => Promise<FoodNutrition | null>,
-): UsdaClient {
+): FoodNutritionLookup {
   return {
     getFoodNutrition: async (foodName: string, _portionG?: number) =>
       impl(foodName),
-  } as UsdaClient;
+  };
 }
 
 // ─── ingestFoods ─────────────────────────────────────────────────────────────
@@ -210,7 +209,9 @@ describe("ingestFoods", () => {
   it("uses provided category overrides", async () => {
     const client = makeClient(async () => appleNutrition());
 
-    const results = await ingestFoods(client, ["apple"], { apple: "test-category" });
+    const results = await ingestFoods(client, ["apple"], {
+      apple: "test-category",
+    });
 
     expect(results[0].category).toBe("test-category");
   });
