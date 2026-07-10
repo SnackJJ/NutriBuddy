@@ -74,14 +74,7 @@ const ALLERGEN_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
     "omelette",
     "omelet",
   ],
-  peanut: [
-    "peanut",
-    "peanuts",
-    "groundnut",
-    "groundnuts",
-    "arachis",
-    "goober",
-  ],
+  peanut: ["peanut", "peanuts", "groundnut", "groundnuts", "arachis", "goober"],
   tree_nut: [
     "almond",
     "almonds",
@@ -200,7 +193,10 @@ function expandAllergenTerms(allergen: string): readonly string[] {
  * 在文本中检测任一关键词的出现。用 \b 词边界防止 substring false-positive：
  * "eggplant" 不含 \begg\b 所以不命中 egg 过敏。
  */
-function containsAnyTerm(text: string, terms: readonly string[]): string | null {
+function containsAnyTerm(
+  text: string,
+  terms: readonly string[],
+): string | null {
   for (const term of terms) {
     // 对含空格的多词术语（如 "soy sauce"），用转义后的字面量匹配。
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -242,7 +238,8 @@ export async function buildPreGateContext(
   // 用药约束（含药物-营养素相互作用）
   if (user.medications.length > 0) {
     const medList = user.medications.join(", ");
-    let medSection = `[SAFETY CONSTRAINT — MEDICATIONS]\n` +
+    let medSection =
+      `[SAFETY CONSTRAINT — MEDICATIONS]\n` +
       `The user is currently taking: ${medList}.`;
 
     if (interactions.length > 0) {
@@ -284,9 +281,7 @@ export function checkPostGate(
     const terms = expandAllergenTerms(allergen);
     const hit = containsAnyTerm(lowerOutput, terms);
     if (hit) {
-      reasons.push(
-        `Allergen mention: "${hit}" matches allergy "${allergen}"`,
-      );
+      reasons.push(`Allergen mention: "${hit}" matches allergy "${allergen}"`);
     }
   }
 
@@ -312,6 +307,44 @@ export function checkPostGate(
 /** The classified intent of a user utterance. */
 export type UtteranceIntent = "prescriptive" | "descriptive" | "neutral";
 
+const PRESCRIPTIVE_INTENT_PATTERNS: readonly RegExp[] = [
+  /\bshould\b/,
+  /\brecommend\b/,
+  /\bwhat (can|should|could) i\b/,
+  /\bis it ok\b/,
+  /\bsafe for me\b/,
+  /\bgood (choice|option)\b/,
+  /\bhealthy (choice|option)\b/,
+  /\bwhat('s| is) a good\b/,
+  /\bwhat do you (recommend|suggest|think)\b/,
+  /\bhelp me (plan|decide|choose|pick)\b/,
+  /\bmeal (plan|idea|suggestion)\b/,
+  /\bcan i\b/,
+  /\badvise?\b/,
+  /\bsuggest(ion)?\b/,
+];
+
+const DESCRIPTIVE_INTENT_PATTERNS: readonly RegExp[] = [
+  /\blog\b/,
+  /\bate\b/,
+  /\bhad\b/,
+  /\btrack\b/,
+  /\brecord\b/,
+  /\bentered\b/,
+  /\bconsumed\b/,
+  /\bjust ate\b/,
+  /\bi ate\b/,
+  /\badd(ed)? (this|that|the)\b/,
+  /\bwrite (this|that|the) down\b/,
+];
+
+function countPatternMatches(
+  text: string,
+  patterns: readonly RegExp[],
+): number {
+  return patterns.filter((pattern) => pattern.test(text)).length;
+}
+
 /**
  * Classify an utterance as prescriptive (asking for recommendations),
  * descriptive (logging/tracking what was eaten), or neutral.
@@ -323,43 +356,14 @@ export type UtteranceIntent = "prescriptive" | "descriptive" | "neutral";
 export function classifyUtteranceIntent(utterance: string): UtteranceIntent {
   const lower = utterance.toLowerCase();
 
-  const prescriptivePatterns: readonly RegExp[] = [
-    /\bshould\b/,
-    /\brecommend\b/,
-    /\bwhat (can|should|could) i\b/,
-    /\bis it ok\b/,
-    /\bsafe for me\b/,
-    /\bgood (choice|option)\b/,
-    /\bhealthy (choice|option)\b/,
-    /\bwhat('s| is) a good\b/,
-    /\bwhat do you (recommend|suggest|think)\b/,
-    /\bhelp me (plan|decide|choose|pick)\b/,
-    /\bmeal (plan|idea|suggestion)\b/,
-    /\bcan i\b/,
-    /\badvise?\b/,
-    /\bsuggest(ion)?\b/,
-  ];
-
-  const descriptivePatterns: readonly RegExp[] = [
-    /\blog\b/,
-    /\bate\b/,
-    /\bhad\b/,
-    /\btrack\b/,
-    /\brecord\b/,
-    /\bentered\b/,
-    /\bconsumed\b/,
-    /\bjust ate\b/,
-    /\bi ate\b/,
-    /\badd(ed)? (this|that|the)\b/,
-    /\bwrite (this|that|the) down\b/,
-  ];
-
-  const prescriptiveScore = prescriptivePatterns.filter((p) =>
-    p.test(lower),
-  ).length;
-  const descriptiveScore = descriptivePatterns.filter((p) =>
-    p.test(lower),
-  ).length;
+  const prescriptiveScore = countPatternMatches(
+    lower,
+    PRESCRIPTIVE_INTENT_PATTERNS,
+  );
+  const descriptiveScore = countPatternMatches(
+    lower,
+    DESCRIPTIVE_INTENT_PATTERNS,
+  );
 
   if (descriptiveScore > prescriptiveScore) return "descriptive";
   if (prescriptiveScore > descriptiveScore) return "prescriptive";
@@ -376,6 +380,26 @@ export interface UtteranceScanResult {
   readonly intent: UtteranceIntent;
   /** Canonical names of foods that triggered conflicts. */
   readonly hitFoods: readonly string[];
+}
+
+function foodNameAppearsInUtterance(
+  food: Catalog["allFoods"][number],
+  lowerUtterance: string,
+): boolean {
+  const canonicalLower = food.canonicalName.toLowerCase();
+  return (
+    lowerUtterance.includes(canonicalLower) ||
+    food.aliases.some((alias) => lowerUtterance.includes(alias.toLowerCase()))
+  );
+}
+
+function matchingAllergenTags(
+  food: Catalog["allFoods"][number],
+  userAllergySet: ReadonlySet<string>,
+): readonly string[] {
+  return food.allergenTags.filter((tag) =>
+    userAllergySet.has(tag.toLowerCase()),
+  );
 }
 
 /**
@@ -405,17 +429,9 @@ export function scanUtteranceForConflicts(
   for (const food of catalog.allFoods) {
     if (food.allergenTags.length === 0) continue;
 
-    const canonicalLower = food.canonicalName.toLowerCase();
-    const nameHit = lowerUtterance.includes(canonicalLower);
-    const aliasHit = food.aliases.some((a) =>
-      lowerUtterance.includes(a.toLowerCase()),
-    );
+    if (!foodNameAppearsInUtterance(food, lowerUtterance)) continue;
 
-    if (!nameHit && !aliasHit) continue;
-
-    const intersectingAllergens = food.allergenTags.filter((tag) =>
-      userAllergySet.has(tag.toLowerCase()),
-    );
+    const intersectingAllergens = matchingAllergenTags(food, userAllergySet);
 
     if (intersectingAllergens.length > 0) {
       for (const allergen of intersectingAllergens) {
