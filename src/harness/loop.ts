@@ -23,6 +23,7 @@ import type {
   ModelAdapter,
   ModelTier,
   TerminalResult,
+  ToolCall,
   ToolCallDelta,
   ToolHandler,
   ToolSchema,
@@ -73,6 +74,39 @@ export type TurnResult = TerminalResult;
 
 function renderPrompt(messages: readonly ChatMessage[]): string {
   return messages.map((m) => `${m.role}: ${m.content}`).join("\n");
+}
+
+function toToolCallDelta(toolCall: ToolCall): ToolCallDelta {
+  return {
+    id: toolCall.id,
+    type: "function",
+    function: {
+      name: toolCall.name,
+      arguments: JSON.stringify(toolCall.args),
+    },
+  };
+}
+
+function createAssistantToolCallMessage(
+  content: string,
+  toolCalls: readonly ToolCall[],
+): ChatMessage {
+  return {
+    role: "assistant",
+    content: content || "",
+    tool_calls: toolCalls.map((toolCall) => toToolCallDelta(toolCall)),
+  };
+}
+
+function createToolResultMessage(
+  toolCall: ToolCall,
+  result: string,
+): ChatMessage {
+  return {
+    role: "tool",
+    content: result,
+    tool_call_id: toolCall.id,
+  };
 }
 
 /** Post-gate 重试耗尽后的兜底回复。 */
@@ -147,7 +181,7 @@ export async function* run(
     toolDefs,
   };
 
-  // working set 随步骤增长：工具结果回灌为 user 消息，未交卷的模型产出
+  // working set 随步骤增长：工具结果回灌为 tool 消息，未交卷的模型产出
   // 回灌为 assistant 消息。
   const working: ChatMessage[] = [...history];
   let reply = "";
@@ -191,29 +225,11 @@ export async function* run(
     });
     tracer.record({ step, type: "model_return", payload: response.content });
 
-    // 工具调用检测：模型产出 toolCalls → dispatch → 注入 tool_result
-    // Issue #41：原生协议——assistant 消息带 tool_calls[]，
-    // 结果以 role:"tool" + tool_call_id 回灌。
     if (response.toolCalls && response.toolCalls.length > 0) {
-      // Build assistant message with native tool_calls
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: response.content || "",
-        tool_calls: response.toolCalls.map((tc) => {
-          const delta: ToolCallDelta = {
-            id: tc.id,
-            type: "function",
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.args),
-            },
-          };
-          return delta;
-        }),
-      };
-      working.push(assistantMsg);
+      working.push(
+        createAssistantToolCallMessage(response.content, response.toolCalls),
+      );
 
-      // Dispatch each tool call in order
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
@@ -228,12 +244,7 @@ export async function* run(
           toolResult: { name: tc.name, result },
         };
 
-        // 将工具结果以原生 role:"tool" + tool_call_id 回灌
-        working.push({
-          role: "tool",
-          content: result,
-          tool_call_id: tc.id,
-        });
+        working.push(createToolResultMessage(tc, result));
       }
       // 工具调用后继续循环（不在此步交卷）
       continue;

@@ -9,11 +9,13 @@ function okResponse(content: string): Response {
   );
 }
 
-function toolCallResponse(toolCalls: Array<{
-  id: string;
-  name: string;
-  arguments: string;
-}>): Response {
+function toolCallResponse(
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>,
+): Response {
   return new Response(
     JSON.stringify({
       choices: [
@@ -240,8 +242,16 @@ describe("DeepSeekAdapter", () => {
       apiKey: "k",
       fetchImpl: async () =>
         toolCallResponse([
-          { id: "call_1", name: "search_food", arguments: JSON.stringify({ food: "egg" }) },
-          { id: "call_2", name: "log_meal", arguments: JSON.stringify({ food_name: "egg", portion_g: 50 }) },
+          {
+            id: "call_1",
+            name: "search_food",
+            arguments: JSON.stringify({ food: "egg" }),
+          },
+          {
+            id: "call_2",
+            name: "log_meal",
+            arguments: JSON.stringify({ food_name: "egg", portion_g: 50 }),
+          },
         ]),
     });
 
@@ -378,7 +388,10 @@ describe("DeepSeekAdapter", () => {
               type: "function",
               function: {
                 name: "log_meal",
-                arguments: JSON.stringify({ food_name: "chicken", portion_g: 200 }),
+                arguments: JSON.stringify({
+                  food_name: "chicken",
+                  portion_g: 200,
+                }),
               },
             },
           ],

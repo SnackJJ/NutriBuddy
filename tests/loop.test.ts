@@ -42,7 +42,10 @@ async function collect(
 describe("run", () => {
   it("yields thought → observe and returns stopReason=end_turn for a single-step turn", async () => {
     const tracer = new Tracer();
-    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+    const adapter = stubAdapter(() => ({
+      content: "约 6 克蛋白质",
+      stop: true,
+    }));
 
     const { events, result } = await collect(
       run({ userInput: "一个鸡蛋多少蛋白质？", adapter, tracer }),
@@ -113,7 +116,11 @@ describe("run", () => {
           content: "我需要查一下鸡蛋的营养数据。",
           stop: false,
           toolCalls: [
-            { id: "call-1", name: "search_food", args: { food: "egg" } } satisfies ToolCall,
+            {
+              id: "call-1",
+              name: "search_food",
+              args: { food: "egg" },
+            } satisfies ToolCall,
           ],
         };
       }
@@ -148,12 +155,13 @@ describe("run", () => {
 
     // act carries the tool call
     const act = events.find((e) => e.type === "act");
-    expect(act?.toolCall).toMatchObject({ name: "search_food", args: { food: "egg" } });
+    expect(act?.toolCall).toMatchObject({
+      name: "search_food",
+      args: { food: "egg" },
+    });
 
     // observe carries the tool result
-    const obs = events.find(
-      (e) => e.type === "observe" && e.toolResult,
-    );
+    const obs = events.find((e) => e.type === "observe" && e.toolResult);
     expect(obs?.toolResult).toMatchObject({
       name: "search_food",
       result: "egg: 6g protein per large egg",
@@ -169,14 +177,19 @@ describe("run", () => {
         return {
           content: "尝试调用不存在的工具。",
           stop: false,
-          toolCalls: [{ id: "call-1", name: "nonexistent", args: {} } satisfies ToolCall],
+          toolCalls: [
+            { id: "call-1", name: "nonexistent", args: {} } satisfies ToolCall,
+          ],
         };
       }
       return { content: "fallback answer", stop: true };
     });
 
     // Empty tools map — no handler for "nonexistent"
-    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+    const tools = new Map<
+      string,
+      (args: Readonly<Record<string, unknown>>) => Promise<string>
+    >();
 
     const { events, result } = await collect(
       run({ userInput: "q", adapter, tracer, tools }),
@@ -230,7 +243,10 @@ describe("run", () => {
     const tracer = new Tracer();
     const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-run", deps);
-    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+    const adapter = stubAdapter(() => ({
+      content: "约 6 克蛋白质",
+      stop: true,
+    }));
 
     await collect(
       run({ userInput: "一个鸡蛋多少蛋白质？", adapter, tracer, eventLog }),
@@ -251,7 +267,9 @@ describe("run", () => {
     const eventLog = new EventLog("sess-max", deps);
     const adapter = stubAdapter(() => ({ content: "not done", stop: false }));
 
-    await collect(run({ userInput: "go", adapter, tracer, eventLog, maxSteps: 3 }));
+    await collect(
+      run({ userInput: "go", adapter, tracer, eventLog, maxSteps: 3 }),
+    );
 
     const logged: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
     expect(logged.map((e) => e.type)).toEqual([
@@ -310,9 +328,7 @@ describe("run", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
 
-    const { result } = await collect(
-      run({ userInput: "hi", adapter, tracer }),
-    );
+    const { result } = await collect(run({ userInput: "hi", adapter, tracer }));
     expect(result.reply).toBe("ok");
   });
 
@@ -332,7 +348,8 @@ describe("run", () => {
       }),
     );
 
-    const prompt = tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
+    const prompt =
+      tracer.events().find((e) => e.type === "model_prompt")?.payload ?? "";
     expect(prompt).toContain("PRIOR-Q-protein in one egg");
     expect(prompt).toContain("PRIOR-A-about 6 grams");
   });
@@ -368,15 +385,19 @@ describe("run", () => {
         return {
           content: "查询中...",
           stop: false,
-          toolCalls: [{ id: "call-1", name: "calc", args: { expr: "1+1" } } satisfies ToolCall],
+          toolCalls: [
+            {
+              id: "call-1",
+              name: "calc",
+              args: { expr: "1+1" },
+            } satisfies ToolCall,
+          ],
         };
       }
       return { content: "结果是 2", stop: true };
     });
 
-    const tools = new Map([
-      ["calc", async () => "2"],
-    ]);
+    const tools = new Map([["calc", async () => "2"]]);
 
     await collect(run({ userInput: "计算", adapter, tracer, tools }));
 
@@ -409,7 +430,11 @@ describe("run", () => {
           content: "查询中...",
           stop: false,
           toolCalls: [
-            { id: "call-abc", name: "calc", args: { expr: "1+1" } } satisfies ToolCall,
+            {
+              id: "call-abc",
+              name: "calc",
+              args: { expr: "1+1" },
+            } satisfies ToolCall,
           ],
         };
       }
@@ -446,7 +471,11 @@ describe("run", () => {
           content: "查询中...",
           stop: false,
           toolCalls: [
-            { id: "call-1", name: "search", args: { q: "egg" } } satisfies ToolCall,
+            {
+              id: "call-1",
+              name: "search",
+              args: { q: "egg" },
+            } satisfies ToolCall,
           ],
         };
       }
@@ -483,12 +512,32 @@ describe("run", () => {
     });
 
     const tools = new Map([
-      ["tool_a", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`a:${args.order}`); return "a-result"; }],
-      ["tool_b", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`b:${args.order}`); return "b-result"; }],
-      ["tool_c", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`c:${args.order}`); return "c-result"; }],
+      [
+        "tool_a",
+        async (args: Readonly<Record<string, unknown>>) => {
+          dispatchOrder.push(`a:${args.order}`);
+          return "a-result";
+        },
+      ],
+      [
+        "tool_b",
+        async (args: Readonly<Record<string, unknown>>) => {
+          dispatchOrder.push(`b:${args.order}`);
+          return "b-result";
+        },
+      ],
+      [
+        "tool_c",
+        async (args: Readonly<Record<string, unknown>>) => {
+          dispatchOrder.push(`c:${args.order}`);
+          return "c-result";
+        },
+      ],
     ]);
 
-    await collect(run({ userInput: "test multi", adapter, tracer, tools, maxSteps: 1 }));
+    await collect(
+      run({ userInput: "test multi", adapter, tracer, tools, maxSteps: 1 }),
+    );
 
     // All three dispatched, in order
     expect(dispatchOrder).toEqual(["a:1", "b:2", "c:3"]);
@@ -566,7 +615,11 @@ describe("run", () => {
           content: "查询中...",
           stop: false,
           toolCalls: [
-            { id: "adapter-gen-id", name: "calc", args: { expr: "1+1" } } satisfies ToolCall,
+            {
+              id: "adapter-gen-id",
+              name: "calc",
+              args: { expr: "1+1" },
+            } satisfies ToolCall,
           ],
         };
       }
@@ -737,7 +790,10 @@ describe("runTurn (backward compat)", () => {
     const tracer = new Tracer();
     const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-1", deps);
-    const adapter = stubAdapter(() => ({ content: "约 6 克蛋白质", stop: true }));
+    const adapter = stubAdapter(() => ({
+      content: "约 6 克蛋白质",
+      stop: true,
+    }));
 
     await runTurn({
       userInput: "一个鸡蛋多少蛋白质？",
@@ -756,13 +812,19 @@ describe("runTurn (backward compat)", () => {
     // user_message carries the input
     expect(events[0].data).toEqual({ content: "一个鸡蛋多少蛋白质？" });
     // model_call carries step + model + thinking + systemPrompt
-    expect(events[1].data).toMatchObject({ step: 1, model: "flash", thinking: true });
+    expect(events[1].data).toMatchObject({
+      step: 1,
+      model: "flash",
+      thinking: true,
+    });
     expect(events[1].data.systemPrompt).toBeDefined();
     // agent_response carries the reply + step
     expect(events[2].data).toEqual({ content: "约 6 克蛋白质", step: 1 });
 
     // all go to one session file
-    expect(sink.writes.every((w) => w.path === "traces/sess-1.jsonl")).toBe(true);
+    expect(sink.writes.every((w) => w.path === "traces/sess-1.jsonl")).toBe(
+      true,
+    );
   });
 
   it("records model_call per step then error when MAX_STEPS is exhausted", async () => {
@@ -908,8 +970,7 @@ describe("runTurn (backward compat)", () => {
     expect(result.reply).toBe("I recommend drinking water.");
 
     // Should have gate_block event for the first (blocked) response
-    const events: LogEvent[] = sink.writes
-      .map((w) => JSON.parse(w.line));
+    const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
     const gateBlocks = events.filter((e) => e.type === "gate_block");
     expect(gateBlocks).toHaveLength(1);
     expect(gateBlocks[0].data).toMatchObject({
@@ -948,8 +1009,7 @@ describe("runTurn (backward compat)", () => {
     expect(result.reply).toContain("cannot safely answer");
 
     // Should have 3 gate_block events: original + 2 retries all blocked
-    const events: LogEvent[] = sink.writes
-      .map((w) => JSON.parse(w.line));
+    const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
     const gateBlocks = events.filter((e) => e.type === "gate_block");
     expect(gateBlocks).toHaveLength(3);
     expect(gateBlocks[0].data.attempt).toBe(1);
@@ -990,8 +1050,7 @@ describe("runTurn (backward compat)", () => {
 
     expect(result.reply).toBe("A cucumber salad is a safe choice.");
 
-    const events: LogEvent[] = sink.writes
-      .map((w) => JSON.parse(w.line));
+    const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
     const gateBlocks = events.filter((e) => e.type === "gate_block");
     expect(gateBlocks).toHaveLength(1);
     const reason = (gateBlocks[0].data.reasons as string[])[0];

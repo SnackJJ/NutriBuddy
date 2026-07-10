@@ -13,18 +13,24 @@ import type {
   ModelAdapter,
   ModelRequest,
   ModelResponse,
+  ModelTier,
   ToolCall,
   ToolSchema,
 } from "./types";
 
-export const TIER_TO_MODEL_ID: Record<string, string> = {
+export const TIER_TO_MODEL_ID: Record<ModelTier, string> = {
   flash: "deepseek-v4-flash",
   pro: "deepseek-v4-pro",
 };
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
+const TOOL_ARGUMENT_PREVIEW_CHARS = 200;
 
 type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+type ThinkingConfig = { readonly type: "enabled" | "disabled" };
+type ParsedToolArgs =
+  | { readonly ok: true; readonly value: Readonly<Record<string, unknown>> }
+  | { readonly ok: false; readonly error: string };
 
 export interface DeepSeekAdapterOptions {
   /** 显式 key；缺省时从 env.DEEPSEEK_API_KEY 读。 */
@@ -41,14 +47,7 @@ interface ChatCompletionChoice {
   readonly message?: {
     readonly role?: string;
     readonly content?: string | null;
-    readonly tool_calls?: ReadonlyArray<{
-      readonly id?: string;
-      readonly type?: string;
-      readonly function?: {
-        readonly name?: string;
-        readonly arguments?: string;
-      };
-    }>;
+    readonly tool_calls?: readonly ChatCompletionToolCall[];
   };
 }
 
@@ -56,51 +55,98 @@ interface ChatCompletionResponse {
   readonly choices?: ReadonlyArray<ChatCompletionChoice>;
 }
 
-function parseToolArgs(
-  argsStr: string,
-): Readonly<Record<string, unknown>> | string {
+interface ChatCompletionToolCall {
+  readonly id?: string;
+  readonly type?: string;
+  readonly function?: {
+    readonly name?: string;
+    readonly arguments?: string;
+  };
+}
+
+function argumentPreview(argsStr: string): string {
+  return argsStr.slice(0, TOOL_ARGUMENT_PREVIEW_CHARS);
+}
+
+function parseToolArgs(argsStr: string): ParsedToolArgs {
   try {
     const parsed: unknown = JSON.parse(argsStr);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Readonly<Record<string, unknown>>;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return { ok: true, value: parsed as Readonly<Record<string, unknown>> };
     }
-    return `tool call arguments is not a JSON object: ${argsStr.slice(0, 200)}`;
+    return {
+      ok: false,
+      error: `tool call arguments is not a JSON object: ${argumentPreview(argsStr)}`,
+    };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return `[JSON parse error in tool call arguments] ${message}: ${argsStr.slice(0, 200)}`;
+    return {
+      ok: false,
+      error: `[JSON parse error in tool call arguments] ${message}: ${argumentPreview(argsStr)}`,
+    };
   }
 }
 
-function parseFinishReason(choice: ChatCompletionChoice): string {
-  return choice.finish_reason ?? "stop";
+function resolveModelId(model: ModelTier): string {
+  return TIER_TO_MODEL_ID[model] ?? model;
 }
 
-/**
- * Serialize a ChatMessage for the OpenAI/DeepSeek API.
- *
- * Handles three message shapes:
- *   1. Plain system/user/assistant messages → {role, content}
- *   2. Assistant messages with tool_calls → {role, content, tool_calls}
- *   3. Tool result messages → {role, content, tool_call_id}
- */
-function serializeMessage(m: ChatMessage): Record<string, unknown> {
-  const base: Record<string, unknown> = { role: m.role };
+function thinkingConfig(thinking: boolean): ThinkingConfig {
+  return { type: thinking ? "enabled" : "disabled" };
+}
 
-  // role: "tool" messages carry tool_call_id instead of content (though content is also present)
-  if (m.role === "tool" && m.tool_call_id) {
-    base.content = m.content;
-    base.tool_call_id = m.tool_call_id;
-    return base;
+function fallbackToolCallId(): string {
+  return `call_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function serializeMessage(message: ChatMessage): Record<string, unknown> {
+  const serialized: Record<string, unknown> = { role: message.role };
+
+  if (message.role === "tool" && message.tool_call_id) {
+    serialized.content = message.content;
+    serialized.tool_call_id = message.tool_call_id;
+    return serialized;
   }
 
-  base.content = m.content;
+  serialized.content = message.content;
 
-  // Assistant messages with native tool_calls
-  if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
-    base.tool_calls = m.tool_calls;
+  if (
+    message.role === "assistant" &&
+    message.tool_calls &&
+    message.tool_calls.length > 0
+  ) {
+    serialized.tool_calls = message.tool_calls;
   }
 
-  return base;
+  return serialized;
+}
+
+function buildRequestBody(req: ModelRequest): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: resolveModelId(req.model),
+    thinking: thinkingConfig(req.thinking),
+    messages: req.messages.map((message) => serializeMessage(message)),
+  };
+
+  if (req.tools && req.tools.length > 0) {
+    body.tools = req.tools;
+  }
+
+  return body;
+}
+
+function parseToolCall(toolCall: ChatCompletionToolCall): ToolCall {
+  const parsedArgs = parseToolArgs(toolCall.function?.arguments ?? "{}");
+
+  return {
+    id: toolCall.id ?? fallbackToolCallId(),
+    name: toolCall.function?.name ?? "unknown",
+    args: parsedArgs.ok ? parsedArgs.value : { _parse_error: parsedArgs.error },
+  };
 }
 
 export class DeepSeekAdapter implements ModelAdapter {
@@ -126,23 +172,13 @@ export class DeepSeekAdapter implements ModelAdapter {
   }
 
   async generate(req: ModelRequest): Promise<ModelResponse> {
-    const body: Record<string, unknown> = {
-      model: TIER_TO_MODEL_ID[req.model] ?? req.model,
-      thinking: { type: req.thinking ? "enabled" : "disabled" },
-      messages: req.messages.map((m) => serializeMessage(m)),
-    };
-
-    if (req.tools && req.tools.length > 0) {
-      body.tools = req.tools;
-    }
-
     const res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildRequestBody(req)),
     });
 
     if (!res.ok) {
@@ -153,36 +189,16 @@ export class DeepSeekAdapter implements ModelAdapter {
     const data = (await res.json()) as ChatCompletionResponse;
     const choice = data.choices?.[0];
     const msg = choice?.message;
-    const finishReason = choice ? parseFinishReason(choice) : "stop";
+    const finishReason = choice?.finish_reason ?? "stop";
+    const toolCalls = msg?.tool_calls ?? [];
 
     // ── Native tool_calls path ──────────────────────────────────────────
-    if (finishReason === "tool_calls" && msg?.tool_calls && msg.tool_calls.length > 0) {
-      const toolCalls: ToolCall[] = msg.tool_calls.map((tc) => {
-        const name = tc.function?.name ?? "unknown";
-        const argsStr = tc.function?.arguments ?? "{}";
-        const parsed = parseToolArgs(argsStr);
-
-        if (typeof parsed === "string") {
-          // Parse error → surface as typed observation, not a crash
-          return {
-            id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
-            name,
-            args: { _parse_error: parsed },
-          };
-        }
-
-        return {
-          id: tc.id ?? `call_${Math.random().toString(36).slice(2, 10)}`,
-          name,
-          args: parsed,
-        };
-      });
-
+    if (finishReason === "tool_calls" && toolCalls.length > 0) {
       return {
-        content: msg.content ?? "",
+        content: msg?.content ?? "",
         stop: false,
         finishReason: "tool_calls",
-        toolCalls,
+        toolCalls: toolCalls.map((toolCall) => parseToolCall(toolCall)),
       };
     }
 
