@@ -2894,4 +2894,152 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(result.reply).toContain("confirmed");
     expect(result.reply).toContain("olive oil");
   });
+
+describe("submit_answer output gate integration (issue #43)", () => {
+  function makeObservation(
+    templateId: string,
+    columns: readonly ColumnDef[],
+    rows: ReadonlyArray<Record<string, unknown>>,
+  ): Observation {
+    return {
+      templateId,
+      columns,
+      rows: rows as Observation["rows"],
+      rowCount: rows.length,
+      truncated: false,
+    };
+  }
+
+  const CHICKEN_COLUMNS: ColumnDef[] = [
+    { name: "food_id", type: "string", description: "Catalog food ID" },
+    { name: "food_name", type: "string", description: "Canonical name" },
+    { name: "portion_g", type: "number", unit: "g", description: "Portion size" },
+    { name: "kcal", type: "number", unit: "kcal", description: "Calories" },
+    { name: "protein_g", type: "number", unit: "g", description: "Protein" },
+    { name: "fat_g", type: "number", unit: "g", description: "Fat" },
+    { name: "carbs_g", type: "number", unit: "g", description: "Carbs" },
+    { name: "allergen_tags", type: "string", description: "Allergens" },
+  ];
+
+  const PEANUT_CONFLICT: Conflict = {
+    type: "allergy",
+    id: "peanut",
+    description: "User is allergic to peanut",
+  };
+
+  it("output gates run on live submit_answer call with TypedOutput", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-turn-1",
+          name: "submit_answer",
+          args: {
+            prose: "Chicken breast has 31g protein per 100g.",
+            foodRefs: [
+              { foodId: "chicken-001", foodName: "chicken breast", matchType: "exact", allergens: [] },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const ports = createPorts(() => adapter.generate({} as never), {
+      tracer,
+      observations: [
+        makeObservation("food_lookup", CHICKEN_COLUMNS, [
+          {
+            food_id: "chicken-001", food_name: "Chicken breast, raw",
+            portion_g: 100, kcal: 165, protein_g: 31, fat_g: 3.6, carbs_g: 0, allergen_tags: "",
+          },
+        ]),
+      ],
+    });
+
+    const input: TurnInput = { tag: "utterance", content: "protein in chicken?" };
+    const { events, result } = await collect(turn(input, { ...ports, adapter }));
+
+    expect(result.output).toBeDefined();
+    expect(result.output!.prose).toBe("Chicken breast has 31g protein per 100g.");
+    expect(result.stopReason).toBe("end_turn");
+
+    const npVerdict = events.find(
+      (e) => e.type === "gate_verdict" && e.checkName === "output_numeric_provenance",
+    );
+    expect(npVerdict).toBeDefined();
+    expect((npVerdict as TurnGateVerdictEvent).verdict).toBe("pass");
+
+    const asVerdict = events.find(
+      (e) => e.type === "gate_verdict" && e.checkName === "output_advisory_structure",
+    );
+    expect(asVerdict).toBeDefined();
+    expect((asVerdict as TurnGateVerdictEvent).verdict).toBe("pass");
+  });
+
+  it("advisory structure gate blocks when conflicts and foodRefs present without ruleRefs", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-as-fail",
+          name: "submit_answer",
+          args: {
+            prose: "Try this peanut butter smoothie!",
+            foodRefs: [
+              { foodId: "peanut-001", foodName: "peanut butter", matchType: "exact", allergens: ["peanut"] },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const ports = createPorts(() => adapter.generate({} as never), {
+      tracer,
+      conflicts: [PEANUT_CONFLICT],
+      observations: [],
+    });
+
+    const input: TurnInput = { tag: "utterance", content: "smoothie ideas?" };
+    const { events } = await collect(turn(input, { ...ports, adapter }));
+
+    const asVerdict = events.find(
+      (e) => e.type === "gate_verdict" && e.checkName === "output_advisory_structure",
+    );
+    expect(asVerdict).toBeDefined();
+    expect((asVerdict as TurnGateVerdictEvent).verdict).toBe("block");
+  });
+
+  it("prose-only completion (no submit_answer) is distinguishable in the event stream", async () => {
+    const tracer = new Tracer();
+    const adapter = stubAdapter(() => ({
+      content: "Here is a simple answer without structured output.",
+      stop: true,
+    }));
+
+    const ports = createPorts(() => adapter.generate({} as never), {
+      tracer,
+      observations: [],
+    });
+
+    const input: TurnInput = { tag: "utterance", content: "hello" };
+    const { events, result } = await collect(turn(input, { ...ports, adapter }));
+
+    expect(result.output).toBeUndefined();
+    expect(result.reply).toBe("Here is a simple answer without structured output.");
+
+    const npVerdict = events.find(
+      (e) => e.type === "gate_verdict" && e.checkName === "output_numeric_provenance",
+    );
+    expect(npVerdict).toBeUndefined();
+  });
+});
+
 });

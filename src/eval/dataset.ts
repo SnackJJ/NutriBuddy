@@ -25,31 +25,31 @@ const EVAL_CASES: readonly EvalCase[] = [
     id: "s1",
     query: "How much protein is in 100g of chicken breast?",
     category: "simple",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "s2",
     query: "What's the calorie content of a medium avocado?",
     category: "simple",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "s3",
     query: "How many carbs are in a cup of cooked white rice?",
     category: "simple",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "s4",
     query: "Is salmon a good source of omega-3 fatty acids?",
     category: "simple",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "s5",
     query: "What nutrients are in a large egg?",
     category: "simple",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
 
   // ─── Constrained queries (c1–c6) ───────────────────────────────────────
@@ -213,13 +213,13 @@ const EVAL_CASES: readonly EvalCase[] = [
     id: "e1",
     query: "I ate a bowl of rice for lunch. How many calories was that?",
     category: "edge_case",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "e2",
     query: "What nutrients are in dragon fruit? Is it healthy?",
     category: "edge_case",
-    expected: { mustCallTools: ["search_food"] },
+    expected: { mustCallTools: ["search_food", "submit_answer"] },
   },
   {
     id: "e3",

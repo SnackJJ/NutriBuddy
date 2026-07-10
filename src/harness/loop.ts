@@ -33,6 +33,10 @@ import { EventLog } from "./eventLog";
 import { buildPreGateContext, checkPostGate, type UserContext } from "./gate";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { QueryCatalog } from "../catalog/queryCatalog";
+import {
+  SUBMIT_ANSWER_TOOL,
+  parseSubmitAnswerArgs,
+} from "./submitAnswer";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -226,6 +230,116 @@ export async function* run(
     tracer.record({ step, type: "model_return", payload: response.content });
 
     if (response.toolCalls && response.toolCalls.length > 0) {
+      // ── Terminal: submit_answer ──────────────────────────────────
+      // Issue #43: the model delivers its typed final answer through a
+      // submit_answer tool call. The loop recognises this call and ends
+      // the turn with TypedOutput populated so the output gates can fire.
+      const submitAnswerCall = response.toolCalls.find(
+        (tc) => tc.name === SUBMIT_ANSWER_TOOL,
+      );
+
+      if (submitAnswerCall) {
+        yield { type: "act", step, toolCall: submitAnswerCall };
+
+        const output = parseSubmitAnswerArgs(submitAnswerCall.args);
+        const resultText =
+          output !== null
+            ? `Answer submitted with ${output.foodRefs.length} food ref(s) and ${output.ruleRefs.length} rule ref(s)`
+            : "Answer submitted (prose-only fallback)";
+
+        yield {
+          type: "observe",
+          step,
+          toolResult: { name: SUBMIT_ANSWER_TOOL, result: resultText },
+        };
+
+        // Prose from TypedOutput, falling back to model content
+        reply = output?.prose ?? response.content;
+
+        // ── Post-gate: check output against hard constraints ──────
+        if (userContext && interactionStore) {
+          const check = checkPostGate(reply, userContext, interactions);
+
+          if (!check.passed) {
+            eventLog?.record({
+              type: "gate_block",
+              data: {
+                attempt: postGateRetries + 1,
+                maxRetries: MAX_POST_GATE_RETRIES,
+                reasons: check.reasons,
+                blockedContent: reply,
+                step,
+              },
+            });
+
+            if (postGateRetries < MAX_POST_GATE_RETRIES) {
+              postGateRetries++;
+              const reasonList = check.reasons
+                .map((r) => `  - ${r}`)
+                .join("\n");
+              const retryFeedback =
+                `Your previous response was BLOCKED by safety constraints:\n${reasonList}\n\n` +
+                `Please regenerate your response. Make absolutely sure you do NOT mention ` +
+                `or recommend any of the blocked foods or allergens listed above. ` +
+                `This is a hard safety requirement.`;
+
+              // Replay the blocked response as history for the retry
+              working.push(
+                createAssistantToolCallMessage(
+                  response.content,
+                  response.toolCalls,
+                ),
+              );
+              working.push(
+                createToolResultMessage(
+                  submitAnswerCall,
+                  `BLOCKED: ${check.reasons.join("; ")}`,
+                ),
+              );
+              working.push({ role: "user", content: retryFeedback });
+              tracer.record({
+                step,
+                type: "gate_block",
+                payload: `Post-gate blocked (attempt ${postGateRetries}/${MAX_POST_GATE_RETRIES}): ${check.reasons.join("; ")}`,
+              });
+              continue;
+            }
+
+            // Retries exhausted: return refusal
+            eventLog?.record({
+              type: "agent_response",
+              data: {
+                content: gateExhaustedReply(check.reasons),
+                step,
+                gateExhausted: true,
+              },
+            });
+            tracer.record({
+              step,
+              type: "gate_exhausted",
+              payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
+            });
+            return {
+              reply: gateExhaustedReply(check.reasons),
+              steps: step,
+              stopReason: "gate_blocked",
+            };
+          }
+        }
+
+        eventLog?.record({
+          type: "agent_response",
+          data: { content: reply, step },
+        });
+        return {
+          reply,
+          steps: step,
+          stopReason: "end_turn",
+          output: output ?? undefined,
+        };
+      }
+
+      // ── Regular tool dispatch ───────────────────────────────────
       working.push(
         createAssistantToolCallMessage(response.content, response.toolCalls),
       );

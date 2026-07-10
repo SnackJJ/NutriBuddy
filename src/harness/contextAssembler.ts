@@ -20,7 +20,13 @@ import type {
 } from "../catalog/queryCatalog";
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。";
+  "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。\n\n" +
+  "When you are ready to deliver your final answer, you MUST call the " +
+  "submit_answer tool. Provide your full prose response in the 'prose' field, " +
+  "structured food references in 'foodRefs' (with foodId, foodName, and matchType " +
+  "for every food you recommend), and applicable safety advisory rules in " +
+  "'ruleRefs' (with ruleId and summary). Do NOT end the turn with plain prose — " +
+  "prose-only completions skip safety checks.";
 
 // ─── Tool Definitions ─────────────────────────────────────────────────
 

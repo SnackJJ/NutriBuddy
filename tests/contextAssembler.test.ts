@@ -230,9 +230,11 @@ describe("assembleContext", () => {
   });
 
   it("future: DEFAULT_SYSTEM_PROMPT is still exported (backward compat)", () => {
-    expect(DEFAULT_SYSTEM_PROMPT).toBe(
+    expect(DEFAULT_SYSTEM_PROMPT).toContain(
       "你是 NutriBuddy，一个谨慎、循证的个人营养顾问。",
     );
+    // Issue #43: the prompt now includes submit_answer instructions
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("submit_answer");
   });
 });
 

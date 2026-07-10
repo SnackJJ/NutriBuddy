@@ -679,6 +679,44 @@ describe("runHarnessEval", () => {
     expect(results[0].response).toContain("[ERROR]");
     expect(results[0].response).toContain("model offline at step 2");
   });
+
+  it("captures submit_answer tool call and exercises typed output path (issue #43)", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-eval",
+          name: "submit_answer",
+          args: {
+            prose: "Chicken breast is a great source of lean protein. I recommend it for your meals.",
+            foodRefs: [
+              { foodId: "chicken-001", foodName: "chicken breast", matchType: "exact" },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const tools = new Map<string, (args: Readonly<Record<string, unknown>>) => Promise<string>>();
+
+    const cases: EvalCase[] = [
+      {
+        id: "t1",
+        query: "protein in chicken?",
+        category: "simple",
+        expected: { mustCallTools: ["submit_answer"] },
+      },
+    ];
+
+    const results = await runHarnessEval(cases, adapter, tools);
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(true);
+    expect(results[0].toolCalls).toContain("submit_answer");
+    expect(results[0].stopReason).toBe("end_turn");
+  });
 });
 
 // ─── Reporter tests ──────────────────────────────────────────────────────

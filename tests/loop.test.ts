@@ -1057,4 +1057,229 @@ describe("runTurn (backward compat)", () => {
     expect(reason).toContain("kale");
     expect(reason).toContain("warfarin");
   });
+  describe("submit_answer terminal tool call (issue #43)", () => {
+    function fakeInteractionStore(
+      rows: DrugNutrientInteraction[],
+    ): InteractionStore {
+      return { all: async () => rows };
+    }
+
+    it("ends the turn with TypedOutput populated when model calls submit_answer", async () => {
+      const tracer = new Tracer();
+      const adapter = stubAdapter(() => ({
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "call-sa-1",
+            name: "submit_answer",
+            args: {
+              prose: "I recommend chicken breast. It has 31g protein per 100g.",
+              foodRefs: [
+                { foodId: "f-001", foodName: "chicken breast", matchType: "exact", allergens: [] },
+              ],
+              ruleRefs: [
+                { ruleId: "r-001", summary: "Limit saturated fat intake" },
+              ],
+            },
+          } satisfies ToolCall,
+        ],
+      }));
+
+      const { events, result } = await collect(
+        run({ userInput: "what should I eat for protein?", adapter, tracer }),
+      );
+
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.reply).toBe("I recommend chicken breast. It has 31g protein per 100g.");
+      expect(result.output).toBeDefined();
+      expect(result.output!.prose).toBe("I recommend chicken breast. It has 31g protein per 100g.");
+      expect(result.output!.foodRefs).toHaveLength(1);
+      expect(result.output!.foodRefs[0].foodId).toBe("f-001");
+      expect(result.output!.ruleRefs).toHaveLength(1);
+      expect(result.output!.ruleRefs[0].ruleId).toBe("r-001");
+
+      const types = events.map((e) => e.type);
+      expect(types).toEqual(["thought", "act", "observe"]);
+
+      const act = events.find((e) => e.type === "act");
+      expect(act?.toolCall?.name).toBe("submit_answer");
+    });
+
+    it("submit_answer takes precedence over other tool calls in the same response", async () => {
+      const tracer = new Tracer();
+      let otherToolCalled = false;
+      const adapter = stubAdapter(() => ({
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          { id: "call-other", name: "search_food", args: { food: "egg" } } satisfies ToolCall,
+          {
+            id: "call-sa-2",
+            name: "submit_answer",
+            args: {
+              prose: "Eggs have 6g protein each.",
+              foodRefs: [{ foodId: "f-egg", foodName: "egg", matchType: "exact" }],
+              ruleRefs: [],
+            },
+          } satisfies ToolCall,
+        ],
+      }));
+
+      const tools = new Map([
+        ["search_food", async () => { otherToolCalled = true; return "egg data"; }],
+      ]);
+
+      const { result } = await collect(
+        run({ userInput: "eggs?", adapter, tracer, tools }),
+      );
+
+      expect(otherToolCalled).toBe(false);
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.output).toBeDefined();
+      expect(result.output!.prose).toBe("Eggs have 6g protein each.");
+    });
+
+    it("prose-only submit_answer (empty refs) still terminates with output", async () => {
+      const tracer = new Tracer();
+      const adapter = stubAdapter(() => ({
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "call-sa-3",
+            name: "submit_answer",
+            args: {
+              prose: "I cannot make a specific recommendation without more information.",
+              foodRefs: [],
+              ruleRefs: [],
+            },
+          } satisfies ToolCall,
+        ],
+      }));
+
+      const { result } = await collect(
+        run({ userInput: "what should I eat?", adapter, tracer }),
+      );
+
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.output).toBeDefined();
+      expect(result.output!.prose).toBe("I cannot make a specific recommendation without more information.");
+      expect(result.output!.foodRefs).toEqual([]);
+      expect(result.output!.ruleRefs).toEqual([]);
+    });
+
+    it("falls back to model content when submit_answer args have no prose", async () => {
+      const tracer = new Tracer();
+      const adapter = stubAdapter(() => ({
+        content: "Fallback prose from model content.",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          { id: "call-sa-4", name: "submit_answer", args: {} } satisfies ToolCall,
+        ],
+      }));
+
+      const { result } = await collect(
+        run({ userInput: "q", adapter, tracer }),
+      );
+
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.output).toBeUndefined();
+      expect(result.reply).toBe("Fallback prose from model content.");
+    });
+
+    it("submit_answer with post-gate block retries and returns clean response", async () => {
+      const tracer = new Tracer();
+      const { sink, deps } = fixedDeps();
+      const eventLog = new EventLog("sess-sa-gate-1", deps);
+
+      let calls = 0;
+      const adapter = stubAdapter(() => {
+        calls++;
+        if (calls === 1) {
+          return {
+            content: "",
+            stop: false,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "call-sa-blocked",
+                name: "submit_answer",
+                args: {
+                  prose: "I recommend drinking milk daily for calcium.",
+                  foodRefs: [{ foodId: "f-milk", foodName: "milk", matchType: "exact" }],
+                  ruleRefs: [],
+                },
+              } satisfies ToolCall,
+            ],
+          };
+        }
+        return {
+          content: "",
+          stop: false,
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "call-sa-clean",
+              name: "submit_answer",
+              args: { prose: "I recommend drinking water.", foodRefs: [], ruleRefs: [] },
+            } satisfies ToolCall,
+          ],
+        };
+      });
+
+      const result = await runTurn({
+        userInput: "what should I drink?",
+        adapter,
+        tracer,
+        eventLog,
+        userContext: { allergies: ["milk"], medications: [] },
+        interactionStore: fakeInteractionStore([]),
+      });
+
+      expect(result.reply).toBe("I recommend drinking water.");
+      expect(result.output).toBeDefined();
+      expect(result.stopReason).toBe("end_turn");
+
+      const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
+      const gateBlocks = events.filter((e) => e.type === "gate_block");
+      expect(gateBlocks).toHaveLength(1);
+    });
+
+    it("submit_answer with exhausted post-gate retries returns gate_blocked", async () => {
+      const tracer = new Tracer();
+      const adapter = stubAdapter(() => ({
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "call-sa-always-blocked",
+            name: "submit_answer",
+            args: {
+              prose: "Drink more milk for calcium!",
+              foodRefs: [{ foodId: "f-milk", foodName: "milk", matchType: "exact" }],
+              ruleRefs: [],
+            },
+          } satisfies ToolCall,
+        ],
+      }));
+
+      const result = await runTurn({
+        userInput: "how can I get more calcium?",
+        adapter,
+        tracer,
+        userContext: { allergies: ["milk"], medications: [] },
+        interactionStore: fakeInteractionStore([]),
+      });
+
+      expect(result.reply).toContain("cannot safely answer");
+      expect(result.stopReason).toBe("gate_blocked");
+    });
+  });
+
 });

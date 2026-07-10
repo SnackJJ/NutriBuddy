@@ -18,6 +18,7 @@ import {
   type ChatRequestBody,
 } from "@/lib/chatApi";
 import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
+import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
 import { createGetFoodNutrition } from "@/harness/foodNutrition";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 import type {
@@ -245,7 +246,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     ports = {
       ...ports,
       tools: buildToolMap(sessionUserId),
-      toolSchemas: [LOG_MEAL_SCHEMA],
+      toolSchemas: [LOG_MEAL_SCHEMA, SUBMIT_ANSWER_SCHEMA],
     };
   }
 
