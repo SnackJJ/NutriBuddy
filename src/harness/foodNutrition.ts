@@ -1,7 +1,15 @@
 // get_food_nutrition：根据食物名称 + 份量返回营养数据（issue #12 占位接口）。
 //
-// 当前为内置常见食物 stub（约 30 种），按份量线性缩放。M1 后续切片将替换
-// 为 USDA FoodData Central API 实时查询。接口签名保留以便无缝替换。
+// ⚠ DEPRECATED — superseded by the local catalog + resolver (issue #42).
+//
+// This stub is kept for backward compat in tests that exercise the log_meal
+// tool without wiring a full catalog. New runtime code should use the typed
+// query catalog (food_lookup template) against the local catalog, never this
+// stub or the USDA API directly.
+//
+// The USDA FoodData Central client (src/lib/usda.ts) is now an offline
+// ingestion adapter; mapToCatalogFood + ingestFoods produce CatalogFood
+// entries consumed by the resolver at runtime. No runtime code calls USDA.
 //
 // 数据来源：USDA FoodData Central (SR Legacy)，每 100g 数值。
 

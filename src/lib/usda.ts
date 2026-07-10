@@ -9,6 +9,21 @@
 // 确保失败的工具调用不会把 Loop 拖垮。
 //
 // Schema：GET_FOOD_NUTRITION_SCHEMA 符合 OpenAI function-calling 格式。
+//
+// ── Ingestion adapter (issue #42 / ADD §Data Pipeline) ────────────────────────
+//
+// mapToCatalogFood maps a USDA FoodNutrition result into the canonical
+// CatalogFood shape — the single nutrition data form the agent maintains
+// regardless of source. Allergen tags are empty (fail-closed: untagged foods
+// are loggable but never recommendable). Aliases are derived from the food
+// description where possible.
+//
+// createCatalogSnapshot assembles a versioned snapshot envelope suitable for
+// serialisation. The ingestion script (src/ingest/usda.ts) uses UsdaClient
+// to fetch foods offline, maps them through this adapter, and writes the
+// resulting catalog snapshot as JSON. The runtime never calls USDA.
+
+import type { CatalogFood } from "../catalog/catalog";
 
 const DEFAULT_BASE_URL = "https://api.nal.usda.gov/fdc/v1";
 
@@ -98,6 +113,15 @@ function emptyFoodNutrition(
   };
 }
 
+/**
+ * USDA FoodData Central API client — OFFLINE INGESTION ONLY (issue #42).
+ *
+ * This client fetches nutrition data from USDA FoodData Central for ingestion.
+ * It is NOT a runtime dependency: the runtime reads from the local catalog
+ * produced by the ingestion pipeline (src/ingest/usda.ts).
+ *
+ * DI-friendly (injectable fetch + env) for deterministic testing.
+ */
 export class UsdaClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -219,6 +243,13 @@ export const GET_FOOD_NUTRITION_SCHEMA = {
 };
 
 /**
+ * ⚠ DEPRECATED — superseded by the local catalog + resolver (issue #42).
+ *
+ * Creates a get_food_nutrition tool handler that calls the USDA API.
+ * This is kept for test backward compat only; runtime code should use the
+ * typed query catalog (food_lookup template) against the local catalog.
+ * The USDA client is now an offline ingestion adapter.
+ *
  * 创建 get_food_nutrition 工具处理器。
  *
  * 返回的 ToolHandler 绝不抛异常——所有错误（输入校验、API 失败、无匹配）
@@ -254,5 +285,115 @@ export function createGetFoodNutritionTool(client: UsdaClient): ToolHandler {
         return `USDA 查询失败: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
+  };
+}
+
+// ─── Snapshot ingestion adapter (issue #42 / ADD §Data Pipeline) ─────────────
+
+/** Sanitise a food description into a stable, URL-safe id fragment. */
+function sanitizeForId(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Generate a stable catalog food ID from a food name and index. */
+export function generateFoodId(name: string, index: number): string {
+  const fragment = sanitizeForId(name);
+  const padded = String(index).padStart(3, "0");
+  return `food-usda-${fragment}-${padded}`;
+}
+
+/** Common food name normalisations for alias derivation. */
+function deriveAliases(foodName: string): readonly string[] {
+  const aliases: string[] = [];
+  const lower = foodName.toLowerCase().trim();
+
+  // Strip comma-separated qualifiers to produce shorter aliases.
+  // e.g. "Apples, raw, with skin" → "apples raw", "apples"
+  if (lower.includes(",")) {
+    const parts = lower.split(",").map((p) => p.trim());
+    if (parts[0]) {
+      aliases.push(parts[0]);
+    }
+    // Two-part combo descriptions
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      aliases.push(`${parts[0]} ${parts[1]}`);
+    }
+  }
+
+  return aliases;
+}
+
+/**
+ * Map a USDA FoodNutrition result into the canonical CatalogFood shape.
+ *
+ * Allergen tags are empty (fail-closed): untagged foods are loggable but
+ * never recommendable. Tag review happens separately; this adapter never
+ * auto-tags allergens.
+ *
+ * @param food - the USDA FoodNutrition result (per-100g values)
+ * @param index - position in the ingestion batch, for stable id generation
+ * @param category - optional food category; defaults to "general"
+ */
+export function mapToCatalogFood(
+  food: FoodNutrition,
+  index: number,
+  category = "general",
+): CatalogFood {
+  return {
+    id: generateFoodId(food.food_name, index),
+    canonicalName: food.food_name.toLowerCase(),
+    aliases: deriveAliases(food.food_name),
+    per100g: {
+      kcal: food.kcal,
+      proteinG: food.protein_g,
+      fatG: food.fat_g,
+      carbsG: food.carbs_g,
+      fiberG: food.fiber_g,
+      sugarsG: food.sugars_g,
+      saturatedFatG: food.saturated_fat_g,
+      cholesterolMg: food.cholesterol_mg,
+      sodiumMg: food.sodium_mg,
+      calciumMg: food.calcium_mg,
+      ironMg: food.iron_mg,
+      potassiumMg: food.potassium_mg,
+      vitaminCMg: food.vitamin_c_mg,
+      vitaminDMcg: food.vitamin_d_mcg,
+    },
+    allergenTags: [],
+    portionAliases: {},
+    category,
+  };
+}
+
+/**
+ * A versioned snapshot of ingested foods from USDA FoodData Central.
+ * The version stamp flows into resolver results so traces reproduce
+ * against their data (ADD §Data Pipeline).
+ */
+export interface CatalogSnapshot {
+  /** Snapshot version stamp (ISO date-based). */
+  readonly version: string;
+  /** ISO 8601 timestamp of generation. */
+  readonly generatedAt: string;
+  /** Data source identifier. */
+  readonly source: string;
+  /** Ingested CatalogFood entries. */
+  readonly foods: readonly CatalogFood[];
+}
+
+/** Create a versioned catalog snapshot from ingested food entries. */
+export function createCatalogSnapshot(
+  foods: readonly CatalogFood[],
+  generatedAt: Date = new Date(),
+): CatalogSnapshot {
+  const dateStamp = generatedAt.toISOString().slice(0, 10);
+  return {
+    version: `usda-snapshot-${dateStamp}`,
+    generatedAt: generatedAt.toISOString(),
+    source: "USDA FoodData Central",
+    foods,
   };
 }

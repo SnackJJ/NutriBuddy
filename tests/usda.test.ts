@@ -3,6 +3,9 @@ import {
   UsdaClient,
   createGetFoodNutritionTool,
   GET_FOOD_NUTRITION_SCHEMA,
+  mapToCatalogFood,
+  generateFoodId,
+  createCatalogSnapshot,
 } from "../src/lib/usda";
 import type { FoodNutrition } from "../src/lib/usda";
 
@@ -445,5 +448,196 @@ describe("createGetFoodNutritionTool", () => {
     const result = await tool.execute({ food_name: "apple" });
     expect(typeof result).toBe("string");
     expect(result).toContain("USDA");
+  });
+});
+
+// ─── Snapshot ingestion adapter (issue #42) ─────────────────────────────────
+
+describe("generateFoodId", () => {
+  it("generates a stable id from a food name and index", () => {
+    const id = generateFoodId("Apples, raw, with skin", 1);
+    expect(id).toBe("food-usda-apples-raw-with-skin-001");
+  });
+
+  it("pads the index to three digits", () => {
+    expect(generateFoodId("banana", 5)).toContain("-005");
+    expect(generateFoodId("banana", 42)).toContain("-042");
+    expect(generateFoodId("banana", 100)).toContain("-100");
+  });
+
+  it("lowercases and replaces non-alphanumeric characters with dashes", () => {
+    const id = generateFoodId("Chicken Breast", 1);
+    expect(id).toBe("food-usda-chicken-breast-001");
+  });
+
+  it("strips leading and trailing dashes from the fragment", () => {
+    const id = generateFoodId("  (special food)  ", 3);
+    expect(id).toMatch(/^food-usda-special-food-003$/);
+  });
+});
+
+describe("mapToCatalogFood", () => {
+  function appleFood(): FoodNutrition {
+    return {
+      food_name: "Apples, raw, with skin",
+      portion_g: 100,
+      kcal: 52,
+      protein_g: 0.3,
+      fat_g: 0.2,
+      carbs_g: 14,
+      fiber_g: 2.4,
+      sugars_g: 10,
+      saturated_fat_g: 0.03,
+      cholesterol_mg: 0,
+      sodium_mg: 1,
+      calcium_mg: 6,
+      iron_mg: 0.1,
+      potassium_mg: 107,
+      vitamin_c_mg: 4.6,
+      vitamin_d_mcg: 0,
+    };
+  }
+
+  it("maps a USDA FoodNutrition to a CatalogFood entry with all 14 nutrients", () => {
+    const result = mapToCatalogFood(appleFood(), 0);
+
+    expect(result.id).toBe("food-usda-apples-raw-with-skin-000");
+    expect(result.canonicalName).toBe("apples, raw, with skin");
+    expect(result.per100g.kcal).toBe(52);
+    expect(result.per100g.proteinG).toBe(0.3);
+    expect(result.per100g.fatG).toBe(0.2);
+    expect(result.per100g.carbsG).toBe(14);
+    expect(result.per100g.fiberG).toBe(2.4);
+    expect(result.per100g.sugarsG).toBe(10);
+    expect(result.per100g.saturatedFatG).toBe(0.03);
+    expect(result.per100g.cholesterolMg).toBe(0);
+    expect(result.per100g.sodiumMg).toBe(1);
+    expect(result.per100g.calciumMg).toBe(6);
+    expect(result.per100g.ironMg).toBe(0.1);
+    expect(result.per100g.potassiumMg).toBe(107);
+    expect(result.per100g.vitaminCMg).toBe(4.6);
+    expect(result.per100g.vitaminDMcg).toBe(0);
+  });
+
+  it("emits empty allergen tags (fail-closed)", () => {
+    const result = mapToCatalogFood(appleFood(), 0);
+    expect(result.allergenTags).toEqual([]);
+  });
+
+  it("derives aliases from comma-separated USDA food descriptions", () => {
+    const result = mapToCatalogFood(appleFood(), 0);
+
+    // "Apples, raw, with skin" → aliases should include short forms
+    expect(result.aliases).toContain("apples");
+    expect(result.aliases).toContain("apples raw");
+  });
+
+  it("does not derive aliases for simple names without commas", () => {
+    const food: FoodNutrition = {
+      food_name: "banana",
+      portion_g: 100,
+      kcal: 89,
+      protein_g: 1.1,
+      fat_g: 0.3,
+      carbs_g: 23,
+      fiber_g: 2.6,
+      sugars_g: 12,
+      saturated_fat_g: 0.1,
+      cholesterol_mg: 0,
+      sodium_mg: 1,
+      calcium_mg: 5,
+      iron_mg: 0.3,
+      potassium_mg: 358,
+      vitamin_c_mg: 8.7,
+      vitamin_d_mcg: 0,
+    };
+
+    const result = mapToCatalogFood(food, 0);
+    expect(result.aliases).toEqual([]);
+  });
+
+  it("uses the provided category", () => {
+    const result = mapToCatalogFood(appleFood(), 0, "fruit");
+    expect(result.category).toBe("fruit");
+  });
+
+  it("defaults category to general", () => {
+    const result = mapToCatalogFood(appleFood(), 0);
+    expect(result.category).toBe("general");
+  });
+
+  it("produces empty portion aliases (human review needed)", () => {
+    const result = mapToCatalogFood(appleFood(), 0);
+    expect(result.portionAliases).toEqual({});
+  });
+
+  it("generates unique ids for each index", () => {
+    const r0 = mapToCatalogFood(appleFood(), 0);
+    const r1 = mapToCatalogFood(appleFood(), 1);
+    expect(r0.id).not.toBe(r1.id);
+    expect(r0.id).toContain("-000");
+    expect(r1.id).toContain("-001");
+  });
+});
+
+describe("createCatalogSnapshot", () => {
+  function appleFood(): FoodNutrition {
+    return {
+      food_name: "apple",
+      portion_g: 100,
+      kcal: 52,
+      protein_g: 0.3,
+      fat_g: 0.2,
+      carbs_g: 14,
+      fiber_g: 2.4,
+      sugars_g: 10,
+      saturated_fat_g: 0.03,
+      cholesterol_mg: 0,
+      sodium_mg: 1,
+      calcium_mg: 6,
+      iron_mg: 0.1,
+      potassium_mg: 107,
+      vitamin_c_mg: 4.6,
+      vitamin_d_mcg: 0,
+    };
+  }
+
+  it("creates a versioned snapshot envelope", () => {
+    const foods = [
+      mapToCatalogFood(appleFood(), 0),
+      mapToCatalogFood(appleFood(), 1),
+    ];
+    const snapshot = createCatalogSnapshot(foods, new Date("2026-07-10"));
+
+    expect(snapshot.version).toBe("usda-snapshot-2026-07-10");
+    expect(snapshot.generatedAt).toBe("2026-07-10T00:00:00.000Z");
+    expect(snapshot.source).toBe("USDA FoodData Central");
+    expect(snapshot.foods).toEqual(foods);
+  });
+
+  it("version stamp is date-stamped from generation time", () => {
+    const foods = [mapToCatalogFood(appleFood(), 0)];
+    const snapshot = createCatalogSnapshot(foods, new Date("2025-01-15"));
+
+    expect(snapshot.version).toBe("usda-snapshot-2025-01-15");
+  });
+
+  it("snapshot version stamp is suitable for trace reproduction", () => {
+    const foods = [mapToCatalogFood(appleFood(), 0)];
+    const snapshot = createCatalogSnapshot(foods, new Date("2026-07-10"));
+
+    // The version is a string that can be stored and compared
+    expect(typeof snapshot.version).toBe("string");
+    expect(snapshot.version.length).toBeGreaterThan(0);
+  });
+
+  it("produces deterministic snapshots for the same inputs", () => {
+    const foods = [mapToCatalogFood(appleFood(), 0)];
+    const s1 = createCatalogSnapshot(foods, new Date("2026-07-10"));
+    const s2 = createCatalogSnapshot(foods, new Date("2026-07-10"));
+
+    expect(s1.version).toBe(s2.version);
+    expect(s1.source).toBe(s2.source);
+    expect(s1.foods).toEqual(s2.foods);
   });
 });
