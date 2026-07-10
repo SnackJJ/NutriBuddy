@@ -9,6 +9,7 @@ import type { FoodRef, RuleRef, ToolSchema, TypedOutput } from "./types";
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
 export const SUBMIT_ANSWER_TOOL = "submit_answer";
+const VALID_MATCH_TYPES = ["exact", "alias", "fuzzy"] as const;
 
 // ─── OpenAI Function-Calling Schema ────────────────────────────────────────
 
@@ -56,7 +57,8 @@ export const SUBMIT_ANSWER_SCHEMA: ToolSchema = {
               allergens: {
                 type: "array",
                 items: { type: "string" },
-                description: "FDA big-9 allergen tags for this food, if reviewed.",
+                description:
+                  "FDA big-9 allergen tags for this food, if reviewed.",
               },
             },
             required: ["foodId", "foodName", "matchType"],
@@ -95,26 +97,82 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isValidFoodRef(ref: unknown): ref is FoodRef {
+function isMatchType(value: unknown): value is FoodRef["matchType"] {
   return (
-    isRecord(ref) &&
-    typeof ref.foodId === "string" &&
-    ref.foodId.length > 0 &&
-    typeof ref.foodName === "string" &&
-    ref.foodName.length > 0 &&
-    (ref.matchType === "exact" ||
-      ref.matchType === "alias" ||
-      ref.matchType === "fuzzy")
+    typeof value === "string" &&
+    VALID_MATCH_TYPES.includes(value as FoodRef["matchType"])
   );
 }
 
-function isValidRuleRef(ref: unknown): ref is RuleRef {
-  return (
-    isRecord(ref) &&
-    typeof ref.ruleId === "string" &&
-    ref.ruleId.length > 0 &&
-    typeof ref.summary === "string"
-  );
+function readStringArray(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function parseFoodRef(ref: unknown): FoodRef | null {
+  if (
+    !isRecord(ref) ||
+    typeof ref.foodId !== "string" ||
+    ref.foodId.length === 0 ||
+    typeof ref.foodName !== "string" ||
+    ref.foodName.length === 0 ||
+    !isMatchType(ref.matchType)
+  ) {
+    return null;
+  }
+
+  const allergens = readStringArray(ref.allergens);
+  if (allergens) {
+    return {
+      foodId: ref.foodId,
+      foodName: ref.foodName,
+      matchType: ref.matchType,
+      allergens,
+    };
+  }
+
+  return {
+    foodId: ref.foodId,
+    foodName: ref.foodName,
+    matchType: ref.matchType,
+  };
+}
+
+function parseRuleRef(ref: unknown): RuleRef | null {
+  if (
+    !isRecord(ref) ||
+    typeof ref.ruleId !== "string" ||
+    ref.ruleId.length === 0 ||
+    typeof ref.summary !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    ruleId: ref.ruleId,
+    summary: ref.summary,
+  };
+}
+
+function parseArrayItems<T>(
+  value: unknown,
+  parseItem: (item: unknown) => T | null,
+): T[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const parsed: T[] = [];
+  for (const item of value) {
+    const parsedItem = parseItem(item);
+    if (parsedItem) {
+      parsed.push(parsedItem);
+    }
+  }
+  return parsed;
 }
 
 /**
@@ -131,14 +189,8 @@ export function parseSubmitAnswerArgs(
   args: Readonly<Record<string, unknown>>,
 ): TypedOutput | null {
   const prose = typeof args.prose === "string" ? args.prose : "";
-
-  const foodRefs: FoodRef[] = Array.isArray(args.foodRefs)
-    ? args.foodRefs.filter(isValidFoodRef)
-    : [];
-
-  const ruleRefs: RuleRef[] = Array.isArray(args.ruleRefs)
-    ? args.ruleRefs.filter(isValidRuleRef)
-    : [];
+  const foodRefs = parseArrayItems(args.foodRefs, parseFoodRef);
+  const ruleRefs = parseArrayItems(args.ruleRefs, parseRuleRef);
 
   // If no prose at all, return null so caller can fall back to content
   if (prose.length === 0 && foodRefs.length === 0 && ruleRefs.length === 0) {

@@ -4,7 +4,32 @@ import {
   SUBMIT_ANSWER_TOOL,
   parseSubmitAnswerArgs,
 } from "../src/harness/submitAnswer";
-import type { TypedOutput } from "../src/harness/types";
+
+function expectRecord(value: unknown): Record<string, unknown> {
+  expect(value).toBeDefined();
+  expect(typeof value).toBe("object");
+  expect(value).not.toBeNull();
+  expect(Array.isArray(value)).toBe(false);
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("expected object");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function schemaProperty(name: string): Record<string, unknown> {
+  const properties = expectRecord(
+    SUBMIT_ANSWER_SCHEMA.function.parameters.properties,
+  );
+  return expectRecord(properties[name]);
+}
+
+function schemaArrayItems(name: string): Record<string, unknown> {
+  const property = schemaProperty(name);
+  expect(property.type).toBe("array");
+  return expectRecord(property.items);
+}
 
 describe("SUBMIT_ANSWER_SCHEMA", () => {
   it("is an OpenAI function-calling tool definition", () => {
@@ -26,15 +51,7 @@ describe("SUBMIT_ANSWER_SCHEMA", () => {
   });
 
   it("describes foodRefs items with foodId, foodName, matchType", () => {
-    const params = SUBMIT_ANSWER_SCHEMA.function
-      .parameters as Record<string, unknown>;
-    const foodRefs = params.properties
-      ? (params.properties as Record<string, unknown>).foodRefs
-      : undefined;
-    expect(foodRefs).toBeDefined();
-    const fr = foodRefs as Record<string, unknown>;
-    expect(fr.type).toBe("array");
-    const items = fr.items as Record<string, unknown>;
+    const items = schemaArrayItems("foodRefs");
     expect(items.type).toBe("object");
     expect(items.required).toEqual(["foodId", "foodName", "matchType"]);
     expect(items.properties).toHaveProperty("foodId");
@@ -44,15 +61,7 @@ describe("SUBMIT_ANSWER_SCHEMA", () => {
   });
 
   it("describes ruleRefs items with ruleId and summary", () => {
-    const params = SUBMIT_ANSWER_SCHEMA.function
-      .parameters as Record<string, unknown>;
-    const ruleRefs = params.properties
-      ? (params.properties as Record<string, unknown>).ruleRefs
-      : undefined;
-    expect(ruleRefs).toBeDefined();
-    const rr = ruleRefs as Record<string, unknown>;
-    expect(rr.type).toBe("array");
-    const items = rr.items as Record<string, unknown>;
+    const items = schemaArrayItems("ruleRefs");
     expect(items.type).toBe("object");
     expect(items.required).toEqual(["ruleId", "summary"]);
     expect(items.properties).toHaveProperty("ruleId");
@@ -148,6 +157,30 @@ describe("parseSubmitAnswerArgs", () => {
     expect(result!.foodRefs).toHaveLength(1);
   });
 
+  it("drops malformed optional allergens without dropping the foodRef", () => {
+    const result = parseSubmitAnswerArgs({
+      prose: "test",
+      foodRefs: [
+        {
+          foodId: "f-001",
+          foodName: "peanut butter",
+          matchType: "exact",
+          allergens: ["peanut", 123],
+        },
+      ],
+      ruleRefs: [],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.foodRefs).toEqual([
+      {
+        foodId: "f-001",
+        foodName: "peanut butter",
+        matchType: "exact",
+      },
+    ]);
+  });
+
   it("filters out invalid ruleRefs (missing ruleId)", () => {
     const args = {
       prose: "test",
@@ -203,9 +236,7 @@ describe("parseSubmitAnswerArgs", () => {
   it("accepts foodRef with fuzzy matchType", () => {
     const args = {
       prose: "test",
-      foodRefs: [
-        { foodId: "f-001", foodName: "chicken", matchType: "fuzzy" },
-      ],
+      foodRefs: [{ foodId: "f-001", foodName: "chicken", matchType: "fuzzy" }],
       ruleRefs: [],
     };
 
@@ -218,9 +249,7 @@ describe("parseSubmitAnswerArgs", () => {
   it("accepts foodRef with alias matchType", () => {
     const args = {
       prose: "test",
-      foodRefs: [
-        { foodId: "f-001", foodName: "chicken", matchType: "alias" },
-      ],
+      foodRefs: [{ foodId: "f-001", foodName: "chicken", matchType: "alias" }],
       ruleRefs: [],
     };
 

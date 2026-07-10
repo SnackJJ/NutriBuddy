@@ -27,16 +27,17 @@ import type {
   ToolCallDelta,
   ToolHandler,
   ToolSchema,
+  TypedOutput,
 } from "./types";
 import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
 import { buildPreGateContext, checkPostGate, type UserContext } from "./gate";
-import type { InteractionStore } from "../lib/drugInteractions";
+import type {
+  DrugNutrientInteraction,
+  InteractionStore,
+} from "../lib/drugInteractions";
 import type { QueryCatalog } from "../catalog/queryCatalog";
-import {
-  SUBMIT_ANSWER_TOOL,
-  parseSubmitAnswerArgs,
-} from "./submitAnswer";
+import { SUBMIT_ANSWER_TOOL, parseSubmitAnswerArgs } from "./submitAnswer";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -121,6 +122,127 @@ function gateExhaustedReply(reasons: readonly string[]): string {
     `after ${MAX_POST_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
     "Please consult a doctor or registered dietitian for personalized advice."
   );
+}
+
+type PostGateDecision =
+  | { readonly kind: "pass" }
+  | {
+      readonly kind: "retry";
+      readonly retryCount: number;
+      readonly reasons: readonly string[];
+      readonly feedback: string;
+    }
+  | { readonly kind: "refuse"; readonly reply: string };
+
+interface CheckTerminalPostGateInput {
+  readonly reply: string;
+  readonly step: number;
+  readonly retryCount: number;
+  readonly userContext: UserContext | undefined;
+  readonly interactionStore: InteractionStore | undefined;
+  readonly interactions: readonly DrugNutrientInteraction[];
+  readonly eventLog: EventLog | undefined;
+  readonly tracer: Tracer;
+}
+
+function formatGateReasons(reasons: readonly string[]): string {
+  return reasons.map((reason) => `  - ${reason}`).join("\n");
+}
+
+function createPostGateRetryFeedback(reasons: readonly string[]): string {
+  return (
+    `Your previous response was BLOCKED by safety constraints:\n${formatGateReasons(reasons)}\n\n` +
+    `Please regenerate your response. Make absolutely sure you do NOT mention ` +
+    `or recommend any of the blocked foods or allergens listed above. ` +
+    `This is a hard safety requirement.`
+  );
+}
+
+function createPostGateBlockPayload(
+  retryCount: number,
+  reasons: readonly string[],
+): string {
+  return `Post-gate blocked (attempt ${retryCount}/${MAX_POST_GATE_RETRIES}): ${reasons.join("; ")}`;
+}
+
+function createBlockedToolResult(reasons: readonly string[]): string {
+  return `BLOCKED: ${reasons.join("; ")}`;
+}
+
+function describeSubmitAnswerResult(output: TypedOutput | null): string {
+  if (!output) {
+    return "Answer submitted (prose-only fallback)";
+  }
+
+  return `Answer submitted with ${output.foodRefs.length} food ref(s) and ${output.ruleRefs.length} rule ref(s)`;
+}
+
+function checkTerminalPostGate(
+  input: CheckTerminalPostGateInput,
+): PostGateDecision {
+  const {
+    reply,
+    step,
+    retryCount,
+    userContext,
+    interactionStore,
+    interactions,
+    eventLog,
+    tracer,
+  } = input;
+
+  if (!userContext || !interactionStore) {
+    return { kind: "pass" };
+  }
+
+  const check = checkPostGate(reply, userContext, interactions);
+  if (check.passed) {
+    return { kind: "pass" };
+  }
+
+  eventLog?.record({
+    type: "gate_block",
+    data: {
+      attempt: retryCount + 1,
+      maxRetries: MAX_POST_GATE_RETRIES,
+      reasons: check.reasons,
+      blockedContent: reply,
+      step,
+    },
+  });
+
+  if (retryCount < MAX_POST_GATE_RETRIES) {
+    const nextRetryCount = retryCount + 1;
+    tracer.record({
+      step,
+      type: "gate_block",
+      payload: createPostGateBlockPayload(nextRetryCount, check.reasons),
+    });
+
+    return {
+      kind: "retry",
+      retryCount: nextRetryCount,
+      reasons: check.reasons,
+      feedback: createPostGateRetryFeedback(check.reasons),
+    };
+  }
+
+  const refusal = gateExhaustedReply(check.reasons);
+  eventLog?.record({
+    type: "agent_response",
+    data: {
+      content: refusal,
+      step,
+      gateExhausted: true,
+    },
+  });
+  tracer.record({
+    step,
+    type: "gate_exhausted",
+    payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
+  });
+
+  return { kind: "refuse", reply: refusal };
 }
 
 /**
@@ -231,9 +353,6 @@ export async function* run(
 
     if (response.toolCalls && response.toolCalls.length > 0) {
       // ── Terminal: submit_answer ──────────────────────────────────
-      // Issue #43: the model delivers its typed final answer through a
-      // submit_answer tool call. The loop recognises this call and ends
-      // the turn with TypedOutput populated so the output gates can fire.
       const submitAnswerCall = response.toolCalls.find(
         (tc) => tc.name === SUBMIT_ANSWER_TOOL,
       );
@@ -242,89 +361,53 @@ export async function* run(
         yield { type: "act", step, toolCall: submitAnswerCall };
 
         const output = parseSubmitAnswerArgs(submitAnswerCall.args);
-        const resultText =
-          output !== null
-            ? `Answer submitted with ${output.foodRefs.length} food ref(s) and ${output.ruleRefs.length} rule ref(s)`
-            : "Answer submitted (prose-only fallback)";
 
         yield {
           type: "observe",
           step,
-          toolResult: { name: SUBMIT_ANSWER_TOOL, result: resultText },
+          toolResult: {
+            name: SUBMIT_ANSWER_TOOL,
+            result: describeSubmitAnswerResult(output),
+          },
         };
 
-        // Prose from TypedOutput, falling back to model content
         reply = output?.prose ?? response.content;
 
-        // ── Post-gate: check output against hard constraints ──────
-        if (userContext && interactionStore) {
-          const check = checkPostGate(reply, userContext, interactions);
+        const postGateDecision = checkTerminalPostGate({
+          reply,
+          step,
+          retryCount: postGateRetries,
+          userContext,
+          interactionStore,
+          interactions,
+          eventLog,
+          tracer,
+        });
 
-          if (!check.passed) {
-            eventLog?.record({
-              type: "gate_block",
-              data: {
-                attempt: postGateRetries + 1,
-                maxRetries: MAX_POST_GATE_RETRIES,
-                reasons: check.reasons,
-                blockedContent: reply,
-                step,
-              },
-            });
+        if (postGateDecision.kind === "retry") {
+          postGateRetries = postGateDecision.retryCount;
+          working.push(
+            createAssistantToolCallMessage(
+              response.content,
+              response.toolCalls,
+            ),
+          );
+          working.push(
+            createToolResultMessage(
+              submitAnswerCall,
+              createBlockedToolResult(postGateDecision.reasons),
+            ),
+          );
+          working.push({ role: "user", content: postGateDecision.feedback });
+          continue;
+        }
 
-            if (postGateRetries < MAX_POST_GATE_RETRIES) {
-              postGateRetries++;
-              const reasonList = check.reasons
-                .map((r) => `  - ${r}`)
-                .join("\n");
-              const retryFeedback =
-                `Your previous response was BLOCKED by safety constraints:\n${reasonList}\n\n` +
-                `Please regenerate your response. Make absolutely sure you do NOT mention ` +
-                `or recommend any of the blocked foods or allergens listed above. ` +
-                `This is a hard safety requirement.`;
-
-              // Replay the blocked response as history for the retry
-              working.push(
-                createAssistantToolCallMessage(
-                  response.content,
-                  response.toolCalls,
-                ),
-              );
-              working.push(
-                createToolResultMessage(
-                  submitAnswerCall,
-                  `BLOCKED: ${check.reasons.join("; ")}`,
-                ),
-              );
-              working.push({ role: "user", content: retryFeedback });
-              tracer.record({
-                step,
-                type: "gate_block",
-                payload: `Post-gate blocked (attempt ${postGateRetries}/${MAX_POST_GATE_RETRIES}): ${check.reasons.join("; ")}`,
-              });
-              continue;
-            }
-
-            // Retries exhausted: return refusal
-            eventLog?.record({
-              type: "agent_response",
-              data: {
-                content: gateExhaustedReply(check.reasons),
-                step,
-                gateExhausted: true,
-              },
-            });
-            tracer.record({
-              step,
-              type: "gate_exhausted",
-              payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
-            });
-            return {
-              reply: gateExhaustedReply(check.reasons),
-              steps: step,
-              stopReason: "gate_blocked",
-            };
-          }
+        if (postGateDecision.kind === "refuse") {
+          return {
+            reply: postGateDecision.reply,
+            steps: step,
+            stopReason: "gate_blocked",
+          };
         }
 
         eventLog?.record({
@@ -371,61 +454,32 @@ export async function* run(
 
     if (response.stop) {
       // ─── Post-gate：检查输出是否违反硬约束 ──────────────────────
-      if (userContext && interactionStore) {
-        const check = checkPostGate(reply, userContext, interactions);
+      const postGateDecision = checkTerminalPostGate({
+        reply,
+        step,
+        retryCount: postGateRetries,
+        userContext,
+        interactionStore,
+        interactions,
+        eventLog,
+        tracer,
+      });
 
-        if (!check.passed) {
-          eventLog?.record({
-            type: "gate_block",
-            data: {
-              attempt: postGateRetries + 1,
-              maxRetries: MAX_POST_GATE_RETRIES,
-              reasons: check.reasons,
-              blockedContent: reply,
-              step,
-            },
-          });
+      if (postGateDecision.kind === "retry") {
+        postGateRetries = postGateDecision.retryCount;
+        working.push(
+          { role: "assistant", content: reply },
+          { role: "user", content: postGateDecision.feedback },
+        );
+        continue;
+      }
 
-          if (postGateRetries < MAX_POST_GATE_RETRIES) {
-            postGateRetries++;
-            // 将违规回复和 block 反馈回灌为上下文，要求模型重新生成
-            const reasonList = check.reasons.map((r) => `  - ${r}`).join("\n");
-            const retryFeedback =
-              `Your previous response was BLOCKED by safety constraints:\n${reasonList}\n\n` +
-              `Please regenerate your response. Make absolutely sure you do NOT mention ` +
-              `or recommend any of the blocked foods or allergens listed above. ` +
-              `This is a hard safety requirement.`;
-
-            working.push({ role: "assistant", content: reply });
-            working.push({ role: "user", content: retryFeedback });
-            tracer.record({
-              step,
-              type: "gate_block",
-              payload: `Post-gate blocked (attempt ${postGateRetries}/${MAX_POST_GATE_RETRIES}): ${check.reasons.join("; ")}`,
-            });
-            continue;
-          }
-
-          // 重试耗尽：返回兜底回复
-          eventLog?.record({
-            type: "agent_response",
-            data: {
-              content: gateExhaustedReply(check.reasons),
-              step,
-              gateExhausted: true,
-            },
-          });
-          tracer.record({
-            step,
-            type: "gate_exhausted",
-            payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
-          });
-          return {
-            reply: gateExhaustedReply(check.reasons),
-            steps: step,
-            stopReason: "gate_blocked",
-          };
-        }
+      if (postGateDecision.kind === "refuse") {
+        return {
+          reply: postGateDecision.reply,
+          steps: step,
+          stopReason: "gate_blocked",
+        };
       }
 
       eventLog?.record({
