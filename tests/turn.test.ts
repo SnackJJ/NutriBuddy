@@ -13,7 +13,11 @@ import {
   type TurnStartEvent,
   type TypedOutput,
 } from "../src/harness/turn";
-import { TRACE_EVENT_TYPES, Tracer } from "../src/harness/tracer";
+import {
+  TRACE_EVENT_TYPES,
+  Tracer,
+  buildTurnEventSink,
+} from "../src/harness/tracer";
 import {
   STOP_REASONS,
   type ModelAdapter,
@@ -1233,7 +1237,9 @@ describe("gate verdict events", () => {
         tracer,
       });
 
-      await collect(turn(input, ports));
+      const { events, result } = await collect(turn(input, ports));
+
+      tracer.sink(buildTurnEventSink(events, result.steps));
 
       const toolCallEvents = tracer
         .events()

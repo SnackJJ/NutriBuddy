@@ -196,18 +196,6 @@ function createToolGateVerdict(
   };
 }
 
-function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
-  const gateBlocks = tracer
-    .events()
-    .filter((event) => event.type === "gate_block");
-  if (gateBlocks.length === 0) {
-    return "No safety violations detected";
-  }
-
-  const lastBlock = gateBlocks[gateBlocks.length - 1];
-  return `Blocked: ${lastBlock.payload}`;
-}
-
 /** Max retry attempts for the consolidated output gate (issue #47).
  *  All checks — lexical backstop, numeric provenance, advisory structure —
  *  share one regenerate budget. */
@@ -399,14 +387,7 @@ function failReasonsFromOutputChecks(
 function createOutputGateBlockedResult(
   result: TurnResult,
   reasons: readonly string[],
-  tracer: TurnPorts["tracer"],
 ): TurnResult {
-  tracer.record({
-    step: result.steps,
-    type: "gate_block",
-    payload: reasons.join("; "),
-  });
-
   return {
     reply: consolidatedGateRefusalReply(reasons),
     steps: result.steps,
@@ -608,7 +589,6 @@ async function* runUtteranceTurn(
     result = createOutputGateBlockedResult(
       result,
       outputGateFailReasons,
-      ports.tracer,
     );
     break;
   }
@@ -794,12 +774,9 @@ async function handleProposalConfirm(
   );
 }
 
-function createOutputEvidence(
-  result: TurnResult,
-  tracer: TurnPorts["tracer"],
-): string {
+function createOutputEvidence(result: TurnResult): string {
   if (result.stopReason === "gate_blocked") {
-    return extractGateEvidence(tracer);
+    return "Output blocked by consolidated safety gate";
   }
 
   if (result.stopReason === "write_proposal") {
@@ -1046,7 +1023,8 @@ export async function* turn(
     };
   }
 
-  const outputEvidence = createOutputEvidence(result, ports.tracer);
+  const isGateBlocked = result.stopReason === "gate_blocked";
+  const outputEvidence = createOutputEvidence(result);
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(

@@ -26,7 +26,7 @@ import {
   type GateCheckpoint,
   type GateVerdict,
 } from "../harness/turn";
-import { Tracer } from "../harness/tracer";
+import { buildTurnEventSink, Tracer } from "../harness/tracer";
 import type {
   ModelAdapter,
   ToolHandler,
@@ -177,14 +177,6 @@ function recordTurnEvent(signals: TurnEventSignals, event: AnyTurnEvent): void {
   }
 }
 
-function countGateBlocks(gateVerdictBlocks: number, tracer: Tracer): number {
-  return Math.max(gateVerdictBlocks, countTracerGateBlocks(tracer));
-}
-
-function countTracerGateBlocks(tracer: Tracer): number {
-  return tracer.events().filter((event) => event.type === "gate_block").length;
-}
-
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 /**
@@ -216,6 +208,8 @@ export async function runLiveComplianceEval(
     let stopReason: StopReason = "end_turn";
     let typedOutput = buildTypedOutputSignal(undefined);
 
+    const turnEvents: AnyTurnEvent[] = [];
+
     const shouldRunGate =
       c.userContext !== undefined && interactionStore !== undefined;
 
@@ -231,28 +225,32 @@ export async function runLiveComplianceEval(
             interactionStore: shouldRunGate ? interactionStore : undefined,
           },
         ),
-        (event: AnyTurnEvent) => recordTurnEvent(eventSignals, event),
+        (event: AnyTurnEvent) => {
+          turnEvents.push(event);
+          recordTurnEvent(eventSignals, event);
+        },
       );
 
       reply = result.reply;
       steps = result.steps;
       stopReason = result.stopReason;
       typedOutput = buildTypedOutputSignal(result.output);
+      tracer.sink(buildTurnEventSink(turnEvents, result.steps));
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
       steps = eventSignals.steps;
+      tracer.sink(buildTurnEventSink(turnEvents, steps));
     }
 
     const durationMs = Date.now() - start;
-    const gateBlocks = countGateBlocks(eventSignals.gateVerdictBlocks, tracer);
 
     const scored = scoreHarness(
       reply,
       eventSignals.toolCalls,
       c.expected,
       c.userContext,
-      gateBlocks,
+      eventSignals.gateVerdictBlocks,
     );
 
     signals.push({

@@ -5,7 +5,7 @@
 
 import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
 import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
-import { Tracer } from "../harness/tracer";
+import { buildTurnEventSink, Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
@@ -33,8 +33,9 @@ export async function runHarnessEval(
     let steps = 0;
     let stopReason: StopReason = "end_turn";
     const toolCalls: string[] = [];
-    let gateBlocks = 0;
     let gateVerdictBlocks = 0;
+
+    const turnEvents: AnyTurnEvent[] = [];
 
     const shouldRunGate =
       c.userContext !== undefined && interactionStore !== undefined;
@@ -52,6 +53,8 @@ export async function runHarnessEval(
           },
         ),
         (event) => {
+          turnEvents.push(event);
+
           if (isBlockedGateVerdict(event)) {
             gateVerdictBlocks++;
           }
@@ -72,11 +75,11 @@ export async function runHarnessEval(
       steps = result.steps;
       stopReason = result.stopReason;
 
-      gateBlocks = countGateBlocks(gateVerdictBlocks, tracer);
+      tracer.sink(buildTurnEventSink(turnEvents, result.steps));
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
-      gateBlocks = countGateBlocks(gateVerdictBlocks, tracer);
+      tracer.sink(buildTurnEventSink(turnEvents, steps));
     }
 
     const durationMs = Date.now() - start;
@@ -85,7 +88,7 @@ export async function runHarnessEval(
       toolCalls,
       c.expected,
       c.userContext,
-      gateBlocks,
+      gateVerdictBlocks,
     );
 
     results.push({
@@ -106,12 +109,4 @@ export async function runHarnessEval(
 
 function isBlockedGateVerdict(event: AnyTurnEvent): boolean {
   return event.type === "gate_verdict" && event.verdict === "block";
-}
-
-function countGateBlocks(gateVerdictBlocks: number, tracer: Tracer): number {
-  return Math.max(gateVerdictBlocks, countTracerGateBlocks(tracer));
-}
-
-function countTracerGateBlocks(tracer: Tracer): number {
-  return tracer.events().filter((event) => event.type === "gate_block").length;
 }

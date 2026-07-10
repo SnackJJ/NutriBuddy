@@ -139,19 +139,8 @@ async function dispatchTool(
   toolCall: ToolCall,
   tools: ReadonlyMap<string, ToolHandler> | undefined,
   toolSchemas: readonly ToolSchema[] | undefined,
-  tracer: Tracer,
-  step: number,
 ): Promise<ToolResult> {
   const schema = toolSchemas?.find((s) => s.function.name === toolCall.name);
-
-  tracer.record({
-    step,
-    type: "tool_call",
-    payload: JSON.stringify({
-      name: toolCall.name,
-      args: toolCall.args,
-    }),
-  });
 
   const handler = tools?.get(toolCall.name);
   if (!handler) {
@@ -410,8 +399,6 @@ export async function* run(
           tc,
           tools,
           toolSchemas,
-          tracer,
-          step,
         );
 
         yield {
