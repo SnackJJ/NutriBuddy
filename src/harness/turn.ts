@@ -954,7 +954,25 @@ async function handleProposalConfirm(
   }
 
   if (!confirmed) {
-    await declineProposalBestEffort(proposalStore, proposalId);
+    // Ownership check mirrors the confirm path (issue #63 / ADD §Multi-User):
+    // with shared multi-tenant storage an unchecked decline is a
+    // cross-tenant void channel.
+    const declined = await proposalStore.get(proposalId);
+
+    if (declined && declined.userId !== sessionUserId) {
+      return createProposalConfirmOutcome(
+        createEndTurnResult(
+          `Cannot decline proposal ${proposalId}: it belongs to a different user.`,
+        ),
+        "block",
+        `Proposal ${proposalId} belongs to user ${declined.userId}, not ${sessionUserId}`,
+      );
+    }
+
+    if (declined) {
+      await declineProposalBestEffort(proposalStore, proposalId);
+    }
+
     return createProposalConfirmOutcome(
       createProposalConfirmResult(input),
       "pass",

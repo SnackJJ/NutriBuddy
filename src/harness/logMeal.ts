@@ -30,11 +30,10 @@ type ResolvedMatchType = FoodRef["matchType"];
 
 // ── 提案写入端口（issue #36 / PRD v2 §3.4 / ADD §Tools）──
 
-/** 提案状态机（issue #37 / PRD v2 §3.4 / ADD Phase 3）。 */
+/** 提案状态机（issue #37 / PRD v2 §3.4 / ADD §Memory：proposed → committed | voided | superseded | expired）。 */
 export type ProposalStatus =
   | "proposed"
   | "committed"
-  | "rejected"
   | "voided"
   | "expired"
   | "superseded";
@@ -89,7 +88,7 @@ export interface ProposalStore {
   get(id: string): Promise<Proposal | undefined>;
   /** Transition a proposal from "proposed" to "committed". */
   commit(id: string): Promise<Proposal>;
-  /** Transition a proposal from "proposed" to "rejected". */
+  /** Transition a proposal from "proposed" to "voided". */
   decline(id: string): Promise<Proposal>;
 }
 

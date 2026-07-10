@@ -232,12 +232,12 @@ function memProposalStore(state?: MemProposalState): {
         if (s.proposals[idx].status !== "proposed") {
           throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
         }
-        const rejected: Proposal = {
+        const voided: Proposal = {
           ...s.proposals[idx],
-          status: "rejected",
+          status: "voided",
         };
-        s.proposals[idx] = rejected;
-        return rejected;
+        s.proposals[idx] = voided;
+        return voided;
       },
     },
   };
@@ -2766,6 +2766,50 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(commitVerdict.evidence).toContain(SESSION_USER_B);
   });
 
+  it("blocks decline when the proposal belongs to a different user (issue #63)", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    // User A creates the proposal
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "salmon",
+      portionG: 150,
+      mealType: "dinner",
+      kcal: 312,
+      proteinG: 30,
+      fatG: 20,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
+    });
+
+    // User B tries to decline it
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: false,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_B,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: wrong user; the proposal stays proposed
+    expect(result.reply).toContain("different user");
+    expect(proposalState.proposals[0].status).toBe("proposed");
+
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("belongs to user");
+  });
+
   it("rejects repeated confirmation of an already committed proposal", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
@@ -2858,7 +2902,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(commitVerdict.evidence).toContain("not found");
   });
 
-  it("explicitly rejects a proposal when confirmed is false and updates status to rejected", async () => {
+  it("explicitly rejects a proposal when confirmed is false and updates status to voided", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
 
@@ -2898,8 +2942,8 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(result.steps).toBe(0);
     expect(result.stopReason).toBe("end_turn");
 
-    // Proposal status updated to "rejected"
-    expect(proposalState.proposals[0].status).toBe("rejected");
+    // Proposal status updated to "voided"
+    expect(proposalState.proposals[0].status).toBe("voided");
 
     // No meal ledger mutation
     expect(mealLedgerState.entries.length).toBe(0);
@@ -3075,7 +3119,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(countBlockedGateVerdicts(events)).toBe(0);
   });
 
-  it("rejects confirmation of an already rejected proposal", async () => {
+  it("rejects confirmation of an already voided proposal", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
 
@@ -3097,7 +3141,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
 
     // First, reject it
     await proposalStore.decline(proposal.id);
-    expect(proposalState.proposals[0].status).toBe("rejected");
+    expect(proposalState.proposals[0].status).toBe("voided");
 
     // Now try to confirm the rejected proposal
     const input: TurnInput = {
@@ -3113,8 +3157,8 @@ describe("proposal commit short-circuit (issue #37)", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Blocked: already rejected
-    expect(result.reply).toContain("already rejected");
+    // Blocked: already voided
+    expect(result.reply).toContain("already voided");
     expect(result.reply).toContain("cannot be confirmed");
 
     // No meal ledger mutation
@@ -3123,7 +3167,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     // Commit gate blocks
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("rejected");
+    expect(commitVerdict.evidence).toContain("voided");
   });
 
   it("rejects confirmation of a voided proposal", async () => {

@@ -3,6 +3,7 @@
 // 将 ProposalStore 端口接上 Supabase `proposals` 表。
 // 沿用 harness/Supabase 既有约定：窄端口可注入，单测不触网。
 
+import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ProposalStore,
@@ -83,12 +84,11 @@ function inputToRow(
 const TABLE = "proposals";
 const PROPOSED_STATUS = "proposed";
 const ID_PREFIX = "proposal";
-let nextId = Date.now();
 
 function generateProposalId(): string {
-  // Preserve the proposal-* id shape while letting the DB reject rare
-  // cross-process collisions.
-  return `${ID_PREFIX}-${(nextId++).toString(36)}`;
+  // proposal-* id shape, collision-free across processes and clock-independent
+  // (ADD §Testing Seam: nothing below the seam reads the clock outside its port).
+  return `${ID_PREFIX}-${randomUUID()}`;
 }
 
 export interface SupabaseProposalStoreOptions {
@@ -115,7 +115,7 @@ export function createSupabaseProposalStore(
 
   async function transitionStatus(
     id: string,
-    status: Extract<ProposalStatus, "committed" | "rejected">,
+    status: Extract<ProposalStatus, "committed" | "voided">,
     action: "commit" | "decline",
   ): Promise<Proposal> {
     const { data, error } = await client
@@ -175,7 +175,7 @@ export function createSupabaseProposalStore(
     },
 
     async decline(id: string): Promise<Proposal> {
-      return transitionStatus(id, "rejected", "decline");
+      return transitionStatus(id, "voided", "decline");
     },
   };
 }

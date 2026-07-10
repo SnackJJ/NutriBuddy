@@ -84,12 +84,12 @@ function memProposalStore(state?: MemProposalState): {
         if (s.proposals[idx].status !== "proposed") {
           throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
         }
-        const rejected: Proposal = {
+        const voided: Proposal = {
           ...s.proposals[idx],
-          status: "rejected",
+          status: "voided",
         };
-        s.proposals[idx] = rejected;
-        return rejected;
+        s.proposals[idx] = voided;
+        return voided;
       },
     },
   };
