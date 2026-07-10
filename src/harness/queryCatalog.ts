@@ -10,6 +10,7 @@ import type {
   QueryResult,
   QueryRunner,
   Observation,
+  ColumnDef,
   MealRecord,
 } from "../catalog/queryCatalog";
 import {
@@ -29,6 +30,8 @@ import type { Catalog } from "../catalog/catalog";
 export const QUERY_CATALOG_TOOL = "query_catalog";
 const FOOD_LOOKUP_TEMPLATE_ID = FOOD_LOOKUP_TEMPLATE.id;
 const DEFAULT_PORTION_G = 100;
+const MS_PER_DAY = 86_400_000;
+const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner", "snack"] as const;
 
 const TEMPLATE_IDS = {
   food_lookup: FOOD_LOOKUP_TEMPLATE_ID,
@@ -39,8 +42,6 @@ const TEMPLATE_IDS = {
   range_comparison: RANGE_COMPARISON_TEMPLATE.id,
   top_k_by_nutrient: TOP_K_BY_NUTRIENT_TEMPLATE.id,
 } as const;
-
-const KNOWN_TEMPLATE_IDS = new Set(Object.values(TEMPLATE_IDS));
 
 type QueryCatalogError = Extract<QueryResult, { readonly type: "error" }>;
 
@@ -160,13 +161,8 @@ export function createQueryCatalogHandler(
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-function round1dp(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
 /** Parse an ISO 8601 date or datetime string to a Date at noon UTC. */
-function parseDate(dateStr: string): Date {
-  // If already a full datetime, extract just the date portion
+function parseUtcNoonDate(dateStr: string): Date {
   const datePart = dateStr.slice(0, 10);
   return new Date(datePart + "T12:00:00Z");
 }
@@ -178,15 +174,14 @@ function dateKey(isoStr: string): string {
 
 /** Count calendar days between two YYYY-MM-DD dates, inclusive. */
 function daysInclusive(from: string, to: string): number {
-  const msPerDay = 86_400_000;
-  const dFrom = parseDate(from).getTime();
-  const dTo = parseDate(to).getTime();
-  return Math.max(0, Math.floor((dTo - dFrom) / msPerDay) + 1);
+  const dFrom = parseUtcNoonDate(from).getTime();
+  const dTo = parseUtcNoonDate(to).getTime();
+  return Math.max(0, Math.floor((dTo - dFrom) / MS_PER_DAY) + 1);
 }
 
 /** Return the Monday of the ISO week for an ISO date or datetime string. */
 function isoWeekMonday(dateStr: string): string {
-  const d = parseDate(dateStr);
+  const d = parseUtcNoonDate(dateStr);
   const day = d.getUTCDay(); // 0 = Sun, 1 = Mon, ...
   // ISO: Monday = day 1. shift: Sun(0)→-6, Mon(1)→0, ... Sat(6)→5
   const diff = day === 0 ? -6 : 1 - day;
@@ -208,6 +203,10 @@ function filterMeals(
   );
 }
 
+function round1dp(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 interface MealAggregate {
   totalKcal: number;
   totalProteinG: number;
@@ -216,7 +215,7 @@ interface MealAggregate {
   count: number;
 }
 
-function sumMeals(meals: MealRecord[]): MealAggregate {
+function sumMeals(meals: readonly MealRecord[]): MealAggregate {
   return meals.reduce<MealAggregate>(
     (acc, m) => ({
       totalKcal: acc.totalKcal + m.kcal,
@@ -229,12 +228,59 @@ function sumMeals(meals: MealRecord[]): MealAggregate {
   );
 }
 
+function sumMealGroups(groups: Iterable<readonly MealRecord[]>): MealAggregate {
+  let aggregate: MealAggregate = {
+    totalKcal: 0,
+    totalProteinG: 0,
+    totalFatG: 0,
+    totalCarbsG: 0,
+    count: 0,
+  };
+
+  for (const group of groups) {
+    const groupAggregate = sumMeals(group);
+    aggregate = {
+      totalKcal: aggregate.totalKcal + groupAggregate.totalKcal,
+      totalProteinG: aggregate.totalProteinG + groupAggregate.totalProteinG,
+      totalFatG: aggregate.totalFatG + groupAggregate.totalFatG,
+      totalCarbsG: aggregate.totalCarbsG + groupAggregate.totalCarbsG,
+      count: aggregate.count + groupAggregate.count,
+    };
+  }
+
+  return aggregate;
+}
+
+function groupMealsBy(
+  meals: readonly MealRecord[],
+  keyForMeal: (meal: MealRecord) => string,
+): Map<string, MealRecord[]> {
+  const grouped = new Map<string, MealRecord[]>();
+  for (const meal of meals) {
+    const key = keyForMeal(meal);
+    const group = grouped.get(key);
+    if (group) {
+      group.push(meal);
+    } else {
+      grouped.set(key, [meal]);
+    }
+  }
+
+  return grouped;
+}
+
+function mealTotalsRow(agg: MealAggregate): Record<string, number> {
+  return {
+    total_kcal: round1dp(agg.totalKcal),
+    total_protein_g: round1dp(agg.totalProteinG),
+    total_fat_g: round1dp(agg.totalFatG),
+    total_carbs_g: round1dp(agg.totalCarbsG),
+  };
+}
+
 function makeObservation(
   templateId: string,
-  columns: ReadonlyArray<{
-    name: string; type: "number" | "string" | "date" | "boolean";
-    unit?: string; description: string;
-  }>,
+  columns: readonly ColumnDef[],
   rows: Record<string, unknown>[],
 ): Observation {
   return {
@@ -266,18 +312,22 @@ function runFoodLookup(
   const scale = portionG / 100;
   const round = (per100gValue: number) => round1dp(per100gValue * scale);
 
-  return makeObservation(FOOD_LOOKUP_TEMPLATE_ID, FOOD_LOOKUP_TEMPLATE.resultSchema, [
-    {
-      food_id: food.id,
-      food_name: food.canonicalName,
-      portion_g: portionG,
-      kcal: round(food.per100g.kcal),
-      protein_g: round(food.per100g.proteinG),
-      fat_g: round(food.per100g.fatG),
-      carbs_g: round(food.per100g.carbsG),
-      allergen_tags: food.allergenTags.join(", "),
-    },
-  ]);
+  return makeObservation(
+    FOOD_LOOKUP_TEMPLATE_ID,
+    FOOD_LOOKUP_TEMPLATE.resultSchema,
+    [
+      {
+        food_id: food.id,
+        food_name: food.canonicalName,
+        portion_g: portionG,
+        kcal: round(food.per100g.kcal),
+        protein_g: round(food.per100g.proteinG),
+        fat_g: round(food.per100g.fatG),
+        carbs_g: round(food.per100g.carbsG),
+        allergen_tags: food.allergenTags.join(", "),
+      },
+    ],
+  );
 }
 
 function runMealSummary(
@@ -289,29 +339,29 @@ function runMealSummary(
   const dateTo = String(params.date_to);
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
 
-  const byType = new Map<string, MealRecord[]>();
-  for (const m of filtered) {
-    const list = byType.get(m.mealType) ?? [];
-    list.push(m);
-    byType.set(m.mealType, list);
-  }
+  const byType = groupMealsBy(filtered, (meal) => meal.mealType);
 
-  const mealTypes = ["breakfast", "lunch", "dinner", "snack"];
-  const rows = mealTypes
-    .filter((mt) => byType.has(mt))
-    .map((mt) => {
-      const agg = sumMeals(byType.get(mt)!);
-      return {
-        meal_type: mt,
+  const rows = MEAL_TYPE_ORDER.flatMap((mealType) => {
+    const mealsForType = byType.get(mealType);
+    if (!mealsForType) {
+      return [];
+    }
+
+    const agg = sumMeals(mealsForType);
+    return [
+      {
+        meal_type: mealType,
         meal_count: agg.count,
-        total_kcal: round1dp(agg.totalKcal),
-        total_protein_g: round1dp(agg.totalProteinG),
-        total_fat_g: round1dp(agg.totalFatG),
-        total_carbs_g: round1dp(agg.totalCarbsG),
-      };
-    });
+        ...mealTotalsRow(agg),
+      },
+    ];
+  });
 
-  return makeObservation(MEAL_SUMMARY_TEMPLATE.id, MEAL_SUMMARY_TEMPLATE.resultSchema, rows);
+  return makeObservation(
+    MEAL_SUMMARY_TEMPLATE.id,
+    MEAL_SUMMARY_TEMPLATE.resultSchema,
+    rows,
+  );
 }
 
 function runDailyTotals(
@@ -323,28 +373,23 @@ function runDailyTotals(
   const dateTo = String(params.date_to);
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
 
-  const byDate = new Map<string, MealRecord[]>();
-  for (const m of filtered) {
-    const dk = dateKey(m.loggedAt);
-    const list = byDate.get(dk) ?? [];
-    list.push(m);
-    byDate.set(dk, list);
-  }
+  const byDate = groupMealsBy(filtered, (meal) => dateKey(meal.loggedAt));
 
   const sortedDates = [...byDate.keys()].sort();
-  const rows = sortedDates.map((d) => {
-    const agg = sumMeals(byDate.get(d)!);
+  const rows = sortedDates.map((date) => {
+    const agg = sumMeals(byDate.get(date)!);
     return {
-      date: d,
-      total_kcal: round1dp(agg.totalKcal),
-      total_protein_g: round1dp(agg.totalProteinG),
-      total_fat_g: round1dp(agg.totalFatG),
-      total_carbs_g: round1dp(agg.totalCarbsG),
+      date,
+      ...mealTotalsRow(agg),
       meal_count: agg.count,
     };
   });
 
-  return makeObservation(DAILY_TOTALS_TEMPLATE.id, DAILY_TOTALS_TEMPLATE.resultSchema, rows);
+  return makeObservation(
+    DAILY_TOTALS_TEMPLATE.id,
+    DAILY_TOTALS_TEMPLATE.resultSchema,
+    rows,
+  );
 }
 
 function runWeeklyTotals(
@@ -357,30 +402,31 @@ function runWeeklyTotals(
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
 
   const byWeek = new Map<string, { meals: MealRecord[]; days: Set<string> }>();
-  for (const m of filtered) {
-    const weekMonday = isoWeekMonday(m.loggedAt);
+  for (const meal of filtered) {
+    const weekMonday = isoWeekMonday(meal.loggedAt);
     const entry = byWeek.get(weekMonday) ?? { meals: [], days: new Set() };
-    entry.meals.push(m);
-    entry.days.add(dateKey(m.loggedAt));
+    entry.meals.push(meal);
+    entry.days.add(dateKey(meal.loggedAt));
     byWeek.set(weekMonday, entry);
   }
 
   const sortedWeeks = [...byWeek.keys()].sort();
-  const rows = sortedWeeks.map((w) => {
-    const entry = byWeek.get(w)!;
+  const rows = sortedWeeks.map((weekStart) => {
+    const entry = byWeek.get(weekStart)!;
     const agg = sumMeals(entry.meals);
     return {
-      week_start: w,
-      total_kcal: round1dp(agg.totalKcal),
-      total_protein_g: round1dp(agg.totalProteinG),
-      total_fat_g: round1dp(agg.totalFatG),
-      total_carbs_g: round1dp(agg.totalCarbsG),
+      week_start: weekStart,
+      ...mealTotalsRow(agg),
       meal_count: agg.count,
       day_count: entry.days.size,
     };
   });
 
-  return makeObservation(WEEKLY_TOTALS_TEMPLATE.id, WEEKLY_TOTALS_TEMPLATE.resultSchema, rows);
+  return makeObservation(
+    WEEKLY_TOTALS_TEMPLATE.id,
+    WEEKLY_TOTALS_TEMPLATE.resultSchema,
+    rows,
+  );
 }
 
 function runDailyAverage(
@@ -391,41 +437,24 @@ function runDailyAverage(
   const dateFrom = String(params.date_from);
   const dateTo = String(params.date_to);
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
-
-  const byDate = new Map<string, MealRecord[]>();
-  for (const m of filtered) {
-    const dk = dateKey(m.loggedAt);
-    const list = byDate.get(dk) ?? [];
-    list.push(m);
-    byDate.set(dk, list);
-  }
-
+  const byDate = groupMealsBy(filtered, (meal) => dateKey(meal.loggedAt));
+  const totals = sumMealGroups(byDate.values());
   const totalDays = daysInclusive(dateFrom, dateTo);
-  const daysWithMeals = byDate.size;
 
-  let totalKcal = 0;
-  let totalProteinG = 0;
-  let totalFatG = 0;
-  let totalCarbsG = 0;
-  for (const mealsOfDay of byDate.values()) {
-    for (const m of mealsOfDay) {
-      totalKcal += m.kcal;
-      totalProteinG += m.proteinG;
-      totalFatG += m.fatG;
-      totalCarbsG += m.carbsG;
-    }
-  }
-
-  return makeObservation(DAILY_AVERAGE_TEMPLATE.id, DAILY_AVERAGE_TEMPLATE.resultSchema, [
-    {
-      avg_kcal: round1dp(totalKcal / totalDays),
-      avg_protein_g: round1dp(totalProteinG / totalDays),
-      avg_fat_g: round1dp(totalFatG / totalDays),
-      avg_carbs_g: round1dp(totalCarbsG / totalDays),
-      days_with_meals: daysWithMeals,
-      total_days: totalDays,
-    },
-  ]);
+  return makeObservation(
+    DAILY_AVERAGE_TEMPLATE.id,
+    DAILY_AVERAGE_TEMPLATE.resultSchema,
+    [
+      {
+        avg_kcal: round1dp(totals.totalKcal / totalDays),
+        avg_protein_g: round1dp(totals.totalProteinG / totalDays),
+        avg_fat_g: round1dp(totals.totalFatG / totalDays),
+        avg_carbs_g: round1dp(totals.totalCarbsG / totalDays),
+        days_with_meals: byDate.size,
+        total_days: totalDays,
+      },
+    ],
+  );
 }
 
 function computeRangeAvg(
@@ -433,24 +462,22 @@ function computeRangeAvg(
   userId: string,
   dateFrom: string,
   dateTo: string,
-): { kcal: number; proteinG: number; fatG: number; carbsG: number; days: number } {
+): {
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbsG: number;
+  days: number;
+} {
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
+  const totals = sumMeals(filtered);
   const totalDays = daysInclusive(dateFrom, dateTo);
-  let kcal = 0;
-  let proteinG = 0;
-  let fatG = 0;
-  let carbsG = 0;
-  for (const m of filtered) {
-    kcal += m.kcal;
-    proteinG += m.proteinG;
-    fatG += m.fatG;
-    carbsG += m.carbsG;
-  }
+
   return {
-    kcal: totalDays > 0 ? kcal / totalDays : 0,
-    proteinG: totalDays > 0 ? proteinG / totalDays : 0,
-    fatG: totalDays > 0 ? fatG / totalDays : 0,
-    carbsG: totalDays > 0 ? carbsG / totalDays : 0,
+    kcal: totalDays > 0 ? totals.totalKcal / totalDays : 0,
+    proteinG: totalDays > 0 ? totals.totalProteinG / totalDays : 0,
+    fatG: totalDays > 0 ? totals.totalFatG / totalDays : 0,
+    carbsG: totalDays > 0 ? totals.totalCarbsG / totalDays : 0,
     days: totalDays,
   };
 }
@@ -468,24 +495,41 @@ function runRangeComparison(
   const r1 = computeRangeAvg(meals, userId, r1From, r1To);
   const r2 = computeRangeAvg(meals, userId, r2From, r2To);
 
-  return makeObservation(RANGE_COMPARISON_TEMPLATE.id, RANGE_COMPARISON_TEMPLATE.resultSchema, [
-    {
-      range1_avg_kcal: round1dp(r1.kcal),
-      range1_avg_protein_g: round1dp(r1.proteinG),
-      range1_avg_fat_g: round1dp(r1.fatG),
-      range1_avg_carbs_g: round1dp(r1.carbsG),
-      range2_avg_kcal: round1dp(r2.kcal),
-      range2_avg_protein_g: round1dp(r2.proteinG),
-      range2_avg_fat_g: round1dp(r2.fatG),
-      range2_avg_carbs_g: round1dp(r2.carbsG),
-      diff_kcal: round1dp(r2.kcal - r1.kcal),
-      diff_protein_g: round1dp(r2.proteinG - r1.proteinG),
-      diff_fat_g: round1dp(r2.fatG - r1.fatG),
-      diff_carbs_g: round1dp(r2.carbsG - r1.carbsG),
-      range1_days: r1.days,
-      range2_days: r2.days,
-    },
-  ]);
+  return makeObservation(
+    RANGE_COMPARISON_TEMPLATE.id,
+    RANGE_COMPARISON_TEMPLATE.resultSchema,
+    [
+      {
+        range1_avg_kcal: round1dp(r1.kcal),
+        range1_avg_protein_g: round1dp(r1.proteinG),
+        range1_avg_fat_g: round1dp(r1.fatG),
+        range1_avg_carbs_g: round1dp(r1.carbsG),
+        range2_avg_kcal: round1dp(r2.kcal),
+        range2_avg_protein_g: round1dp(r2.proteinG),
+        range2_avg_fat_g: round1dp(r2.fatG),
+        range2_avg_carbs_g: round1dp(r2.carbsG),
+        diff_kcal: round1dp(r2.kcal - r1.kcal),
+        diff_protein_g: round1dp(r2.proteinG - r1.proteinG),
+        diff_fat_g: round1dp(r2.fatG - r1.fatG),
+        diff_carbs_g: round1dp(r2.carbsG - r1.carbsG),
+        range1_days: r1.days,
+        range2_days: r2.days,
+      },
+    ],
+  );
+}
+
+function nutrientValueFor(nutrient: string): (meal: MealRecord) => number {
+  switch (nutrient) {
+    case "kcal":
+      return (meal) => meal.kcal;
+    case "protein":
+      return (meal) => meal.proteinG;
+    case "fat":
+      return (meal) => meal.fatG;
+    default:
+      return (meal) => meal.carbsG;
+  }
 }
 
 function runTopKByNutrient(
@@ -499,26 +543,26 @@ function runTopKByNutrient(
   const k = Number(params.k);
   const filtered = filterMeals(meals, userId, dateFrom, dateTo);
 
-  const byFood = new Map<string, { meals: MealRecord[] }>();
-  for (const m of filtered) {
-    const key = m.foodName.toLowerCase();
-    const entry = byFood.get(key) ?? { meals: [] };
-    entry.meals.push(m);
-    byFood.set(key, entry);
-  }
-
-  const nutrientKey: (m: MealRecord) => number =
-    nutrient === "kcal" ? ((m) => m.kcal) :
-    nutrient === "protein" ? ((m) => m.proteinG) :
-    nutrient === "fat" ? ((m) => m.fatG) :
-    ((m) => m.carbsG);
+  const byFood = groupMealsBy(filtered, (meal) => meal.foodName.toLowerCase());
+  const nutrientValue = nutrientValueFor(nutrient);
 
   const entries = [...byFood.entries()]
-    .map(([_key, entry]) => {
-      const agg = sumMeals(entry.meals);
-      const totalPortionG = entry.meals.reduce((s, m) => s + m.portionG, 0);
-      const nutrientTotal = entry.meals.reduce((s, m) => s + nutrientKey(m), 0);
-      return { foodName: entry.meals[0].foodName, agg, totalPortionG, nutrientTotal };
+    .map(([_key, foodMeals]) => {
+      const agg = sumMeals(foodMeals);
+      const totalPortionG = foodMeals.reduce(
+        (sum, meal) => sum + meal.portionG,
+        0,
+      );
+      const nutrientTotal = foodMeals.reduce(
+        (sum, meal) => sum + nutrientValue(meal),
+        0,
+      );
+      return {
+        foodName: foodMeals[0].foodName,
+        agg,
+        totalPortionG,
+        nutrientTotal,
+      };
     })
     .sort((a, b) => b.nutrientTotal - a.nutrientTotal)
     .slice(0, k)
@@ -533,7 +577,11 @@ function runTopKByNutrient(
       meal_count: e.agg.count,
     }));
 
-  return makeObservation(TOP_K_BY_NUTRIENT_TEMPLATE.id, TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema, entries);
+  return makeObservation(
+    TOP_K_BY_NUTRIENT_TEMPLATE.id,
+    TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema,
+    entries,
+  );
 }
 
 /**

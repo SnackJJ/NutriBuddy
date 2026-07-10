@@ -121,10 +121,6 @@ function expectColumn(
   expect(column!.unit).toBe(expected.unit);
 }
 
-function round1dp(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
 // ─── template definitions ──────────────────────────────────────────────────
 
 describe("QueryTemplate definitions", () => {
@@ -800,7 +796,10 @@ describe("template signature exposure for prompt injection", () => {
 
 // ─── template definitions: templates 2–7 ───────────────────────────────────
 
-function assertTemplateShape(template: QueryTemplate, expectedId: string): void {
+function assertTemplateShape(
+  template: QueryTemplate,
+  expectedId: string,
+): void {
   expect(template.id).toBe(expectedId);
   expect(template.description.length).toBeGreaterThan(0);
   expect(template.parameters.length).toBeGreaterThan(0);
@@ -816,23 +815,6 @@ function assertTemplateShape(template: QueryTemplate, expectedId: string): void 
     expect(c.name.length).toBeGreaterThan(0);
     expect(c.description.length).toBeGreaterThan(0);
     expect(["string", "number", "date", "boolean"]).toContain(c.type);
-  }
-}
-
-/** Assert that every numeric column carrying a unit name-match has a non-empty unit. */
-function assertNumericColumnsHaveUnits(
-  schema: readonly ColumnDef[],
-  unitColumnPatterns: string[],
-): void {
-  const unitCols = new Set(
-    schema.filter((c) => c.type === "number" && c.unit !== undefined).map((c) => c.name),
-  );
-  for (const pattern of unitColumnPatterns) {
-    const col = schema.find((c) => c.name.includes(pattern));
-    if (col && col.type === "number") {
-      expect(col.unit).toBeDefined();
-      expect(col.unit!.length).toBeGreaterThan(0);
-    }
   }
 }
 
@@ -1003,7 +985,12 @@ describe("QueryTemplate definitions — seven reviewed templates", () => {
     );
     expect(nutrientParam).toBeDefined();
     expect(nutrientParam!.type).toBe("enum");
-    expect(nutrientParam!.enumValues).toEqual(["kcal", "protein", "fat", "carbs"]);
+    expect(nutrientParam!.enumValues).toEqual([
+      "kcal",
+      "protein",
+      "fat",
+      "carbs",
+    ]);
 
     const kParam = TOP_K_BY_NUTRIENT_TEMPLATE.parameters.find(
       (p) => p.name === "k",
@@ -1197,18 +1184,99 @@ function makeMeal(overrides: Partial<MealRecord> = {}): MealRecord {
 function makeWeekMeals(): MealRecord[] {
   return [
     // Monday 2026-07-06
-    makeMeal({ foodName: "oatmeal", mealType: "breakfast", loggedAt: "2026-07-06T08:00:00Z", kcal: 170, proteinG: 6, fatG: 3.6, carbsG: 29, portionG: 240 }),
-    makeMeal({ foodName: "chicken breast", mealType: "lunch", loggedAt: "2026-07-06T12:00:00Z", kcal: 330, proteinG: 62, fatG: 7.2, carbsG: 0, portionG: 200 }),
-    makeMeal({ foodName: "salmon", mealType: "dinner", loggedAt: "2026-07-06T19:00:00Z", kcal: 354, proteinG: 34, fatG: 22.1, carbsG: 0, portionG: 170 }),
+    makeMeal({
+      foodName: "oatmeal",
+      mealType: "breakfast",
+      loggedAt: "2026-07-06T08:00:00Z",
+      kcal: 170,
+      proteinG: 6,
+      fatG: 3.6,
+      carbsG: 29,
+      portionG: 240,
+    }),
+    makeMeal({
+      foodName: "chicken breast",
+      mealType: "lunch",
+      loggedAt: "2026-07-06T12:00:00Z",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      portionG: 200,
+    }),
+    makeMeal({
+      foodName: "salmon",
+      mealType: "dinner",
+      loggedAt: "2026-07-06T19:00:00Z",
+      kcal: 354,
+      proteinG: 34,
+      fatG: 22.1,
+      carbsG: 0,
+      portionG: 170,
+    }),
     // Tuesday 2026-07-07
-    makeMeal({ foodName: "egg", mealType: "breakfast", loggedAt: "2026-07-07T08:00:00Z", kcal: 310, proteinG: 26, fatG: 22, carbsG: 2.2, portionG: 200 }),
-    makeMeal({ foodName: "white rice", mealType: "lunch", loggedAt: "2026-07-07T12:00:00Z", kcal: 260, proteinG: 5.4, fatG: 0.6, carbsG: 56, portionG: 200 }),
-    makeMeal({ foodName: "broccoli", mealType: "dinner", loggedAt: "2026-07-07T19:00:00Z", kcal: 34, proteinG: 2.8, fatG: 0.4, carbsG: 7, portionG: 100 }),
+    makeMeal({
+      foodName: "egg",
+      mealType: "breakfast",
+      loggedAt: "2026-07-07T08:00:00Z",
+      kcal: 310,
+      proteinG: 26,
+      fatG: 22,
+      carbsG: 2.2,
+      portionG: 200,
+    }),
+    makeMeal({
+      foodName: "white rice",
+      mealType: "lunch",
+      loggedAt: "2026-07-07T12:00:00Z",
+      kcal: 260,
+      proteinG: 5.4,
+      fatG: 0.6,
+      carbsG: 56,
+      portionG: 200,
+    }),
+    makeMeal({
+      foodName: "broccoli",
+      mealType: "dinner",
+      loggedAt: "2026-07-07T19:00:00Z",
+      kcal: 34,
+      proteinG: 2.8,
+      fatG: 0.4,
+      carbsG: 7,
+      portionG: 100,
+    }),
     // Wednesday 2026-07-08
-    makeMeal({ foodName: "chicken breast", mealType: "lunch", loggedAt: "2026-07-08T12:00:00Z", kcal: 330, proteinG: 62, fatG: 7.2, carbsG: 0, portionG: 200 }),
+    makeMeal({
+      foodName: "chicken breast",
+      mealType: "lunch",
+      loggedAt: "2026-07-08T12:00:00Z",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      portionG: 200,
+    }),
     // Thursday 2026-07-09
-    makeMeal({ foodName: "salmon", mealType: "dinner", loggedAt: "2026-07-09T19:00:00Z", kcal: 354, proteinG: 34, fatG: 22.1, carbsG: 0, portionG: 170 }),
-    makeMeal({ foodName: "banana", mealType: "snack", loggedAt: "2026-07-09T15:00:00Z", kcal: 105, proteinG: 1.3, fatG: 0.4, carbsG: 27.1, portionG: 118 }),
+    makeMeal({
+      foodName: "salmon",
+      mealType: "dinner",
+      loggedAt: "2026-07-09T19:00:00Z",
+      kcal: 354,
+      proteinG: 34,
+      fatG: 22.1,
+      carbsG: 0,
+      portionG: 170,
+    }),
+    makeMeal({
+      foodName: "banana",
+      mealType: "snack",
+      loggedAt: "2026-07-09T15:00:00Z",
+      kcal: 105,
+      proteinG: 1.3,
+      fatG: 0.4,
+      carbsG: 27.1,
+      portionG: 118,
+    }),
   ];
 }
 
@@ -1217,7 +1285,11 @@ describe("createInMemoryQueryRunner — food_lookup (existing)", () => {
   const runner = createInMemoryQueryRunner(catalog);
 
   it("returns observation for valid food", async () => {
-    const obs = await runner("food_lookup", { food_id: "food-salmon-001" }, "user-001");
+    const obs = await runner(
+      "food_lookup",
+      { food_id: "food-salmon-001" },
+      "user-001",
+    );
     expect(obs.templateId).toBe("food_lookup");
     expect(obs.rows[0].food_name).toBe("salmon");
   });
@@ -1229,10 +1301,14 @@ describe("createInMemoryQueryRunner — meal_summary", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("aggregates meals by meal type within date range", async () => {
-    const obs = await runner("meal_summary", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "meal_summary",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("meal_summary");
     expect(obs.rowCount).toBeGreaterThan(0);
@@ -1247,10 +1323,14 @@ describe("createInMemoryQueryRunner — meal_summary", () => {
   });
 
   it("returns only rows for meal types that have data", async () => {
-    const obs = await runner("meal_summary", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "meal_summary",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     const mealTypes = obs.rows.map((r) => r.meal_type);
     // breakfast, lunch, dinner, snack should all be present in our test data
@@ -1266,44 +1346,75 @@ describe("createInMemoryQueryRunner — meal_summary", () => {
 
   it("scopes to user identity", async () => {
     const mixedMeals = [
-      makeMeal({ userId: "user-A", foodName: "chicken breast", loggedAt: "2026-07-06T12:00:00Z", kcal: 330 }),
-      makeMeal({ userId: "user-B", foodName: "salmon", loggedAt: "2026-07-06T12:00:00Z", kcal: 354 }),
+      makeMeal({
+        userId: "user-A",
+        foodName: "chicken breast",
+        loggedAt: "2026-07-06T12:00:00Z",
+        kcal: 330,
+      }),
+      makeMeal({
+        userId: "user-B",
+        foodName: "salmon",
+        loggedAt: "2026-07-06T12:00:00Z",
+        kcal: 354,
+      }),
     ];
     const mixedRunner = createInMemoryQueryRunner(catalog, mixedMeals);
 
-    const obsA = await mixedRunner("meal_summary", {
-      date_from: "2026-07-01", date_to: "2026-07-10",
-    }, "user-A");
+    const obsA = await mixedRunner(
+      "meal_summary",
+      {
+        date_from: "2026-07-01",
+        date_to: "2026-07-10",
+      },
+      "user-A",
+    );
     expect(obsA.rows).toHaveLength(1);
     expect(obsA.rows[0].meal_type).toBe("lunch");
     expect(obsA.rows[0].total_kcal).toBe(330);
 
-    const obsB = await mixedRunner("meal_summary", {
-      date_from: "2026-07-01", date_to: "2026-07-10",
-    }, "user-B");
+    const obsB = await mixedRunner(
+      "meal_summary",
+      {
+        date_from: "2026-07-01",
+        date_to: "2026-07-10",
+      },
+      "user-B",
+    );
     expect(obsB.rows).toHaveLength(1);
     expect(obsB.rows[0].total_kcal).toBe(354);
   });
 
   it("returns empty when no meals in range", async () => {
-    const obs = await runner("meal_summary", {
-      date_from: "2020-01-01",
-      date_to: "2020-01-07",
-    }, "user-001");
+    const obs = await runner(
+      "meal_summary",
+      {
+        date_from: "2020-01-01",
+        date_to: "2020-01-07",
+      },
+      "user-001",
+    );
 
     expect(obs.rows).toHaveLength(0);
     expect(obs.rowCount).toBe(0);
   });
 
   it("carries schema-declared columns with unit metadata", async () => {
-    const obs = await runner("meal_summary", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "meal_summary",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(MEAL_SUMMARY_TEMPLATE.resultSchema);
 
     // Nutrition columns must carry units; count columns are unitless
-    const unitColumns = obs.columns.filter((c) => c.type === "number" && c.name.startsWith("total_"));
+    const unitColumns = obs.columns.filter(
+      (c) => c.type === "number" && c.name.startsWith("total_"),
+    );
     for (const col of unitColumns) {
       expect(col.unit).toBeDefined();
     }
@@ -1316,10 +1427,14 @@ describe("createInMemoryQueryRunner — daily_totals", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("returns one row per day with meals", async () => {
-    const obs = await runner("daily_totals", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "daily_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("daily_totals");
     // 4 days (Mon–Thu) all have meals
@@ -1333,9 +1448,14 @@ describe("createInMemoryQueryRunner — daily_totals", () => {
   });
 
   it("sums nutrition correctly for a day", async () => {
-    const obs = await runner("daily_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-06",
-    }, "user-001");
+    const obs = await runner(
+      "daily_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-06",
+      },
+      "user-001",
+    );
 
     expect(obs.rowCount).toBe(1);
     const day = obs.rows[0];
@@ -1345,9 +1465,14 @@ describe("createInMemoryQueryRunner — daily_totals", () => {
   });
 
   it("days with no meals are omitted", async () => {
-    const obs = await runner("daily_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "daily_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     // July 8 (Wed) has 1 meal, July 9 (Thu) has 2 meals
     // All 4 days have at least 1 meal
@@ -1361,9 +1486,14 @@ describe("createInMemoryQueryRunner — daily_totals", () => {
   });
 
   it("carries schema-declared columns", async () => {
-    const obs = await runner("daily_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-06",
-    }, "user-001");
+    const obs = await runner(
+      "daily_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-06",
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(DAILY_TOTALS_TEMPLATE.resultSchema);
   });
@@ -1376,10 +1506,14 @@ describe("createInMemoryQueryRunner — weekly_totals", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("groups by ISO week and returns week_start Mondays", async () => {
-    const obs = await runner("weekly_totals", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "weekly_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("weekly_totals");
     expect(obs.rowCount).toBe(1); // All meals in one ISO week
@@ -1387,9 +1521,14 @@ describe("createInMemoryQueryRunner — weekly_totals", () => {
   });
 
   it("counts distinct days and total meals", async () => {
-    const obs = await runner("weekly_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "weekly_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     const week = obs.rows[0];
     expect(week.meal_count).toBe(9); // All 9 meals
@@ -1397,9 +1536,14 @@ describe("createInMemoryQueryRunner — weekly_totals", () => {
   });
 
   it("totals nutrition across the week", async () => {
-    const obs = await runner("weekly_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "weekly_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     const week = obs.rows[0];
     // All meals combined: need to sum from makeWeekMeals
@@ -1410,9 +1554,14 @@ describe("createInMemoryQueryRunner — weekly_totals", () => {
   });
 
   it("carries schema-declared columns", async () => {
-    const obs = await runner("weekly_totals", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "weekly_totals",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(WEEKLY_TOTALS_TEMPLATE.resultSchema);
   });
@@ -1424,10 +1573,14 @@ describe("createInMemoryQueryRunner — daily_average", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("computes average per day over the full range", async () => {
-    const obs = await runner("daily_average", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "daily_average",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("daily_average");
     expect(obs.rowCount).toBe(1);
@@ -1444,12 +1597,19 @@ describe("createInMemoryQueryRunner — daily_average", () => {
 
   it("denominator is total days, not days with meals", async () => {
     // Only 1 day of meals out of a 7-day range
-    const singleDayMeals = [makeMeal({ loggedAt: "2026-07-06T12:00:00Z", kcal: 500 })];
+    const singleDayMeals = [
+      makeMeal({ loggedAt: "2026-07-06T12:00:00Z", kcal: 500 }),
+    ];
     const singleRunner = createInMemoryQueryRunner(catalog, singleDayMeals);
 
-    const obs = await singleRunner("daily_average", {
-      date_from: "2026-07-01", date_to: "2026-07-07",
-    }, "user-001");
+    const obs = await singleRunner(
+      "daily_average",
+      {
+        date_from: "2026-07-01",
+        date_to: "2026-07-07",
+      },
+      "user-001",
+    );
 
     expect(obs.rows[0].total_days).toBe(7);
     expect(obs.rows[0].days_with_meals).toBe(1);
@@ -1457,9 +1617,14 @@ describe("createInMemoryQueryRunner — daily_average", () => {
   });
 
   it("carries schema-declared columns", async () => {
-    const obs = await runner("daily_average", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "daily_average",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(DAILY_AVERAGE_TEMPLATE.resultSchema);
   });
@@ -1474,12 +1639,16 @@ describe("createInMemoryQueryRunner — range_comparison", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("computes per-range averages and diff columns", async () => {
-    const obs = await runner("range_comparison", {
-      range1_from: "2026-07-06",
-      range1_to: "2026-07-07",
-      range2_from: "2026-07-08",
-      range2_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "range_comparison",
+      {
+        range1_from: "2026-07-06",
+        range1_to: "2026-07-07",
+        range2_from: "2026-07-08",
+        range2_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("range_comparison");
     expect(obs.rowCount).toBe(1);
@@ -1495,12 +1664,16 @@ describe("createInMemoryQueryRunner — range_comparison", () => {
   });
 
   it("diff column is observed, not model-computed", async () => {
-    const obs = await runner("range_comparison", {
-      range1_from: "2026-07-06",
-      range1_to: "2026-07-07",
-      range2_from: "2026-07-08",
-      range2_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "range_comparison",
+      {
+        range1_from: "2026-07-06",
+        range1_to: "2026-07-07",
+        range2_from: "2026-07-08",
+        range2_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     const row = obs.rows[0];
     // The diff MUST be available as a column so the model reads it
@@ -1513,19 +1686,43 @@ describe("createInMemoryQueryRunner — range_comparison", () => {
     // Runner computes diff from raw values before display rounding,
     // so re-deriving from display values may differ by ≤0.1.
     const tolerance = 0.2;
-    expect(Math.abs(Number(row.diff_kcal) - (Number(row.range2_avg_kcal) - Number(row.range1_avg_kcal)))).toBeLessThanOrEqual(tolerance);
-    expect(Math.abs(Number(row.diff_protein_g) - (Number(row.range2_avg_protein_g) - Number(row.range1_avg_protein_g)))).toBeLessThanOrEqual(tolerance);
-    expect(Math.abs(Number(row.diff_fat_g) - (Number(row.range2_avg_fat_g) - Number(row.range1_avg_fat_g)))).toBeLessThanOrEqual(tolerance);
-    expect(Math.abs(Number(row.diff_carbs_g) - (Number(row.range2_avg_carbs_g) - Number(row.range1_avg_carbs_g)))).toBeLessThanOrEqual(tolerance);
+    expect(
+      Math.abs(
+        Number(row.diff_kcal) -
+          (Number(row.range2_avg_kcal) - Number(row.range1_avg_kcal)),
+      ),
+    ).toBeLessThanOrEqual(tolerance);
+    expect(
+      Math.abs(
+        Number(row.diff_protein_g) -
+          (Number(row.range2_avg_protein_g) - Number(row.range1_avg_protein_g)),
+      ),
+    ).toBeLessThanOrEqual(tolerance);
+    expect(
+      Math.abs(
+        Number(row.diff_fat_g) -
+          (Number(row.range2_avg_fat_g) - Number(row.range1_avg_fat_g)),
+      ),
+    ).toBeLessThanOrEqual(tolerance);
+    expect(
+      Math.abs(
+        Number(row.diff_carbs_g) -
+          (Number(row.range2_avg_carbs_g) - Number(row.range1_avg_carbs_g)),
+      ),
+    ).toBeLessThanOrEqual(tolerance);
   });
 
   it("carries schema-declared columns", async () => {
-    const obs = await runner("range_comparison", {
-      range1_from: "2026-07-06",
-      range1_to: "2026-07-07",
-      range2_from: "2026-07-08",
-      range2_to: "2026-07-09",
-    }, "user-001");
+    const obs = await runner(
+      "range_comparison",
+      {
+        range1_from: "2026-07-06",
+        range1_to: "2026-07-07",
+        range2_from: "2026-07-08",
+        range2_to: "2026-07-09",
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(RANGE_COMPARISON_TEMPLATE.resultSchema);
   });
@@ -1537,12 +1734,16 @@ describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
   const runner = createInMemoryQueryRunner(catalog, meals);
 
   it("ranks foods by the specified nutrient descending", async () => {
-    const obs = await runner("top_k_by_nutrient", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-      nutrient: "protein",
-      k: 3,
-    }, "user-001");
+    const obs = await runner(
+      "top_k_by_nutrient",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+        nutrient: "protein",
+        k: 3,
+      },
+      "user-001",
+    );
 
     expect(obs.templateId).toBe("top_k_by_nutrient");
     expect(obs.rowCount).toBe(3);
@@ -1555,12 +1756,16 @@ describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
   });
 
   it("returns at most k rows", async () => {
-    const obs = await runner("top_k_by_nutrient", {
-      date_from: "2026-07-06",
-      date_to: "2026-07-09",
-      nutrient: "kcal",
-      k: 5,
-    }, "user-001");
+    const obs = await runner(
+      "top_k_by_nutrient",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+        nutrient: "kcal",
+        k: 5,
+      },
+      "user-001",
+    );
 
     expect(obs.rowCount).toBeLessThanOrEqual(5);
     // There are 6 distinct foods, so we should get 5
@@ -1575,10 +1780,16 @@ describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
     ];
     const singleRunner = createInMemoryQueryRunner(catalog, singleFoodMeals);
 
-    const obs = await singleRunner("top_k_by_nutrient", {
-      date_from: "2026-07-01", date_to: "2026-07-10",
-      nutrient: "protein", k: 10,
-    }, "user-001");
+    const obs = await singleRunner(
+      "top_k_by_nutrient",
+      {
+        date_from: "2026-07-01",
+        date_to: "2026-07-10",
+        nutrient: "protein",
+        k: 10,
+      },
+      "user-001",
+    );
 
     expect(obs.rowCount).toBe(1);
     expect(obs.rows[0].rank).toBe(1);
@@ -1586,18 +1797,28 @@ describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
 
   it("supports ranking by all four nutrient types", async () => {
     for (const nutrient of ["kcal", "protein", "fat", "carbs"] as const) {
-      const obs = await runner("top_k_by_nutrient", {
-        date_from: "2026-07-06", date_to: "2026-07-09",
-        nutrient, k: 3,
-      }, "user-001");
+      const obs = await runner(
+        "top_k_by_nutrient",
+        {
+          date_from: "2026-07-06",
+          date_to: "2026-07-09",
+          nutrient,
+          k: 3,
+        },
+        "user-001",
+      );
 
       expect(obs.rowCount).toBeGreaterThan(0);
       // Rows must be sorted by the chosen nutrient descending
       for (let i = 0; i < obs.rowCount - 1; i++) {
-        const nutrientCol = nutrient === "kcal" ? "total_kcal"
-          : nutrient === "protein" ? "total_protein_g"
-          : nutrient === "fat" ? "total_fat_g"
-          : "total_carbs_g";
+        const nutrientCol =
+          nutrient === "kcal"
+            ? "total_kcal"
+            : nutrient === "protein"
+              ? "total_protein_g"
+              : nutrient === "fat"
+                ? "total_fat_g"
+                : "total_carbs_g";
         expect(Number(obs.rows[i][nutrientCol])).toBeGreaterThanOrEqual(
           Number(obs.rows[i + 1][nutrientCol]),
         );
@@ -1606,19 +1827,31 @@ describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
   });
 
   it("carries schema-declared columns", async () => {
-    const obs = await runner("top_k_by_nutrient", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-      nutrient: "kcal", k: 3,
-    }, "user-001");
+    const obs = await runner(
+      "top_k_by_nutrient",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+        nutrient: "kcal",
+        k: 3,
+      },
+      "user-001",
+    );
 
     expect(obs.columns).toBe(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema);
   });
 
   it("total_portion_g tracks cumulative portion across meals", async () => {
-    const obs = await runner("top_k_by_nutrient", {
-      date_from: "2026-07-06", date_to: "2026-07-09",
-      nutrient: "protein", k: 5,
-    }, "user-001");
+    const obs = await runner(
+      "top_k_by_nutrient",
+      {
+        date_from: "2026-07-06",
+        date_to: "2026-07-09",
+        nutrient: "protein",
+        k: 5,
+      },
+      "user-001",
+    );
 
     const chicken = obs.rows.find((r) => r.food_name === "chicken breast");
     expect(chicken).toBeDefined();
@@ -1697,18 +1930,22 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes food_lookup successfully", async () => {
     const result = await executeQuery(
-      queryCatalog, "food_lookup",
+      queryCatalog,
+      "food_lookup",
       { food_id: "food-salmon-001" },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
   });
 
   it("executes meal_summary (empty meals) and returns empty observation", async () => {
     const result = await executeQuery(
-      queryCatalog, "meal_summary",
+      queryCatalog,
+      "meal_summary",
       { date_from: "2026-07-01", date_to: "2026-07-07" },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1718,9 +1955,11 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes daily_totals (empty meals) and returns empty observation", async () => {
     const result = await executeQuery(
-      queryCatalog, "daily_totals",
+      queryCatalog,
+      "daily_totals",
       { date_from: "2026-07-01", date_to: "2026-07-07" },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1730,9 +1969,11 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes weekly_totals (empty meals) and returns empty observation", async () => {
     const result = await executeQuery(
-      queryCatalog, "weekly_totals",
+      queryCatalog,
+      "weekly_totals",
       { date_from: "2026-07-01", date_to: "2026-07-14" },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1742,9 +1983,11 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes daily_average (empty meals) and returns zero averages", async () => {
     const result = await executeQuery(
-      queryCatalog, "daily_average",
+      queryCatalog,
+      "daily_average",
       { date_from: "2026-07-01", date_to: "2026-07-07" },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1756,12 +1999,16 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes range_comparison (empty meals) and returns zero diffs", async () => {
     const result = await executeQuery(
-      queryCatalog, "range_comparison",
+      queryCatalog,
+      "range_comparison",
       {
-        range1_from: "2026-07-01", range1_to: "2026-07-07",
-        range2_from: "2026-07-08", range2_to: "2026-07-14",
+        range1_from: "2026-07-01",
+        range1_to: "2026-07-07",
+        range2_from: "2026-07-08",
+        range2_to: "2026-07-14",
       },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1771,12 +2018,16 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("executes top_k_by_nutrient (empty meals) and returns empty observation", async () => {
     const result = await executeQuery(
-      queryCatalog, "top_k_by_nutrient",
+      queryCatalog,
+      "top_k_by_nutrient",
       {
-        date_from: "2026-07-01", date_to: "2026-07-07",
-        nutrient: "protein", k: 5,
+        date_from: "2026-07-01",
+        date_to: "2026-07-07",
+        nutrient: "protein",
+        k: 5,
       },
-      "user-001", runner,
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("observation");
     if (result.type === "observation") {
@@ -1786,8 +2037,11 @@ describe("executeQuery — all seven templates through catalog layer", () => {
 
   it("returns typed error for unknown template among seven", async () => {
     const result = await executeQuery(
-      queryCatalog, "nonexistent",
-      {}, "user-001", runner,
+      queryCatalog,
+      "nonexistent",
+      {},
+      "user-001",
+      runner,
     );
     expect(result.type).toBe("error");
     if (result.type === "error") {

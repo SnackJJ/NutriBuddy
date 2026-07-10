@@ -191,7 +191,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       ports = {
         ...ports,
         tools: buildToolMap(sessionUserId, proposalStore),
-        toolSchemas: [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+        toolSchemas,
       };
     }
   }
