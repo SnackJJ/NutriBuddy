@@ -19,7 +19,16 @@ import {
 } from "@/lib/chatApi";
 import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
 import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
+import {
+  createQueryCatalogHandler,
+  createInMemoryQueryRunner,
+  QUERY_CATALOG_SCHEMA,
+} from "@/harness/queryCatalog";
 import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
+import {
+  createQueryCatalog,
+  FOOD_LOOKUP_TEMPLATE,
+} from "@/catalog/queryCatalog";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 import type {
   ProposalStore,
@@ -126,8 +135,9 @@ const memState: MemStoreState = { proposals: [], ledger: [] };
 const memProposalStore = createMemProposalStore(memState);
 const memMealLogStore = createMemMealLogStore(memState);
 
-// Module-level catalog (built once at cold start from seed data)
+// Module-level catalogs (built once at cold start from seed data)
 const catalog = createCatalog(SEED_FOODS);
+const queryCatalog = createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
@@ -138,7 +148,16 @@ function buildToolMap(sessionUserId: string): ReadonlyMap<string, ToolHandler> {
     userId: sessionUserId,
   });
 
-  return new Map([["log_meal", logMealHandler]]);
+  const queryCatalogHandler = createQueryCatalogHandler({
+    queryCatalog,
+    runner: createInMemoryQueryRunner(catalog),
+    userId: sessionUserId,
+  });
+
+  return new Map([
+    ["log_meal", logMealHandler],
+    ["query_catalog", queryCatalogHandler],
+  ]);
 }
 
 function getRequestHistory(
@@ -252,7 +271,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     ports = {
       ...ports,
       tools: buildToolMap(sessionUserId),
-      toolSchemas: [LOG_MEAL_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+      toolSchemas: [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+      queryCatalog,
     };
   }
 
