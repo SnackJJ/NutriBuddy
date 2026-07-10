@@ -138,6 +138,12 @@ const memMealLogStore = createMemMealLogStore(memState);
 // Module-level catalogs (built once at cold start from seed data)
 const catalog = createCatalog(SEED_FOODS);
 const queryCatalog = createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
+const queryRunner = createInMemoryQueryRunner(catalog);
+const toolSchemas = [
+  LOG_MEAL_SCHEMA,
+  QUERY_CATALOG_SCHEMA,
+  SUBMIT_ANSWER_SCHEMA,
+] as const;
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
@@ -150,7 +156,7 @@ function buildToolMap(sessionUserId: string): ReadonlyMap<string, ToolHandler> {
 
   const queryCatalogHandler = createQueryCatalogHandler({
     queryCatalog,
-    runner: createInMemoryQueryRunner(catalog),
+    runner: queryRunner,
     userId: sessionUserId,
   });
 
@@ -271,7 +277,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     ports = {
       ...ports,
       tools: buildToolMap(sessionUserId),
-      toolSchemas: [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+      toolSchemas,
       queryCatalog,
     };
   }
