@@ -17,8 +17,8 @@ describe("eval run (npm run eval entrypoint)", () => {
     const text = out.join("");
     expect(text).toContain("simple");
     expect(text).toContain("cross_domain");
-    // 全量 = 25 条
-    expect(text).toMatch(/25/);
+    // 全量 = 29 条（含 issue #49 descriptive 4 条）
+    expect(text).toMatch(/29/);
     // pending 模式：非 strict，返回 0（框架本身绿）
     expect(code).toBe(0);
   });

@@ -75,6 +75,7 @@ describe("EvalDataset", () => {
       "numeric",
       "cross_domain",
       "edge_case",
+      "descriptive",
     ] as const;
     const cases = loadEvalCases();
     for (const c of cases) {

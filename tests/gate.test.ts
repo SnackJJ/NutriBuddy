@@ -1,13 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   buildPreGateContext,
   checkPostGate,
+  classifyUtteranceIntent,
+  scanUtteranceForConflicts,
   type UserContext,
 } from "../src/harness/gate";
 import type {
   DrugNutrientInteraction,
   InteractionStore,
 } from "../src/lib/drugInteractions";
+import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
 
 const SAMPLE_INTERACTIONS: DrugNutrientInteraction[] = [
   {
@@ -237,5 +240,159 @@ describe("checkPostGate", () => {
     );
     // "eggplant" is not a synonym for egg allergy — it should pass
     expect(result.passed).toBe(true);
+  });
+});
+
+// ─── classifyUtteranceIntent ────────────────────────────────────────────
+
+describe("classifyUtteranceIntent", () => {
+  it("classifies prescriptive asks as prescriptive", () => {
+    expect(classifyUtteranceIntent("Should I eat shrimp for dinner?")).toBe("prescriptive");
+    expect(classifyUtteranceIntent("What should I eat for breakfast?")).toBe("prescriptive");
+    expect(classifyUtteranceIntent("Recommend a healthy snack.")).toBe("prescriptive");
+    expect(classifyUtteranceIntent("Is salmon safe for me?")).toBe("prescriptive");
+    expect(classifyUtteranceIntent("Can I eat peanuts?")).toBe("prescriptive");
+    expect(classifyUtteranceIntent("What's a good source of protein?")).toBe("prescriptive");
+  });
+
+  it("classifies descriptive log/track mentions as descriptive", () => {
+    expect(classifyUtteranceIntent("Log the shrimp I ate for lunch")).toBe("descriptive");
+    expect(classifyUtteranceIntent("I ate a bowl of rice for lunch")).toBe("descriptive");
+    expect(classifyUtteranceIntent("Track 200g chicken breast for dinner")).toBe("descriptive");
+    expect(classifyUtteranceIntent("I had eggs and toast for breakfast")).toBe("descriptive");
+    expect(classifyUtteranceIntent("Record the salmon I consumed")).toBe("descriptive");
+  });
+
+  it("classifies neutral queries as neutral", () => {
+    expect(classifyUtteranceIntent("How much protein is in chicken?")).toBe("neutral");
+    expect(classifyUtteranceIntent("What is the calorie content of rice?")).toBe("neutral");
+    expect(classifyUtteranceIntent("Tell me about vitamin C")).toBe("neutral");
+    expect(classifyUtteranceIntent("hi")).toBe("neutral");
+  });
+});
+
+// ─── scanUtteranceForConflicts ──────────────────────────────────────────
+
+describe("scanUtteranceForConflicts", () => {
+  let catalog: Catalog;
+
+  beforeAll(() => {
+    catalog = createCatalog(SEED_FOODS);
+  });
+
+  it("returns empty conflicts and hitFoods when utterance has no food mentions", () => {
+    const result = scanUtteranceForConflicts(
+      "What time is it?",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.hitFoods).toHaveLength(0);
+  });
+
+  it("returns empty conflicts when food is mentioned but user has no matching allergy", () => {
+    const result = scanUtteranceForConflicts(
+      "Should I eat chicken breast for dinner?",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  it("detects shellfish allergy conflict when shrimp is mentioned", () => {
+    const result = scanUtteranceForConflicts(
+      "Should I eat shrimp for dinner?",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.conflicts.length).toBeGreaterThanOrEqual(1);
+    expect(result.conflicts.some((c) => c.id === "shellfish")).toBe(true);
+    expect(result.hitFoods).toContain("shrimp");
+  });
+
+  it("detects multiple conflicts for multi-allergen foods", () => {
+    // Noodles are tagged with wheat — if user is allergic to wheat
+    const result = scanUtteranceForConflicts(
+      "I had noodles for lunch",
+      catalog,
+      { allergies: ["wheat"], medications: [] },
+    );
+
+    expect(result.conflicts.length).toBeGreaterThanOrEqual(1);
+    expect(result.conflicts.some((c) => c.id === "wheat")).toBe(true);
+    expect(result.hitFoods.some((f) => f === "noodles")).toBe(true);
+  });
+
+  it("detects conflicts across multiple foods in one utterance", () => {
+    const result = scanUtteranceForConflicts(
+      "I ate shrimp and salmon for dinner",
+      catalog,
+      { allergies: ["shellfish", "fish"], medications: [] },
+    );
+
+    expect(result.conflicts.length).toBeGreaterThanOrEqual(2);
+    const conflictIds = result.conflicts.map((c) => c.id);
+    expect(conflictIds).toContain("shellfish");
+    expect(conflictIds).toContain("fish");
+    expect(result.hitFoods).toContain("shrimp");
+    expect(result.hitFoods).toContain("salmon");
+  });
+
+  it("detects conflicts via food aliases", () => {
+    // "prawn" is an alias for shrimp
+    const result = scanUtteranceForConflicts(
+      "I ate some prawns for dinner",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.conflicts.length).toBeGreaterThanOrEqual(1);
+    expect(result.conflicts.some((c) => c.id === "shellfish")).toBe(true);
+    expect(result.hitFoods).toContain("shrimp");
+  });
+
+  it("classifies prescriptive intent when asking for recommendations", () => {
+    const result = scanUtteranceForConflicts(
+      "Should I eat shrimp for dinner?",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.intent).toBe("prescriptive");
+  });
+
+  it("classifies descriptive intent when logging a meal", () => {
+    const result = scanUtteranceForConflicts(
+      "Log the shrimp I ate for lunch",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.intent).toBe("descriptive");
+  });
+
+  it("returns no conflicts for foods without allergen tags", () => {
+    // Chicken breast has no allergen tags
+    const result = scanUtteranceForConflicts(
+      "I ate chicken breast for lunch",
+      catalog,
+      { allergies: ["shellfish", "milk", "egg"], medications: [] },
+    );
+
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  it("returns empty for foods with allergen tags that don't match user allergies", () => {
+    // Salmon has fish allergen tag, but user is only allergic to shellfish
+    const result = scanUtteranceForConflicts(
+      "I ate salmon for dinner",
+      catalog,
+      { allergies: ["shellfish"], medications: [] },
+    );
+
+    expect(result.conflicts).toHaveLength(0);
   });
 });

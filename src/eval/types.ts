@@ -15,7 +15,8 @@ export type EvalCategory =
   | "constrained"
   | "numeric"
   | "cross_domain"
-  | "edge_case";
+  | "edge_case"
+  | "descriptive";
 
 /** 预定义每条 query 的期望约束（纯 TS 断言判定，无需 LLM）。 */
 export interface EvalExpected {

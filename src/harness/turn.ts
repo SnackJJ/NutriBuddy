@@ -12,9 +12,10 @@ import type {
 } from "./types";
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
-import { checkPostGate, type UserContext } from "./gate";
+import { checkPostGate, scanUtteranceForConflicts, type UserContext } from "./gate";
 import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import type { Observation } from "../catalog/queryCatalog";
+import type { Catalog } from "../catalog/catalog";
 import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
@@ -55,6 +56,8 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly mealLogStore?: MealLogStore;
   /** Authenticated user identity — not model-fillable (issue #37). */
   readonly sessionUserId?: string;
+  /** Food catalog for input-gate utterance conflict scanning (issue #49). */
+  readonly catalog?: Catalog;
 }
 
 /**
@@ -254,12 +257,47 @@ function createLexicalBackstopCheck(
   prose: string,
   userContext: UserContext | undefined,
   interactions: readonly DrugNutrientInteraction[],
+  knownConflicts?: readonly Conflict[],
 ): OutputGateCheck | undefined {
   if (!userContext) {
     return undefined;
   }
 
   const check = checkPostGate(prose, userContext, interactions);
+
+  // Issue #49: When descriptive utterance conflicts are known,
+  // exempt matching allergens from the lexical backstop so the
+  // tracker doesn't refuse to track. Novel allergens (not in
+  // the utterance scan) are still blocked.
+  if (knownConflicts && knownConflicts.length > 0 && !check.passed) {
+    const exemptIds = new Set(
+      knownConflicts.map((c) => c.id.toLowerCase()),
+    );
+    const blockReasons = check.reasons.filter((reason) => {
+      const lower = reason.toLowerCase();
+      return ![...exemptIds].some((id) => lower.includes(id));
+    });
+
+    if (blockReasons.length === 0) {
+      // All blocked terms are known descriptive conflicts —
+      // pass through with exemption evidence
+      return createOutputGateCheck(
+        OUTPUT_LEXICAL_BACKSTOP_CHECK,
+        true,
+        [],
+        `Known descriptive conflict(s) exempted: ${knownConflicts.map((c) => c.id).join(", ")}`,
+      );
+    }
+
+    // Some blocked terms are novel — block on those
+    return createOutputGateCheck(
+      OUTPUT_LEXICAL_BACKSTOP_CHECK,
+      false,
+      blockReasons,
+      "",
+    );
+  }
+
   return createOutputGateCheck(
     OUTPUT_LEXICAL_BACKSTOP_CHECK,
     check.passed,
@@ -314,6 +352,7 @@ function collectOutputGateChecks(
     outputTextForGate(result),
     userContext,
     result.interactions ?? [],
+    conflicts,
   );
 
   if (lexicalCheck) {
@@ -809,36 +848,112 @@ export async function* turn(
 
   yield createTurnStartEvent(input, nextMetadata);
 
-  yield createGateVerdictEvent(
-    {
-      checkpoint: "input",
-      verdict: "pass",
-      checkName: "pre_gate_input_check",
-      evidence: "Input accepted for processing",
-    },
-    nextMetadata,
-  );
+  // ── Issue #49: Input gate utterance conflict scan ─────────────────────
+  // Replaces the hardcoded pass verdict with a real entity-level scan.
+  // Prescriptive asks + allergen conflicts → refuse-and-cite (block).
+  // Descriptive mentions + allergen conflicts → advise (pass, populate
+  // conflicts port for the advisory gate).
+
+  const scanConflicts: Conflict[] = [];
+  let inputBlocked = false;
+  let inputBlockEvidence = "";
+
+  if (input.tag === "utterance" && ports.catalog && ports.userContext) {
+    const scan = scanUtteranceForConflicts(
+      input.content,
+      ports.catalog,
+      ports.userContext,
+    );
+
+    if (
+      scan.intent === "prescriptive" &&
+      scan.conflicts.length > 0
+    ) {
+      inputBlocked = true;
+      inputBlockEvidence =
+        `Blocked: prescriptive request mentions foods conflicting with user allergies — ` +
+        scan.conflicts.map((c) => c.id).join(", ") +
+        `. Foods: ${scan.hitFoods.join(", ")}.`;
+    } else if (scan.conflicts.length > 0) {
+      // Descriptive with conflicts — pass but carry conflicts forward
+      scanConflicts.push(...scan.conflicts);
+    }
+  }
+
+  if (inputBlocked) {
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "input",
+        verdict: "block",
+        checkName: "pre_gate_input_check",
+        evidence: inputBlockEvidence,
+      },
+      nextMetadata,
+    );
+  } else if (scanConflicts.length > 0) {
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "input",
+        verdict: "pass",
+        checkName: "pre_gate_input_check",
+        evidence:
+          `Pass (descriptive): detected ${scanConflicts.length} conflict(s) — ` +
+          scanConflicts.map((c) => c.id).join(", ") +
+          `. Advisory gate will enforce ruleRefs.`,
+      },
+      nextMetadata,
+    );
+  } else {
+    yield createGateVerdictEvent(
+      {
+        checkpoint: "input",
+        verdict: "pass",
+        checkName: "pre_gate_input_check",
+        evidence: "Input accepted for processing",
+      },
+      nextMetadata,
+    );
+  }
 
   let result: TurnResult;
   let writeProposal: WriteProposalData | undefined;
   let confirmCommitVerdict: CommitGateVerdict | undefined;
 
-  switch (input.tag) {
-    case "utterance": {
-      const utteranceOutput = yield* runUtteranceTurn(
-        input,
-        ports,
-        nextMetadata,
-      );
-      result = utteranceOutput.result;
-      writeProposal = utteranceOutput.writeProposal;
-      break;
-    }
-    case "proposal_confirm": {
-      const outcome = await handleProposalConfirm(input, ports);
-      result = outcome.result;
-      confirmCommitVerdict = outcome.commitVerdict;
-      break;
+  if (inputBlocked) {
+    // Refuse-and-cite: return immediately without calling the model.
+    result = {
+      reply:
+        `I cannot help with that request. Your allergies conflict with ` +
+        `foods mentioned in your question. Please consult a doctor or ` +
+        `registered dietitian for personalized dietary advice.`,
+      steps: 0,
+      stopReason: "end_turn",
+    };
+  } else {
+    // Merge scan conflicts into the ports so the advisory gate and
+    // lexical backstop can use them.
+    const mergedPorts: TurnPorts = {
+      ...ports,
+      conflicts: [...scanConflicts, ...(ports.conflicts ?? [])],
+    };
+
+    switch (input.tag) {
+      case "utterance": {
+        const utteranceOutput = yield* runUtteranceTurn(
+          input,
+          mergedPorts,
+          nextMetadata,
+        );
+        result = utteranceOutput.result;
+        writeProposal = utteranceOutput.writeProposal;
+        break;
+      }
+      case "proposal_confirm": {
+        const outcome = await handleProposalConfirm(input, ports);
+        result = outcome.result;
+        confirmCommitVerdict = outcome.commitVerdict;
+        break;
+      }
     }
   }
 
@@ -850,7 +965,8 @@ export async function* turn(
     };
   }
 
-  const isGateBlocked = result.stopReason === "gate_blocked";
+  const isGateBlocked =
+    result.stopReason === "gate_blocked" || inputBlocked;
   const outputEvidence = createOutputEvidence(result, ports.tracer);
 
   if (input.tag === "utterance") {
@@ -859,19 +975,28 @@ export async function* turn(
         checkpoint: "output",
         verdict: isGateBlocked ? "block" : "pass",
         checkName: OUTPUT_GATE_SUMMARY_CHECK,
-        evidence: outputEvidence,
+        evidence: inputBlocked
+          ? "Input gate blocked — no model output to check"
+          : outputEvidence,
       },
       nextMetadata,
     );
   }
 
   yield createGateVerdictEvent(
-    createCommitGateDetails(
-      result,
-      writeProposal,
-      outputEvidence,
-      confirmCommitVerdict,
-    ),
+    inputBlocked
+      ? {
+          checkpoint: "commit",
+          verdict: "block",
+          checkName: COMMIT_GATE_CHECK,
+          evidence: `Blocked: input gate refused prescriptive request — ${inputBlockEvidence}`,
+        }
+      : createCommitGateDetails(
+          result,
+          writeProposal,
+          outputEvidence,
+          confirmCommitVerdict,
+        ),
     nextMetadata,
   );
 

@@ -13,6 +13,8 @@ import {
   type DrugNutrientInteraction,
   type InteractionStore,
 } from "../lib/drugInteractions";
+import type { Catalog } from "../catalog/catalog";
+import type { Conflict } from "./advisoryGate";
 
 /** 用户安全上下文：过敏 + 用药列表（由调用方注入，最终由 User Profile 供给）。 */
 export interface UserContext {
@@ -303,4 +305,133 @@ export function checkPostGate(
   }
 
   return { passed: reasons.length === 0, reasons };
+}
+
+// ─── Utterance Intent Classification (issue #49) ─────────────────────────
+
+/** The classified intent of a user utterance. */
+export type UtteranceIntent = "prescriptive" | "descriptive" | "neutral";
+
+/**
+ * Classify an utterance as prescriptive (asking for recommendations),
+ * descriptive (logging/tracking what was eaten), or neutral.
+ *
+ * Deterministic keyword match — no LLM dependency. The classification
+ * determines whether the input gate blocks (prescriptive + conflict) or
+ * advises (descriptive + conflict).
+ */
+export function classifyUtteranceIntent(utterance: string): UtteranceIntent {
+  const lower = utterance.toLowerCase();
+
+  const prescriptivePatterns: readonly RegExp[] = [
+    /\bshould\b/,
+    /\brecommend\b/,
+    /\bwhat (can|should|could) i\b/,
+    /\bis it ok\b/,
+    /\bsafe for me\b/,
+    /\bgood (choice|option)\b/,
+    /\bhealthy (choice|option)\b/,
+    /\bwhat('s| is) a good\b/,
+    /\bwhat do you (recommend|suggest|think)\b/,
+    /\bhelp me (plan|decide|choose|pick)\b/,
+    /\bmeal (plan|idea|suggestion)\b/,
+    /\bcan i\b/,
+    /\badvise?\b/,
+    /\bsuggest(ion)?\b/,
+  ];
+
+  const descriptivePatterns: readonly RegExp[] = [
+    /\blog\b/,
+    /\bate\b/,
+    /\bhad\b/,
+    /\btrack\b/,
+    /\brecord\b/,
+    /\bentered\b/,
+    /\bconsumed\b/,
+    /\bjust ate\b/,
+    /\bi ate\b/,
+    /\badd(ed)? (this|that|the)\b/,
+    /\bwrite (this|that|the) down\b/,
+  ];
+
+  const prescriptiveScore = prescriptivePatterns.filter((p) =>
+    p.test(lower),
+  ).length;
+  const descriptiveScore = descriptivePatterns.filter((p) =>
+    p.test(lower),
+  ).length;
+
+  if (descriptiveScore > prescriptiveScore) return "descriptive";
+  if (prescriptiveScore > descriptiveScore) return "prescriptive";
+  return "neutral";
+}
+
+// ─── Utterance Conflict Scan (issue #49) ─────────────────────────────────
+
+/** Result of scanning an utterance for entity-level allergen conflicts. */
+export interface UtteranceScanResult {
+  /** Conflicts detected between foods mentioned and user allergies. */
+  readonly conflicts: readonly Conflict[];
+  /** Classified intent of the utterance. */
+  readonly intent: UtteranceIntent;
+  /** Canonical names of foods that triggered conflicts. */
+  readonly hitFoods: readonly string[];
+}
+
+/**
+ * Scan an utterance for foods that conflict with the user's allergies.
+ *
+ * For each food in the catalog, checks if its canonical name or aliases
+ * appear in the utterance text. When a match is found and the food's
+ * allergen tags intersect with the user's allergies, a Conflict is
+ * recorded.
+ *
+ * Detection is deterministic substring matching — no LLM dependency.
+ * Framing (refuse-and-cite vs. advise) is determined by the caller
+ * using {@link classifyUtteranceIntent}.
+ */
+export function scanUtteranceForConflicts(
+  utterance: string,
+  catalog: Catalog,
+  userContext: UserContext,
+): UtteranceScanResult {
+  const lowerUtterance = utterance.toLowerCase();
+  const userAllergySet = new Set(
+    userContext.allergies.map((a) => a.toLowerCase()),
+  );
+  const conflicts: Conflict[] = [];
+  const hitFoods: string[] = [];
+
+  for (const food of catalog.allFoods) {
+    if (food.allergenTags.length === 0) continue;
+
+    const canonicalLower = food.canonicalName.toLowerCase();
+    const nameHit = lowerUtterance.includes(canonicalLower);
+    const aliasHit = food.aliases.some((a) =>
+      lowerUtterance.includes(a.toLowerCase()),
+    );
+
+    if (!nameHit && !aliasHit) continue;
+
+    const intersectingAllergens = food.allergenTags.filter((tag) =>
+      userAllergySet.has(tag.toLowerCase()),
+    );
+
+    if (intersectingAllergens.length > 0) {
+      for (const allergen of intersectingAllergens) {
+        conflicts.push({
+          type: "allergy",
+          id: allergen,
+          description: `Food "${food.canonicalName}" is tagged with allergen "${allergen}" — matches user allergy`,
+        });
+      }
+      hitFoods.push(food.canonicalName);
+    }
+  }
+
+  return {
+    conflicts,
+    intent: classifyUtteranceIntent(utterance),
+    hitFoods,
+  };
 }

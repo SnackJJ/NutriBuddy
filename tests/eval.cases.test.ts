@@ -8,6 +8,7 @@ const CATEGORIES: EvalCategory[] = [
   "numeric",
   "cross_domain",
   "edge_case",
+  "descriptive",
 ];
 
 const EVAL_CASES = loadEvalCases();
