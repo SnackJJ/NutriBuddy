@@ -26,6 +26,7 @@ import type {
   ToolCall,
   ToolCallDelta,
   ToolHandler,
+  ToolResult,
   ToolSchema,
   TypedOutput,
 } from "./types";
@@ -45,6 +46,135 @@ export const MAX_STEPS = 8;
 const MAX_POST_GATE_RETRIES = 2;
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CODE_ACT_TOOL = "code_act";
+
+interface ToolPropertySchema {
+  readonly type?: string;
+  readonly enum?: readonly unknown[];
+  readonly description?: string;
+}
+
+interface ToolParameterSchema {
+  readonly type?: string;
+  readonly properties?: Record<string, ToolPropertySchema>;
+  readonly required?: readonly string[];
+}
+
+function validateArgType(
+  name: string,
+  value: unknown,
+  expectedType: string | undefined,
+): string | null {
+  switch (expectedType) {
+    case "string":
+      return typeof value === "string"
+        ? null
+        : `argument "${name}" must be a string, got ${typeof value}`;
+    case "number":
+      return typeof value === "number"
+        ? null
+        : `argument "${name}" must be a number, got ${typeof value}`;
+    case "boolean":
+      return typeof value === "boolean"
+        ? null
+        : `argument "${name}" must be a boolean, got ${typeof value}`;
+    default:
+      return null;
+  }
+}
+
+function validateEnumValue(
+  name: string,
+  value: unknown,
+  allowedValues: readonly unknown[] | undefined,
+): string | null {
+  if (!allowedValues || allowedValues.length === 0) {
+    return null;
+  }
+
+  if (allowedValues.includes(value)) {
+    return null;
+  }
+
+  const allowed = allowedValues.map(String).join(", ");
+  return `argument "${name}" value "${String(value)}" not in allowed enum: [${allowed}]`;
+}
+
+function validateArgs(
+  args: Readonly<Record<string, unknown>>,
+  schema: ToolSchema,
+): string | null {
+  const params = schema.function.parameters as ToolParameterSchema;
+
+  const required = params.required ?? [];
+  const missing = required.filter((key) => !(key in args));
+  if (missing.length > 0) {
+    return `missing required argument(s): ${missing.join(", ")}`;
+  }
+
+  const properties = params.properties ?? {};
+  for (const [name, value] of Object.entries(args)) {
+    const property = properties[name];
+    if (!property) {
+      continue;
+    }
+
+    const typeError = validateArgType(name, value, property.type);
+    if (typeError) {
+      return typeError;
+    }
+
+    const enumError = validateEnumValue(name, value, property.enum);
+    if (enumError) {
+      return enumError;
+    }
+  }
+
+  return null;
+}
+
+function toolDispatchError(name: string, result: string): ToolResult {
+  return { name, result, dispatchError: true };
+}
+
+async function dispatchTool(
+  toolCall: ToolCall,
+  tools: ReadonlyMap<string, ToolHandler> | undefined,
+  toolSchemas: readonly ToolSchema[] | undefined,
+  tracer: Tracer,
+  step: number,
+): Promise<ToolResult> {
+  const schema = toolSchemas?.find((s) => s.function.name === toolCall.name);
+
+  tracer.record({
+    step,
+    type: "tool_call",
+    payload: JSON.stringify({
+      name: toolCall.name,
+      args: toolCall.args,
+    }),
+  });
+
+  const handler = tools?.get(toolCall.name);
+  if (!handler) {
+    return toolDispatchError(
+      toolCall.name,
+      `tool "${toolCall.name}" not found — no handler registered`,
+    );
+  }
+
+  if (schema) {
+    const validationError = validateArgs(toolCall.args, schema);
+    if (validationError) {
+      return toolDispatchError(
+        toolCall.name,
+        `argument validation failed for "${toolCall.name}": ${validationError}`,
+      );
+    }
+  }
+
+  const result = await handler(toolCall.args);
+  return { name: toolCall.name, result };
+}
 
 export interface RunTurnInput {
   readonly userInput: string;
@@ -430,18 +560,21 @@ export async function* run(
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
-        const handler = tools?.get(tc.name);
-        const result = handler
-          ? await handler(tc.args)
-          : `tool "${tc.name}" not found — no handler registered`;
+        const toolResult = await dispatchTool(
+          tc,
+          tools,
+          toolSchemas,
+          tracer,
+          step,
+        );
 
         yield {
           type: "observe",
           step,
-          toolResult: { name: tc.name, result },
+          toolResult,
         };
 
-        working.push(createToolResultMessage(tc, result));
+        working.push(createToolResultMessage(tc, toolResult.result));
       }
       // 工具调用后继续循环（不在此步交卷）
       continue;

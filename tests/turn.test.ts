@@ -20,6 +20,7 @@ import {
   type ModelRequest,
   type ModelResponse,
   type ToolCall,
+  type ToolHandler,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
@@ -1011,6 +1012,290 @@ describe("gate verdict events", () => {
     expect(toolVerdict.verdict).toBe("pass");
     expect(toolVerdict.checkName).toBe("tool_gate_check");
     expect(toolVerdict.evidence).toContain("search_food");
+  });
+
+  describe("tool gate dispatch verdicts (issue #45)", () => {
+    const SEARCH_FOOD_SCHEMA = {
+      type: "function" as const,
+      function: {
+        name: "search_food",
+        description: "Search for a food by name",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            food: { type: "string", description: "Food name to search for" },
+          },
+          required: ["food"],
+        },
+      },
+    };
+
+    it("emits pass verdict when tool dispatch succeeds with valid args", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up...",
+            stop: false,
+            toolCalls: [
+              { id: "call-1", name: "search_food", args: { food: "chicken" } },
+            ],
+          };
+        }
+        return { content: "Chicken has 31g protein/100g.", stop: true };
+      });
+      const tools = new Map([
+        ["search_food", async () => "chicken: 31g protein/100g"],
+      ]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "chicken protein?",
+      };
+      const ports = createPorts(undefined, {
+        adapter,
+        tools,
+        toolSchemas: [SEARCH_FOOD_SCHEMA],
+      });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdict = expectGateVerdict(events, "tool");
+      expect(toolVerdict.verdict).toBe("pass");
+      expect(toolVerdict.evidence).toContain("search_food");
+    });
+
+    it("emits error verdict for unknown tool names", async () => {
+      const adapter = stubAdapter(() => ({
+        content: "Calling unknown tool...",
+        stop: false,
+        toolCalls: [
+          { id: "call-1", name: "nonexistent_tool", args: { x: 1 } },
+        ],
+      }));
+      // No tool registered for "nonexistent_tool"
+      const tools = new Map<string, ToolHandler>();
+      const input: TurnInput = { tag: "utterance", content: "do something" };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdict = expectGateVerdict(events, "tool");
+      expect(toolVerdict.verdict).toBe("error");
+      expect(toolVerdict.checkName).toBe("tool_gate_check");
+      expect(toolVerdict.evidence).toContain("nonexistent_tool");
+      expect(toolVerdict.evidence).toContain("not found");
+    });
+
+    it("emits error verdict when required args are missing", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up with missing args...",
+            stop: false,
+            toolCalls: [
+              // Missing required "food" property
+              { id: "call-1", name: "search_food", args: { wrong_param: "x" } },
+            ],
+          };
+        }
+        return { content: "Recovered after error.", stop: true };
+      });
+      const tools = new Map([
+        ["search_food", async () => "should not be called"],
+      ]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "protein?",
+      };
+      const ports = createPorts(undefined, {
+        adapter,
+        tools,
+        toolSchemas: [SEARCH_FOOD_SCHEMA],
+      });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdict = expectGateVerdict(events, "tool");
+      expect(toolVerdict.verdict).toBe("error");
+      expect(toolVerdict.evidence).toContain("search_food");
+      expect(toolVerdict.evidence).toContain("missing");
+    });
+
+    it("emits error verdict when arg types are wrong", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up with wrong arg type...",
+            stop: false,
+            toolCalls: [
+              // "food" should be string, but number provided
+              { id: "call-1", name: "search_food", args: { food: 123 } },
+            ],
+          };
+        }
+        return { content: "Recovered after error.", stop: true };
+      });
+      const tools = new Map([
+        ["search_food", async () => "should not be called"],
+      ]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "protein?",
+      };
+      const ports = createPorts(undefined, {
+        adapter,
+        tools,
+        toolSchemas: [SEARCH_FOOD_SCHEMA],
+      });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdict = expectGateVerdict(events, "tool");
+      expect(toolVerdict.verdict).toBe("error");
+      expect(toolVerdict.evidence).toContain("search_food");
+      expect(toolVerdict.evidence).toContain("must be a string");
+    });
+
+    it("scorer can distinguish errored tool dispatches from successes", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Calling bad tool...",
+            stop: false,
+            toolCalls: [
+              { id: "call-1", name: "bad_tool", args: {} },
+            ],
+          };
+        }
+        return { content: "Recovered after bad tool call.", stop: true };
+      });
+      const tools = new Map<string, ToolHandler>();
+      const input: TurnInput = { tag: "utterance", content: "do something" };
+      const ports = createPorts(undefined, { adapter, tools });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdicts = gateVerdicts(events).filter(
+        (gv) => gv.checkpoint === "tool",
+      );
+      expect(toolVerdicts.length).toBeGreaterThanOrEqual(1);
+
+      // All tool verdicts are errors (no passes)
+      const errorVerdicts = toolVerdicts.filter(
+        (gv) => gv.verdict === "error",
+      );
+      const passVerdicts = toolVerdicts.filter(
+        (gv) => gv.verdict === "pass",
+      );
+      expect(errorVerdicts.length).toBeGreaterThanOrEqual(1);
+      expect(passVerdicts.length).toBe(0);
+    });
+
+    it("tracer records tool_call events for dispatched tools", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up...",
+            stop: false,
+            toolCalls: [
+              {
+                id: "call-1",
+                name: "search_food",
+                args: { food: "chicken" },
+              },
+            ],
+          };
+        }
+        return { content: "Chicken has 31g protein/100g.", stop: true };
+      });
+      const tools = new Map([
+        ["search_food", async () => "chicken: 31g protein/100g"],
+      ]);
+      const tracer = new Tracer();
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "chicken protein?",
+      };
+      const ports = createPorts(undefined, {
+        adapter,
+        tools,
+        toolSchemas: [SEARCH_FOOD_SCHEMA],
+        tracer,
+      });
+
+      await collect(turn(input, ports));
+
+      const toolCallEvents = tracer
+        .events()
+        .filter((e) => e.type === "tool_call");
+      expect(toolCallEvents.length).toBe(1);
+      expect(toolCallEvents[0].payload).toContain("search_food");
+      expect(toolCallEvents[0].payload).toContain("chicken");
+    });
+
+    it("model receives typed error observation so it can retry on dispatch failure", async () => {
+      let callCount = 0;
+      const adapter = stubAdapter(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: "Looking up with wrong args...",
+            stop: false,
+            toolCalls: [
+              { id: "call-1", name: "search_food", args: { wrong: true } },
+            ],
+          };
+        }
+        // Model retries with corrected args on second call
+        if (callCount === 2) {
+          return {
+            content: "Let me try with correct args...",
+            stop: false,
+            toolCalls: [
+              { id: "call-2", name: "search_food", args: { food: "chicken" } },
+            ],
+          };
+        }
+        return { content: "Chicken has 31g protein/100g.", stop: true };
+      });
+      const tools = new Map([
+        ["search_food", async (args: Readonly<Record<string, unknown>>) => {
+          if (args.food === "chicken") return "chicken: 31g protein/100g";
+          return "unknown food";
+        }],
+      ]);
+      const input: TurnInput = {
+        tag: "utterance",
+        content: "chicken protein?",
+      };
+      const ports = createPorts(undefined, {
+        adapter,
+        tools,
+        toolSchemas: [SEARCH_FOOD_SCHEMA],
+      });
+
+      const { events } = await collect(turn(input, ports));
+
+      const toolVerdicts = gateVerdicts(events).filter(
+        (gv) => gv.checkpoint === "tool",
+      );
+      expect(toolVerdicts.length).toBe(2);
+
+      // First dispatch: error (missing required arg)
+      expect(toolVerdicts[0].verdict).toBe("error");
+
+      // Second dispatch: pass (corrected args)
+      expect(toolVerdicts[1].verdict).toBe("pass");
+    });
   });
 
   it("emits output and commit gate verdicts with pass on clean turns", async () => {
