@@ -1,17 +1,29 @@
 // Supabase Auth helpers for server-side session extraction (issue #48 / ADD §Multi-User).
 //
 // Replaces the client-asserted X-User-Id header with real Supabase session
-// verification. The authenticated user identity enters the harness at the
-// turn seam — it is never model-fillable.
-//
-// Two approaches are supported:
-//   1. Authorization header: `Bearer <access_token>` (from Supabase client SDK)
-//   2. Cookie-based session (Next.js server components / middleware)
-//
-// On failure, returns undefined — the route handler treats unauthenticated
-// requests as anonymous (no store wiring, no tool wiring).
+// verification at the turn seam. On failure, callers treat the request as
+// anonymous and do not wire user-scoped stores or tools.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+type SupabaseAuthClientFactory = (token: string) => SupabaseClient;
+
+const AUTHORIZATION_HEADER = "Authorization";
+const BEARER_TOKEN_PATTERN = /^Bearer\s+(.+)$/i;
+
+function extractBearerToken(headers: Headers): string | undefined {
+  const header = headers.get(AUTHORIZATION_HEADER);
+  if (!header) {
+    return undefined;
+  }
+
+  const match = header.match(BEARER_TOKEN_PATTERN);
+  if (!match || !match[1]) {
+    return undefined;
+  }
+
+  return match[1];
+}
 
 /**
  * Extract and verify user identity from the request's Authorization header.
@@ -25,22 +37,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * Supabase client (which sends the access token in the Authorization header).
  */
 export async function getUserIdFromHeader(
-  createClient: (
-    token: string,
-  ) => SupabaseClient,
+  createClient: SupabaseAuthClientFactory,
   request: { headers: Headers },
 ): Promise<string | undefined> {
-  const header = request.headers.get("Authorization");
-  if (!header) {
+  const token = extractBearerToken(request.headers);
+  if (!token) {
     return undefined;
   }
-
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match || !match[1]) {
-    return undefined;
-  }
-
-  const token = match[1];
 
   try {
     const client = createClient(token);

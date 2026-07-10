@@ -3,10 +3,7 @@ import { turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
-import {
-  createServerSupabase,
-  createUserSupabase,
-} from "@/lib/supabase";
+import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
 import {
   createMemoryStore,
   createSupabaseProfileGateway,
@@ -19,7 +16,11 @@ import {
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "@/lib/chatApi";
-import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
+import {
+  createLogMealHandler,
+  LOG_MEAL_SCHEMA,
+  type ProposalStore,
+} from "@/harness/logMeal";
 import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
 import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
 import { createSupabaseProposalStore } from "@/lib/proposalStore";
@@ -37,7 +38,7 @@ const catalog = createCatalog(SEED_FOODS);
 
 function buildToolMap(
   sessionUserId: string,
-  proposalStore: ReturnType<typeof createSupabaseProposalStore>,
+  proposalStore: ProposalStore,
 ): ReadonlyMap<string, ToolHandler> {
   const logMealHandler = createLogMealHandler({
     catalog,
@@ -131,10 +132,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // ── Extract session user identity from Supabase auth session ─────
-  const sessionUserId = await getUserIdFromHeader(
-    (token) => createUserSupabase(token),
-    request,
-  );
+  const sessionUserId = await getUserIdFromHeader(createUserSupabase, request);
 
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();

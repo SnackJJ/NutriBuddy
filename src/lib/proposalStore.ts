@@ -81,12 +81,13 @@ function inputToRow(
 // ── Factory ──────────────────────────────────────────────────────────────
 
 const TABLE = "proposals";
+const PROPOSED_STATUS = "proposed";
 const ID_PREFIX = "proposal";
 let nextId = Date.now();
 
 function generateProposalId(): string {
-  // Monotonically increasing id within this process lifetime; Supabase
-  // primary key guarantees uniqueness across restarts.
+  // Preserve the proposal-* id shape while letting the DB reject rare
+  // cross-process collisions.
   return `${ID_PREFIX}-${(nextId++).toString(36)}`;
 }
 
@@ -111,6 +112,30 @@ export function createSupabaseProposalStore(
 ): ProposalStore {
   const { client } = options;
   const now = options.now ?? (() => new Date().toISOString());
+
+  async function transitionStatus(
+    id: string,
+    status: Extract<ProposalStatus, "committed" | "rejected">,
+    action: "commit" | "decline",
+  ): Promise<Proposal> {
+    const { data, error } = await client
+      .from(TABLE)
+      .update({ status })
+      .eq("id", id)
+      .eq("status", PROPOSED_STATUS)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to ${action} proposal ${id}: ${error.message}`);
+    }
+
+    if (!data) {
+      throw new Error(`Proposal ${id} not found or not in "proposed" status`);
+    }
+
+    return rowToProposal(data as ProposalDbRow);
+  }
 
   return {
     async store(params: ProposalInput): Promise<Proposal> {
@@ -146,47 +171,11 @@ export function createSupabaseProposalStore(
     },
 
     async commit(id: string): Promise<Proposal> {
-      const { data, error } = await client
-        .from(TABLE)
-        .update({ status: "committed" })
-        .eq("id", id)
-        .eq("status", "proposed")
-        .select()
-        .single();
-
-      if (error) {
-        throw new Error(`Failed to commit proposal ${id}: ${error.message}`);
-      }
-
-      if (!data) {
-        throw new Error(
-          `Proposal ${id} not found or not in "proposed" status`,
-        );
-      }
-
-      return rowToProposal(data as ProposalDbRow);
+      return transitionStatus(id, "committed", "commit");
     },
 
     async decline(id: string): Promise<Proposal> {
-      const { data, error } = await client
-        .from(TABLE)
-        .update({ status: "rejected" })
-        .eq("id", id)
-        .eq("status", "proposed")
-        .select()
-        .single();
-
-      if (error) {
-        throw new Error(`Failed to decline proposal ${id}: ${error.message}`);
-      }
-
-      if (!data) {
-        throw new Error(
-          `Proposal ${id} not found or not in "proposed" status`,
-        );
-      }
-
-      return rowToProposal(data as ProposalDbRow);
+      return transitionStatus(id, "rejected", "decline");
     },
   };
 }
