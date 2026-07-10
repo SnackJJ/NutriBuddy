@@ -66,6 +66,25 @@ export interface ToolResult {
   readonly dispatchError?: boolean;
 }
 
+/** Token usage reported by the model provider (issue #51). */
+export interface ModelUsage {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+  /** Cache hit tokens — prompt content that hit the provider's KV-cache. */
+  readonly cacheHitTokens?: number;
+  /** Cache miss tokens — prompt content that missed the provider's KV-cache. */
+  readonly cacheMissTokens?: number;
+}
+
+/** Trace payload recorded after each provider model call. */
+export interface ModelCallUsageTracePayload {
+  readonly model: ModelTier;
+  readonly thinking: boolean;
+  readonly latencyMs: number;
+  readonly usage: ModelUsage | null;
+}
+
 export interface ModelResponse {
   readonly content: string;
   /**
@@ -83,6 +102,8 @@ export interface ModelResponse {
    * "length" = token limit reached.
    */
   readonly finishReason?: string;
+  /** Token usage from the provider response (issue #51). */
+  readonly usage?: ModelUsage;
 }
 
 export interface ModelAdapter {

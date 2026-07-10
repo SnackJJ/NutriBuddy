@@ -6,12 +6,19 @@
 
 import type { ToolHandler, ToolSchema } from "./types";
 import type {
+  Observation,
   QueryCatalog,
   QueryResult,
   QueryRunner,
+  RenderedObservation,
 } from "../catalog/queryCatalog";
-import { executeQuery, FOOD_LOOKUP_TEMPLATE } from "../catalog/queryCatalog";
+import {
+  executeQuery,
+  FOOD_LOOKUP_TEMPLATE,
+  renderObservationText,
+} from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
+import type { Tracer } from "./tracer";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +66,8 @@ export interface QueryCatalogHandlerDeps {
   readonly runner: QueryRunner;
   /** Authenticated user identity bound by the caller, not model-fillable. */
   readonly userId: string;
+  /** Optional tracer for recording full-fidelity observations (issue #51). */
+  readonly tracer?: Tracer;
 }
 
 // ─── Handler helpers ──────────────────────────────────────────────────────
@@ -91,6 +100,38 @@ function templateParams(
   return params;
 }
 
+function recordObservationTrace(
+  tracer: Tracer | undefined,
+  observation: Observation,
+  rendered: RenderedObservation,
+): void {
+  tracer?.record({
+    // Tool handlers are step-agnostic; loop tool_call traces carry the dispatch step.
+    step: 0,
+    type: "observation",
+    payload: JSON.stringify({
+      observation,
+      truncated: rendered.truncated,
+      renderedRows: rendered.renderedRows,
+    }),
+  });
+}
+
+function observationResponse(
+  observation: Observation,
+  rendered: RenderedObservation,
+): {
+  readonly type: "observation";
+  readonly text: string;
+  readonly observation: Observation;
+} {
+  return {
+    type: "observation",
+    text: rendered.text,
+    observation,
+  };
+}
+
 // ─── 工具工厂 ─────────────────────────────────────────────────────────────
 
 /**
@@ -104,7 +145,7 @@ function templateParams(
 export function createQueryCatalogHandler(
   deps: QueryCatalogHandlerDeps,
 ): ToolHandler {
-  const { queryCatalog, runner, userId } = deps;
+  const { queryCatalog, runner, userId, tracer } = deps;
 
   return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
     const templateId = args.template_id;
@@ -125,6 +166,16 @@ export function createQueryCatalogHandler(
         userId,
         runner,
       );
+
+      if (result.type === "observation") {
+        const rendered = renderObservationText(result.observation);
+        recordObservationTrace(tracer, result.observation, rendered);
+
+        return JSON.stringify(
+          observationResponse(result.observation, rendered),
+        );
+      }
+
       return JSON.stringify(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

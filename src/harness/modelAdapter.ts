@@ -14,6 +14,7 @@ import type {
   ModelRequest,
   ModelResponse,
   ModelTier,
+  ModelUsage,
   ToolCall,
   ToolSchema,
 } from "./types";
@@ -53,6 +54,15 @@ interface ChatCompletionChoice {
 
 interface ChatCompletionResponse {
   readonly choices?: ReadonlyArray<ChatCompletionChoice>;
+  readonly usage?: ChatCompletionUsage;
+}
+
+interface ChatCompletionUsage {
+  readonly prompt_tokens?: number;
+  readonly completion_tokens?: number;
+  readonly total_tokens?: number;
+  readonly prompt_cache_hit_tokens?: number;
+  readonly prompt_cache_miss_tokens?: number;
 }
 
 interface ChatCompletionToolCall {
@@ -139,6 +149,20 @@ function buildRequestBody(req: ModelRequest): Record<string, unknown> {
   return body;
 }
 
+function parseUsage(usage?: ChatCompletionUsage): ModelUsage | undefined {
+  if (!usage || typeof usage.total_tokens !== "number") {
+    return undefined;
+  }
+
+  return {
+    promptTokens: usage.prompt_tokens ?? 0,
+    completionTokens: usage.completion_tokens ?? 0,
+    totalTokens: usage.total_tokens,
+    cacheHitTokens: usage.prompt_cache_hit_tokens,
+    cacheMissTokens: usage.prompt_cache_miss_tokens,
+  };
+}
+
 function parseToolCall(toolCall: ChatCompletionToolCall): ToolCall {
   const parsedArgs = parseToolArgs(toolCall.function?.arguments ?? "{}");
 
@@ -191,6 +215,7 @@ export class DeepSeekAdapter implements ModelAdapter {
     const msg = choice?.message;
     const finishReason = choice?.finish_reason ?? "stop";
     const toolCalls = msg?.tool_calls ?? [];
+    const usage = parseUsage(data.usage);
 
     // ── Native tool_calls path ──────────────────────────────────────────
     if (finishReason === "tool_calls" && toolCalls.length > 0) {
@@ -199,6 +224,7 @@ export class DeepSeekAdapter implements ModelAdapter {
         stop: false,
         finishReason: "tool_calls",
         toolCalls: toolCalls.map((toolCall) => parseToolCall(toolCall)),
+        usage,
       };
     }
 
@@ -208,7 +234,7 @@ export class DeepSeekAdapter implements ModelAdapter {
       throw new Error("DeepSeek 返回缺少 choices[0].message.content");
     }
 
-    return { content, stop: true, finishReason };
+    return { content, stop: true, finishReason, usage };
   }
 }
 

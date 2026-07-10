@@ -5,11 +5,15 @@ import { run, type RunTurnInput } from "./loop";
 import type {
   AgentEvent,
   ChatMessage,
+  ModelCallUsageTracePayload,
+  ModelTier,
+  ModelUsage,
   TerminalResult,
   ToolResult,
   TypedOutput,
   WriteProposalData,
 } from "./types";
+import type { TraceEvent } from "./tracer";
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
 import {
@@ -25,7 +29,7 @@ import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.3.0";
+export const SCHEMA_VERSION = "1.4.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
@@ -62,6 +66,10 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly sessionUserId?: string;
   /** Food catalog for input-gate utterance conflict scanning (issue #49). */
   readonly catalog?: Catalog;
+  /** Snapshot version of the query catalog used in this turn (issue #51). */
+  readonly catalogVersion?: string;
+  /** Version of the user profile constraints used in this turn (issue #51). */
+  readonly profileVersion?: string;
 }
 
 /**
@@ -99,11 +107,26 @@ export interface TurnGateVerdictEvent extends TurnEvent {
 export interface TurnStartEvent extends TurnEvent {
   readonly type: "turn_start";
   readonly input: TurnInput;
+  /** Snapshot version of the query catalog used in this turn (issue #51). */
+  readonly catalogVersion?: string;
+  /** Version of the user profile constraints used in this turn (issue #51). */
+  readonly profileVersion?: string;
 }
 
 export interface TurnStepEvent extends TurnEvent {
   readonly type: "step";
   readonly agentEvent: AgentEvent;
+}
+
+export interface TurnModelCallEvent extends TurnEvent {
+  readonly type: "model_call";
+  readonly step: number;
+  readonly model: ModelTier;
+  readonly thinking: boolean;
+  /** Token usage from the provider response (issue #51). */
+  readonly usage?: ModelUsage;
+  /** Round-trip latency in milliseconds (issue #51). */
+  readonly latencyMs?: number;
 }
 
 export interface TurnEndEvent extends TurnEvent {
@@ -115,6 +138,7 @@ export type AnyTurnEvent =
   | TurnStartEvent
   | TurnStepEvent
   | TurnGateVerdictEvent
+  | TurnModelCallEvent
   | TurnEndEvent;
 
 /** Final result emitted in turn_end and returned by the turn generator. */
@@ -146,9 +170,16 @@ function createEventMetadata(clock: Clock): NextEventMetadata {
 
 function createTurnStartEvent(
   input: TurnInput,
+  ports: TurnPorts,
   nextMetadata: NextEventMetadata,
 ): TurnStartEvent {
-  return { ...nextMetadata(), type: "turn_start", input };
+  return {
+    ...nextMetadata(),
+    type: "turn_start",
+    input,
+    catalogVersion: ports.catalogVersion,
+    profileVersion: ports.profileVersion,
+  };
 }
 
 function createTurnStepEvent(
@@ -173,6 +204,139 @@ function createGateVerdictEvent(
     ...nextMetadata(),
     type: "gate_verdict",
     ...details,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function isModelTier(value: unknown): value is ModelTier {
+  return value === "flash" || value === "pro";
+}
+
+function readNumberAlias(
+  record: Record<string, unknown>,
+  ...keys: readonly string[]
+): number | undefined {
+  for (const key of keys) {
+    const value = readNumber(record, key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function parseModelUsage(value: unknown): ModelUsage | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    promptTokens: readNumberAlias(value, "promptTokens", "prompt_tokens") ?? 0,
+    completionTokens:
+      readNumberAlias(value, "completionTokens", "completion_tokens") ?? 0,
+    totalTokens: readNumberAlias(value, "totalTokens", "total_tokens") ?? 0,
+    cacheHitTokens: readNumberAlias(
+      value,
+      "cacheHitTokens",
+      "prompt_cache_hit_tokens",
+    ),
+    cacheMissTokens: readNumberAlias(
+      value,
+      "cacheMissTokens",
+      "prompt_cache_miss_tokens",
+    ),
+  };
+}
+
+function parseModelCallPayload(
+  payload: string,
+): ModelCallUsageTracePayload | null {
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    const obj = parsed as Record<string, unknown>;
+    if (
+      typeof obj.model !== "string" ||
+      typeof obj.thinking !== "boolean" ||
+      typeof obj.latencyMs !== "number"
+    ) {
+      return null;
+    }
+
+    if (!isModelTier(obj.model)) {
+      return null;
+    }
+
+    return {
+      model: obj.model,
+      thinking: obj.thinking,
+      latencyMs: obj.latencyMs,
+      usage: parseModelUsage(obj.usage) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function findModelCallUsageTrace(
+  step: number,
+  tracer: TurnPorts["tracer"],
+): TraceEvent | undefined {
+  const traceEvents = tracer.events();
+
+  for (let index = traceEvents.length - 1; index >= 0; index--) {
+    const event = traceEvents[index];
+    if (event.type === "model_call_usage" && event.step === step) {
+      return event;
+    }
+  }
+
+  return undefined;
+}
+
+function createTurnModelCallEvent(
+  step: number,
+  tracer: TurnPorts["tracer"],
+  nextMetadata: NextEventMetadata,
+): TurnModelCallEvent | undefined {
+  const usageEvent = findModelCallUsageTrace(step, tracer);
+  if (!usageEvent) {
+    return undefined;
+  }
+
+  const payload = parseModelCallPayload(usageEvent.payload);
+  if (!payload) {
+    return undefined;
+  }
+
+  return {
+    ...nextMetadata(),
+    type: "model_call",
+    step,
+    model: payload.model,
+    thinking: payload.thinking,
+    usage: payload.usage ?? undefined,
+    latencyMs: payload.latencyMs,
   };
 }
 
@@ -395,10 +559,6 @@ function createOutputGateBlockedResult(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function isObservationQueryResult(value: unknown): value is {
   readonly type: "observation";
   readonly observation: Observation;
@@ -427,16 +587,6 @@ function readString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function readNumber(
-  record: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
 }
 
 function readStringArray(
@@ -528,9 +678,26 @@ async function* runUtteranceTurn(
       history,
     });
 
+    const emittedModelCallSteps = new Set<number>();
+
     let next = await gen.next();
     while (!next.done) {
       yield createTurnStepEvent(next.value, nextMetadata);
+
+      // ── Issue #51: Emit model_call event ───────────────────────────
+      // The loop records model_call_usage in the tracer after calling the
+      // adapter (between thought and act/observe). We emit the event on
+      // the NEXT iteration after the thought, when the usage data is
+      // available. Deduped by step number so each model call appears once.
+      const mcEvent = createTurnModelCallEvent(
+        next.value.step,
+        ports.tracer,
+        nextMetadata,
+      );
+      if (mcEvent && !emittedModelCallSteps.has(mcEvent.step)) {
+        emittedModelCallSteps.add(mcEvent.step);
+        yield mcEvent;
+      }
 
       // Emit tool gate verdict after each tool observation
       if (next.value.type === "observe" && next.value.toolResult) {
@@ -978,7 +1145,7 @@ export async function* turn(
 
   const nextMetadata = createEventMetadata(ports.clock ?? (() => new Date()));
 
-  yield createTurnStartEvent(input, nextMetadata);
+  yield createTurnStartEvent(input, ports, nextMetadata);
 
   const inputGate = createInputGateDecision(input, ports);
   yield createGateVerdictEvent(inputGate.verdict, nextMetadata);

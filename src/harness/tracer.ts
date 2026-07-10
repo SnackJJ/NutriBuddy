@@ -13,6 +13,8 @@ export const TRACE_EVENT_TYPES = [
   "max_steps_reached",
   "gate_block",
   "tool_call",
+  "observation",
+  "model_call_usage",
 ] as const;
 
 export type TraceEventType = (typeof TRACE_EVENT_TYPES)[number];

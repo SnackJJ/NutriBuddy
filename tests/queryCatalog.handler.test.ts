@@ -21,6 +21,7 @@ import {
   SEED_FOODS,
   type Catalog,
 } from "../src/catalog/catalog";
+import { Tracer } from "../src/harness/tracer";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -486,5 +487,113 @@ describe("createInMemoryQueryRunner", () => {
       expect(row.fat_g).toBe(food.per100g.fatG);
       expect(row.carbs_g).toBe(food.per100g.carbsG);
     }
+  });
+
+  // ─── observation rendering and tracer integration (issue #51) ────────────
+
+  describe("createQueryCatalogHandler — canonical text and tracer", () => {
+    it("includes a canonical 'text' field in observation results", async () => {
+      const handler = makeHandler();
+      const result = await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-salmon-001",
+      });
+
+      const parsed: Record<string, unknown> = JSON.parse(result);
+      expect(parsed.type).toBe("observation");
+      expect(typeof parsed.text).toBe("string");
+      expect((parsed.text as string).length).toBeGreaterThan(0);
+      expect(parsed.text as string).toContain("[query result:");
+      expect(parsed.observation).toBeDefined();
+    });
+
+    it("canonical text includes nutrition values as human-readable text", async () => {
+      const handler = makeHandler();
+      const result = await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-chicken-breast-001",
+      });
+
+      const parsed: Record<string, unknown> = JSON.parse(result);
+      const text = parsed.text as string;
+      expect(text).toContain("kcal:");
+      expect(text).toContain("protein_g:");
+      expect(text).toContain("165");
+    });
+
+    it("records full-fidelity observation in the tracer when provided", async () => {
+      const tracer = new Tracer();
+      const handler = createQueryCatalogHandler({
+        queryCatalog: seedQueryCatalog(),
+        runner: createInMemoryQueryRunner(seedFoodCatalog()),
+        userId: USER_ID,
+        tracer,
+      });
+
+      await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-salmon-001",
+      });
+
+      const obsEvents = tracer.events().filter((e) => e.type === "observation");
+      expect(obsEvents).toHaveLength(1);
+
+      const payload: Record<string, unknown> = JSON.parse(
+        obsEvents[0].payload,
+      );
+      expect(payload.observation).toBeDefined();
+      expect(payload.truncated).toBe(false);
+      expect(typeof payload.renderedRows).toBe("number");
+    });
+
+    it("full observation in tracer matches what the handler returns", async () => {
+      const tracer = new Tracer();
+      const handler = createQueryCatalogHandler({
+        queryCatalog: seedQueryCatalog(),
+        runner: createInMemoryQueryRunner(seedFoodCatalog()),
+        userId: USER_ID,
+        tracer,
+      });
+
+      const result = await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-chicken-breast-001",
+      });
+
+      const parsed: Record<string, unknown> = JSON.parse(result);
+      const obsEvents = tracer.events().filter((e) => e.type === "observation");
+      const tracePayload: Record<string, unknown> = JSON.parse(
+        obsEvents[0].payload,
+      );
+
+      const traceObs = tracePayload.observation as Record<string, unknown>;
+      const resultObs = parsed.observation as Record<string, unknown>;
+      expect(traceObs.templateId).toBe(resultObs.templateId);
+      expect(traceObs.rowCount).toBe(resultObs.rowCount);
+    });
+
+    it("does not crash when tracer is not provided", async () => {
+      // Handler without tracer — should still produce valid results
+      const handler = makeHandler();
+      const result = await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-egg-001",
+      });
+
+      const parsed: Record<string, unknown> = JSON.parse(result);
+      expect(parsed.type).toBe("observation");
+      expect(parsed.text).toBeDefined();
+    });
+
+    it("error results do not include text field", async () => {
+      const handler = makeHandler();
+      const result = await handler({
+        template_id: "nonexistent",
+      });
+
+      const parsed: Record<string, unknown> = JSON.parse(result);
+      expect(parsed.type).toBe("error");
+      expect(parsed.text).toBeUndefined();
+    });
   });
 });
