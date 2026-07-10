@@ -85,6 +85,19 @@ export interface QueryCatalog {
   readonly templateList: readonly QueryTemplate[];
 }
 
+/** A minimal meal record for query-runner aggregation (M1 in-memory path). */
+export interface MealRecord {
+  readonly userId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
+  readonly loggedAt: string; // ISO 8601
+  readonly kcal: number;
+  readonly proteinG: number;
+  readonly fatG: number;
+  readonly carbsG: number;
+}
+
 /**
  * Query runner port. Executes a template against a data source.
  * The userId is bound by the caller (not from model params).
@@ -517,3 +530,527 @@ export const FOOD_LOOKUP_TEMPLATE: QueryTemplate = {
     },
   ],
 };
+
+/**
+ * meal_summary — Summarise all meals within a date range, aggregated by meal type.
+ *
+ * Groups meals into breakfast / lunch / dinner / snack buckets and returns
+ * per-bucket totals for kcal and macros. The model cannot sum raw meal rows;
+ * aggregation happens server-side and lands as observation columns.
+ */
+export const MEAL_SUMMARY_TEMPLATE: QueryTemplate = {
+  id: "meal_summary",
+  description:
+    "Summarise all meals within a date range, aggregated by meal type " +
+    "(breakfast, lunch, dinner, snack). Returns per-meal-type totals for " +
+    "kcal, protein, fat, carbs, and meal count.",
+  parameters: [
+    {
+      name: "date_from",
+      type: "date",
+      required: true,
+      description:
+        "Start date (YYYY-MM-DD, inclusive). Only meals logged on or after " +
+        "this date are included.",
+    },
+    {
+      name: "date_to",
+      type: "date",
+      required: true,
+      description:
+        "End date (YYYY-MM-DD, inclusive). Only meals logged on or before " +
+        "this date are included.",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "meal_type",
+      type: "string",
+      description:
+        "Meal type: breakfast, lunch, dinner, or snack.",
+    },
+    {
+      name: "meal_count",
+      type: "number",
+      description: "Number of meals of this type in the range.",
+    },
+    {
+      name: "total_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Total calories for this meal type across the range.",
+    },
+    {
+      name: "total_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Total protein for this meal type across the range.",
+    },
+    {
+      name: "total_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Total fat for this meal type across the range.",
+    },
+    {
+      name: "total_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Total carbs for this meal type across the range.",
+    },
+  ],
+};
+
+/**
+ * daily_totals — Daily nutrition totals for each day within a date range.
+ *
+ * Returns one row per calendar day with summed kcal, protein, fat, carbs,
+ * and a meal count. Days with zero meals are omitted.
+ */
+export const DAILY_TOTALS_TEMPLATE: QueryTemplate = {
+  id: "daily_totals",
+  description:
+    "Daily nutrition totals for each day within a date range. Returns one " +
+    "row per day with summed kcal, protein, fat, carbs, and meal count. " +
+    "Days with no meals are omitted.",
+  parameters: [
+    {
+      name: "date_from",
+      type: "date",
+      required: true,
+      description:
+        "Start date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "date_to",
+      type: "date",
+      required: true,
+      description:
+        "End date (YYYY-MM-DD, inclusive).",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "date",
+      type: "date",
+      description: "Calendar date (YYYY-MM-DD).",
+    },
+    {
+      name: "total_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Total calories for the day.",
+    },
+    {
+      name: "total_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Total protein for the day.",
+    },
+    {
+      name: "total_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Total fat for the day.",
+    },
+    {
+      name: "total_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Total carbs for the day.",
+    },
+    {
+      name: "meal_count",
+      type: "number",
+      description: "Number of meals logged on this day.",
+    },
+  ],
+};
+
+/**
+ * weekly_totals — Weekly nutrition totals, grouped by ISO week.
+ *
+ * Returns one row per ISO week (Monday–Sunday) that contains at least one meal.
+ * day_count measures how many distinct calendar days had meals within the week.
+ */
+export const WEEKLY_TOTALS_TEMPLATE: QueryTemplate = {
+  id: "weekly_totals",
+  description:
+    "Weekly nutrition totals, grouped by ISO week (Monday to Sunday). " +
+    "Returns one row per week with summed kcal, protein, fat, carbs, " +
+    "meal count, and the number of distinct days with meals.",
+  parameters: [
+    {
+      name: "date_from",
+      type: "date",
+      required: true,
+      description:
+        "Start date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "date_to",
+      type: "date",
+      required: true,
+      description:
+        "End date (YYYY-MM-DD, inclusive).",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "week_start",
+      type: "date",
+      description: "Monday of the ISO week (YYYY-MM-DD).",
+    },
+    {
+      name: "total_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Total calories for the week.",
+    },
+    {
+      name: "total_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Total protein for the week.",
+    },
+    {
+      name: "total_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Total fat for the week.",
+    },
+    {
+      name: "total_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Total carbs for the week.",
+    },
+    {
+      name: "meal_count",
+      type: "number",
+      description: "Number of meals logged in the week.",
+    },
+    {
+      name: "day_count",
+      type: "number",
+      description:
+        "Number of distinct calendar days with at least one meal in the week.",
+    },
+  ],
+};
+
+/**
+ * daily_average — Average daily nutrition over a date range.
+ *
+ * Divides total intake by the number of days in the range (inclusive), so days
+ * without meals pull the average down. Also reports how many days actually had
+ * meals, so the model can contextualise the average.
+ */
+export const DAILY_AVERAGE_TEMPLATE: QueryTemplate = {
+  id: "daily_average",
+  description:
+    "Average daily nutrition over a date range. Computes total intake " +
+    "divided by the number of days in the range (inclusive). Also reports " +
+    "how many days had at least one meal so the model can contextualise " +
+    "the average.",
+  parameters: [
+    {
+      name: "date_from",
+      type: "date",
+      required: true,
+      description:
+        "Start date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "date_to",
+      type: "date",
+      required: true,
+      description:
+        "End date (YYYY-MM-DD, inclusive).",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "avg_kcal",
+      type: "number",
+      unit: "kcal",
+      description:
+        "Average daily calories over the range (total / total days).",
+    },
+    {
+      name: "avg_protein_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Average daily protein over the range (total / total days).",
+    },
+    {
+      name: "avg_fat_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Average daily fat over the range (total / total days).",
+    },
+    {
+      name: "avg_carbs_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Average daily carbs over the range (total / total days).",
+    },
+    {
+      name: "days_with_meals",
+      type: "number",
+      description: "Number of days with at least one meal logged.",
+    },
+    {
+      name: "total_days",
+      type: "number",
+      description:
+        "Total days in the range (inclusive), used as the denominator.",
+    },
+  ],
+};
+
+/**
+ * range_comparison — Compare nutrition between two date ranges.
+ *
+ * Computes per-range daily averages and exposes the difference (range2 − range1)
+ * as an observed column. The model must not compute the difference — it reads
+ * the diff columns from the observation. This is the canonical example of the
+ * no-arithmetic contract.
+ */
+export const RANGE_COMPARISON_TEMPLATE: QueryTemplate = {
+  id: "range_comparison",
+  description:
+    "Compare nutrition between two date ranges. Returns per-range daily " +
+    "averages and the difference (range2 minus range1) as observed columns. " +
+    "The model must read the diff column — it must NEVER compute the " +
+    "difference itself.",
+  parameters: [
+    {
+      name: "range1_from",
+      type: "date",
+      required: true,
+      description:
+        "First range start date (YYYY-MM-DD, inclusive). Typically the " +
+        "earlier period (e.g. 'last week').",
+    },
+    {
+      name: "range1_to",
+      type: "date",
+      required: true,
+      description:
+        "First range end date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "range2_from",
+      type: "date",
+      required: true,
+      description:
+        "Second range start date (YYYY-MM-DD, inclusive). Typically the " +
+        "later period (e.g. 'this week').",
+    },
+    {
+      name: "range2_to",
+      type: "date",
+      required: true,
+      description:
+        "Second range end date (YYYY-MM-DD, inclusive).",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "range1_avg_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Range 1 average daily calories.",
+    },
+    {
+      name: "range1_avg_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Range 1 average daily protein.",
+    },
+    {
+      name: "range1_avg_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Range 1 average daily fat.",
+    },
+    {
+      name: "range1_avg_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Range 1 average daily carbs.",
+    },
+    {
+      name: "range2_avg_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Range 2 average daily calories.",
+    },
+    {
+      name: "range2_avg_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Range 2 average daily protein.",
+    },
+    {
+      name: "range2_avg_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Range 2 average daily fat.",
+    },
+    {
+      name: "range2_avg_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Range 2 average daily carbs.",
+    },
+    {
+      name: "diff_kcal",
+      type: "number",
+      unit: "kcal",
+      description:
+        "Difference in average daily calories (range2 minus range1). " +
+        "Positive = range 2 is higher.",
+    },
+    {
+      name: "diff_protein_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Difference in average daily protein (range2 minus range1).",
+    },
+    {
+      name: "diff_fat_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Difference in average daily fat (range2 minus range1).",
+    },
+    {
+      name: "diff_carbs_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Difference in average daily carbs (range2 minus range1).",
+    },
+    {
+      name: "range1_days",
+      type: "number",
+      description: "Number of days in range 1 (inclusive).",
+    },
+    {
+      name: "range2_days",
+      type: "number",
+      description: "Number of days in range 2 (inclusive).",
+    },
+  ],
+};
+
+/**
+ * top_k_by_nutrient — Top-k foods ranked by total contribution of a nutrient.
+ *
+ * Aggregates all meals within the date range by food name, ranks by the
+ * specified nutrient's total contribution descending, and returns the top k.
+ * Returns fewer rows when fewer distinct foods were eaten.
+ */
+export const TOP_K_BY_NUTRIENT_TEMPLATE: QueryTemplate = {
+  id: "top_k_by_nutrient",
+  description:
+    "Top-k foods ranked by total contribution of a specified nutrient " +
+    "within a date range. Returns exactly k rows (fewer if fewer distinct " +
+    "foods were eaten), ranked descending by the chosen nutrient.",
+  parameters: [
+    {
+      name: "date_from",
+      type: "date",
+      required: true,
+      description:
+        "Start date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "date_to",
+      type: "date",
+      required: true,
+      description:
+        "End date (YYYY-MM-DD, inclusive).",
+    },
+    {
+      name: "nutrient",
+      type: "enum",
+      required: true,
+      enumValues: ["kcal", "protein", "fat", "carbs"],
+      description:
+        "Nutrient to rank by. Must be one of: kcal, protein, fat, carbs.",
+    },
+    {
+      name: "k",
+      type: "number",
+      required: true,
+      description:
+        "Number of top foods to return. Must be between 1 and 20 inclusive.",
+    },
+  ],
+  resultSchema: [
+    {
+      name: "rank",
+      type: "number",
+      description: "Rank position (1 = highest contribution).",
+    },
+    {
+      name: "food_name",
+      type: "string",
+      description: "Food name from the meal log.",
+    },
+    {
+      name: "total_kcal",
+      type: "number",
+      unit: "kcal",
+      description: "Total calories from this food in the range.",
+    },
+    {
+      name: "total_protein_g",
+      type: "number",
+      unit: "g",
+      description: "Total protein from this food in the range.",
+    },
+    {
+      name: "total_fat_g",
+      type: "number",
+      unit: "g",
+      description: "Total fat from this food in the range.",
+    },
+    {
+      name: "total_carbs_g",
+      type: "number",
+      unit: "g",
+      description: "Total carbs from this food in the range.",
+    },
+    {
+      name: "total_portion_g",
+      type: "number",
+      unit: "g",
+      description:
+        "Total portion size across all meals of this food in the range.",
+    },
+    {
+      name: "meal_count",
+      type: "number",
+      description: "Number of meals containing this food in the range.",
+    },
+  ],
+};
+
+/** All seven reviewed query templates in catalog registration order. */
+export const ALL_QUERY_TEMPLATES: readonly QueryTemplate[] = [
+  FOOD_LOOKUP_TEMPLATE,
+  MEAL_SUMMARY_TEMPLATE,
+  DAILY_TOTALS_TEMPLATE,
+  WEEKLY_TOTALS_TEMPLATE,
+  DAILY_AVERAGE_TEMPLATE,
+  RANGE_COMPARISON_TEMPLATE,
+  TOP_K_BY_NUTRIENT_TEMPLATE,
+];

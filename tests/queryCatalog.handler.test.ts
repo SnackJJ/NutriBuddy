@@ -9,12 +9,14 @@ import {
 import {
   createQueryCatalog,
   FOOD_LOOKUP_TEMPLATE,
+  ALL_QUERY_TEMPLATES,
   type QueryCatalog,
   type QueryRunner,
   type Observation,
   type ObservationRow,
   type ColumnDef,
   type QueryResult,
+  type MealRecord,
 } from "../src/catalog/queryCatalog";
 import {
   createCatalog,
@@ -488,7 +490,6 @@ describe("createInMemoryQueryRunner", () => {
       expect(row.carbs_g).toBe(food.per100g.carbsG);
     }
   });
-
   // ─── observation rendering and tracer integration (issue #51) ────────────
 
   describe("createQueryCatalogHandler — canonical text and tracer", () => {
@@ -595,5 +596,191 @@ describe("createInMemoryQueryRunner", () => {
       expect(parsed.type).toBe("error");
       expect(parsed.text).toBeUndefined();
     });
+  });
+});
+
+// ─── handler dispatch: meal-based templates ───────────────────────────────
+
+function makeMeal(overrides: Partial<MealRecord> = {}): MealRecord {
+  return {
+    userId: USER_ID,
+    foodName: "chicken breast",
+    portionG: 200,
+    mealType: "lunch",
+    loggedAt: "2026-07-06T12:00:00Z",
+    kcal: 330,
+    proteinG: 62,
+    fatG: 7.2,
+    carbsG: 0,
+    ...overrides,
+  };
+}
+
+function makeWeekMeals(): MealRecord[] {
+  return [
+    makeMeal({ foodName: "oatmeal", mealType: "breakfast", loggedAt: "2026-07-06T08:00:00Z", kcal: 170, proteinG: 6, fatG: 3.6, carbsG: 29, portionG: 240 }),
+    makeMeal({ loggedAt: "2026-07-06T12:00:00Z", kcal: 330, proteinG: 62, fatG: 7.2, carbsG: 0 }),
+    makeMeal({ foodName: "salmon", mealType: "dinner", loggedAt: "2026-07-06T19:00:00Z", kcal: 354, proteinG: 34, fatG: 22.1, carbsG: 0, portionG: 170 }),
+    makeMeal({ foodName: "egg", mealType: "breakfast", loggedAt: "2026-07-07T08:00:00Z", kcal: 310, proteinG: 26, fatG: 22, carbsG: 2.2, portionG: 200 }),
+  ];
+}
+
+function makeSevenTemplateHandler(meals?: MealRecord[]) {
+  const foodCatalog = seedFoodCatalog();
+  const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+  const runner = createInMemoryQueryRunner(foodCatalog, meals ?? []);
+  return createQueryCatalogHandler({
+    queryCatalog,
+    runner,
+    userId: USER_ID,
+  });
+}
+
+describe("createQueryCatalogHandler — meal_summary", () => {
+  it("returns observation for valid meal_summary call", async () => {
+    const handler = makeSevenTemplateHandler(makeWeekMeals());
+    const result = await handler({
+      template_id: "meal_summary",
+      date_from: "2026-07-01",
+      date_to: "2026-07-10",
+    });
+
+    const observation = expectObservationResult(result);
+    expect(observation.templateId).toBe("meal_summary");
+    expect(observation.rowCount).toBeGreaterThan(0);
+    expect(observation.truncated).toBe(false);
+  });
+
+  it("scopes to userId (cross-tenant isolation)", async () => {
+    const mixedMeals = [
+      { ...makeMeal(), userId: "user-A", foodName: "chicken", kcal: 300 },
+      { ...makeMeal(), userId: "user-B", foodName: "salmon", kcal: 400 },
+    ];
+    // Handler is bound to user-A
+    const handler = createQueryCatalogHandler({
+      queryCatalog: createQueryCatalog(ALL_QUERY_TEMPLATES),
+      runner: createInMemoryQueryRunner(seedFoodCatalog(), mixedMeals),
+      userId: "user-A",
+    });
+
+    const result = await handler({
+      template_id: "meal_summary",
+      date_from: "2026-07-01",
+      date_to: "2026-07-10",
+    });
+
+    const obs = expectObservationResult(result);
+    // Only user-A's meal should appear
+    const totalKcal = obs.rows.reduce((s, r) => s + Number(r.total_kcal), 0);
+    expect(totalKcal).toBe(300);
+  });
+});
+
+describe("createQueryCatalogHandler — daily_totals", () => {
+  it("returns one row per day with meals", async () => {
+    const handler = makeSevenTemplateHandler(makeWeekMeals());
+    const result = await handler({
+      template_id: "daily_totals",
+      date_from: "2026-07-06",
+      date_to: "2026-07-07",
+    });
+
+    const observation = expectObservationResult(result);
+    expect(observation.templateId).toBe("daily_totals");
+    expect(observation.rowCount).toBe(2); // 2 days
+  });
+});
+
+describe("createQueryCatalogHandler — range_comparison", () => {
+  it("exposes diff columns for range comparison", async () => {
+    const handler = makeSevenTemplateHandler(makeWeekMeals());
+    const result = await handler({
+      template_id: "range_comparison",
+      range1_from: "2026-07-06",
+      range1_to: "2026-07-06",
+      range2_from: "2026-07-07",
+      range2_to: "2026-07-07",
+    });
+
+    const observation = expectObservationResult(result);
+    expect(observation.templateId).toBe("range_comparison");
+    expect(observation.rowCount).toBe(1);
+
+    const row = observation.rows[0];
+    // diff columns must exist
+    expect(typeof row.diff_kcal).toBe("number");
+    expect(typeof row.diff_protein_g).toBe("number");
+    expect(typeof row.diff_fat_g).toBe("number");
+    expect(typeof row.diff_carbs_g).toBe("number");
+  });
+});
+
+describe("createQueryCatalogHandler — top_k_by_nutrient", () => {
+  it("returns top-k ranked foods by nutrient", async () => {
+    const handler = makeSevenTemplateHandler(makeWeekMeals());
+    const result = await handler({
+      template_id: "top_k_by_nutrient",
+      date_from: "2026-07-01",
+      date_to: "2026-07-10",
+      nutrient: "protein",
+      k: 3,
+    });
+
+    const observation = expectObservationResult(result);
+    expect(observation.templateId).toBe("top_k_by_nutrient");
+    expect(observation.rowCount).toBeGreaterThan(0);
+    expect(observation.rowCount).toBeLessThanOrEqual(3);
+    expect(observation.rows[0].rank).toBe(1);
+  });
+});
+
+describe("createQueryCatalogHandler — error cases for new templates", () => {
+  it("rejects meal_summary with missing date params", async () => {
+    const handler = makeSevenTemplateHandler();
+    const result = await handler({
+      template_id: "meal_summary",
+    });
+
+    const err = expectErrorResult(result);
+    expect(String(err.message)).toMatch(/validation|date_from/i);
+  });
+
+  it("rejects range_comparison with missing range params", async () => {
+    const handler = makeSevenTemplateHandler();
+    const result = await handler({
+      template_id: "range_comparison",
+      range1_from: "2026-07-01",
+    });
+
+    const err = expectErrorResult(result);
+    expect(String(err.message)).toMatch(/validation|range1_to/i);
+  });
+
+  it("rejects top_k_by_nutrient with invalid nutrient enum", async () => {
+    const handler = makeSevenTemplateHandler();
+    const result = await handler({
+      template_id: "top_k_by_nutrient",
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+      nutrient: "fiber",
+      k: 3,
+    });
+
+    const err = expectErrorResult(result);
+    expect(String(err.message)).toMatch(/validation|nutrient/i);
+  });
+
+  it("error result lists all seven available templates", async () => {
+    const handler = makeSevenTemplateHandler();
+    const result = await handler({
+      template_id: "invented_template",
+    });
+
+    const err = expectErrorResult(result);
+    expect(err.availableTemplates).toHaveLength(7);
+    expect(err.availableTemplates).toContain("food_lookup");
+    expect(err.availableTemplates).toContain("meal_summary");
+    expect(err.availableTemplates).toContain("range_comparison");
+    expect(err.availableTemplates).toContain("top_k_by_nutrient");
   });
 });

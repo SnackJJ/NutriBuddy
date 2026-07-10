@@ -30,7 +30,7 @@ import {
 import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
 import {
   createQueryCatalog,
-  FOOD_LOOKUP_TEMPLATE,
+  ALL_QUERY_TEMPLATES,
 } from "@/catalog/queryCatalog";
 import { createSupabaseProposalStore } from "@/lib/proposalStore";
 import { createSupabaseMealLogStore } from "@/lib/mealLogStore";
@@ -42,7 +42,7 @@ export const dynamic = "force-dynamic";
 
 // Module-level catalog (built once at cold start from seed data)
 const catalog = createCatalog(SEED_FOODS);
-const queryCatalog = createQueryCatalog([FOOD_LOOKUP_TEMPLATE]);
+const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
 const queryRunner = createInMemoryQueryRunner(catalog);
 const toolSchemas = [
   LOG_MEAL_SCHEMA,
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       ports = {
         ...ports,
         tools: buildToolMap(sessionUserId, proposalStore),
-        toolSchemas: [LOG_MEAL_SCHEMA, SUBMIT_ANSWER_SCHEMA],
+        toolSchemas,
       };
     }
   }
