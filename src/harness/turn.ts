@@ -240,6 +240,20 @@ function readNumber(
     : undefined;
 }
 
+function readStringArray(
+  record: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined {
+  const value = record[key];
+  if (
+    Array.isArray(value) &&
+    value.every((item): item is string => typeof item === "string")
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 export function parseWriteProposalData(
   toolResult: string,
 ): WriteProposalData | undefined {
@@ -261,7 +275,9 @@ export function parseWriteProposalData(
     const nutrition = isRecord(proposal.nutrition) ? proposal.nutrition : {};
     return {
       proposalId,
+      foodId: readString(proposal, "food_id"),
       foodName,
+      canonicalName: readString(proposal, "canonical_name"),
       portionG,
       mealType,
       kcal: readNumber(nutrition, "kcal"),
@@ -269,6 +285,8 @@ export function parseWriteProposalData(
       fatG: readNumber(nutrition, "fat_g"),
       carbsG: readNumber(nutrition, "carbs_g"),
       nutritionSource: readString(proposal, "nutrition_source") ?? "",
+      matchType: readString(proposal, "match_type"),
+      allergenTags: readStringArray(proposal, "allergen_tags"),
       createdAt: readString(proposal, "created_at") ?? "",
     };
   } catch {

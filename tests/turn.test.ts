@@ -185,7 +185,9 @@ function memProposalStore(state?: MemProposalState): {
         const proposal: Proposal = {
           id: nextProposalId(),
           userId: params.userId,
+          foodId: params.foodId,
           foodName: params.foodName,
+          canonicalName: params.canonicalName,
           portionG: params.portionG,
           mealType: params.mealType,
           kcal: params.kcal,
@@ -193,6 +195,8 @@ function memProposalStore(state?: MemProposalState): {
           fatG: params.fatG,
           carbsG: params.carbsG,
           nutritionSource: params.nutritionSource,
+          matchType: params.matchType,
+          allergenTags: params.allergenTags,
           status: "proposed",
           createdAt: new Date(FIXED_TIMESTAMP).toISOString(),
         };
@@ -1120,7 +1124,9 @@ describe("gate verdict events", () => {
         message: "Log 200g chicken breast for lunch? — Confirm?",
         proposal: {
           id: "proposal-001",
+          food_id: "food-chicken-breast-001",
           food_name: "chicken breast",
+          canonical_name: "chicken breast",
           portion_g: 200,
           meal_type: "lunch",
           created_at: "2026-07-05T12:00:00.000Z",
@@ -1130,7 +1136,9 @@ describe("gate verdict events", () => {
             fat_g: 7.2,
             carbs_g: 0,
           },
-          nutrition_source: "USDA FoodData Central",
+          nutrition_source: "usda-sr-legacy-2026-07-v1",
+          match_type: "exact",
+          allergen_tags: [],
         },
         nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
         ...overrides,
@@ -1719,7 +1727,9 @@ describe("write-proposal turn flow (issue #36)", () => {
       message: "Log 200g chicken breast for lunch? Confirm?",
       proposal: {
         id: "proposal-001",
+        food_id: "food-chicken-breast-001",
         food_name: "chicken breast",
+        canonical_name: "chicken breast",
         portion_g: 200,
         meal_type: "lunch",
         created_at: "2026-07-05T12:00:00.000Z",
@@ -1729,7 +1739,9 @@ describe("write-proposal turn flow (issue #36)", () => {
           fat_g: 7.2,
           carbs_g: 0,
         },
-        nutrition_source: "USDA FoodData Central",
+        nutrition_source: "usda-sr-legacy-2026-07-v1",
+        match_type: "exact",
+        allergen_tags: [],
       },
       nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
       ...overrides,
@@ -1748,7 +1760,11 @@ describe("write-proposal turn flow (issue #36)", () => {
       proteinG: 62,
       fatG: 7.2,
       carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
+      nutritionSource: "usda-sr-legacy-2026-07-v1",
+      foodId: "food-chicken-breast-001",
+      canonicalName: "chicken breast",
+      matchType: "exact",
+      allergenTags: [],
       createdAt: "2026-07-05T12:00:00.000Z",
     });
   });
@@ -2199,6 +2215,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 7.2,
       carbsG: 0,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Now confirm it
@@ -2259,6 +2279,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 0.4,
       carbsG: 43,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     const input: TurnInput = {
@@ -2296,6 +2320,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 20,
       carbsG: 0,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // User B tries to confirm it
@@ -2346,6 +2374,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 9.5,
       carbsG: 0.7,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // First confirmation: succeeds
@@ -2434,6 +2466,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 1.5,
       carbsG: 65,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Reject it
@@ -2481,6 +2517,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 8,
       carbsG: 4,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     let generateCalled = false;
@@ -2569,6 +2609,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 7.2,
       carbsG: 0,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     const input: TurnInput = {
@@ -2602,6 +2646,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 7.2,
       carbsG: 0,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     const input: TurnInput = {
@@ -2634,6 +2682,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 2,
       carbsG: 30,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // First, reject it
@@ -2681,6 +2733,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 0.3,
       carbsG: 25,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Manually void the proposal (simulating void via store)
@@ -2731,6 +2787,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 4,
       carbsG: 12,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Manually expire the proposal (simulating time-based expiry)
@@ -2781,6 +2841,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 0.4,
       carbsG: 43,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Manually supersede the proposal (simulating supersede-on-edit)
@@ -2832,6 +2896,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 3.5,
       carbsG: 32,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     // Confirm it — no model call happens
@@ -2875,6 +2943,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
       fatG: 7.2,
       carbsG: 0,
       nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
     });
 
     const input: TurnInput = {

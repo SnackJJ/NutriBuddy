@@ -19,7 +19,7 @@ import {
 } from "@/lib/chatApi";
 import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
 import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
-import { createGetFoodNutrition } from "@/harness/foodNutrition";
+import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 import type {
   ProposalStore,
@@ -69,7 +69,9 @@ function createMemProposalStore(state: MemStoreState): ProposalStore {
       const proposal: Proposal = {
         id,
         userId: params.userId,
+        foodId: params.foodId,
         foodName: params.foodName,
+        canonicalName: params.canonicalName,
         portionG: params.portionG,
         mealType: params.mealType,
         kcal: params.kcal,
@@ -77,6 +79,8 @@ function createMemProposalStore(state: MemStoreState): ProposalStore {
         fatG: params.fatG,
         carbsG: params.carbsG,
         nutritionSource: params.nutritionSource,
+        matchType: params.matchType,
+        allergenTags: params.allergenTags,
         status: "proposed",
         createdAt: new Date().toISOString(),
       };
@@ -122,12 +126,14 @@ const memState: MemStoreState = { proposals: [], ledger: [] };
 const memProposalStore = createMemProposalStore(memState);
 const memMealLogStore = createMemMealLogStore(memState);
 
+// Module-level catalog (built once at cold start from seed data)
+const catalog = createCatalog(SEED_FOODS);
+
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
 function buildToolMap(sessionUserId: string): ReadonlyMap<string, ToolHandler> {
-  const getFoodNutrition = createGetFoodNutrition();
   const logMealHandler = createLogMealHandler({
-    getFoodNutrition,
+    catalog,
     proposalStore: memProposalStore,
     userId: sessionUserId,
   });

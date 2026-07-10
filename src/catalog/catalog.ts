@@ -129,19 +129,35 @@ export interface FoodRef {
   readonly matchScore: number;
 }
 
-/** The resolver's typed result for every lookup. */
-export interface ResolveResult {
-  /** Match classification. */
-  readonly matchType: MatchType;
-  /** Resolved FoodRef (null for all miss types). */
-  readonly foodRef: FoodRef | null;
+interface ResolveResultBase {
   /** Catalog snapshot identity for trace reproducibility. */
   readonly catalogSnapshotId: string;
-  /** Top-k candidates for ambiguous/low-confidence misses. */
-  readonly candidates?: readonly FoodRef[];
   /** The original query string. */
   readonly input: string;
 }
+
+/** A successful resolver hit with a catalog-minted FoodRef. */
+export interface ResolveHitResult extends ResolveResultBase {
+  /** Match classification. */
+  readonly matchType: FoodRef["matchType"];
+  /** Resolved FoodRef. */
+  readonly foodRef: FoodRef;
+  /** Hit results never carry clarification candidates. */
+  readonly candidates?: undefined;
+}
+
+/** A resolver miss that may carry clarification candidates. */
+export interface ResolveMissResult extends ResolveResultBase {
+  /** Match classification. */
+  readonly matchType: Exclude<MatchType, FoodRef["matchType"]>;
+  /** All miss types carry no resolved FoodRef. */
+  readonly foodRef: null;
+  /** Top-k candidates for ambiguous/low-confidence misses. */
+  readonly candidates?: readonly FoodRef[];
+}
+
+/** The resolver's typed result for every lookup. */
+export type ResolveResult = ResolveHitResult | ResolveMissResult;
 
 // ─── catalog container ─────────────────────────────────────────────────────
 
