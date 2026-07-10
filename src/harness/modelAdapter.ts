@@ -24,6 +24,51 @@ export const TIER_TO_MODEL_ID: Record<ModelTier, string> = {
   pro: "deepseek-v4-pro",
 };
 
+/**
+ * Per-MTok USD pricing, mirrored from the provider pricing page
+ * (https://api-docs.deepseek.com/quick_start/pricing). Refresh alongside
+ * TIER_TO_MODEL_ID when models change (issue #58 / ADD §Observability).
+ */
+export interface TierPricing {
+  readonly cacheHitPerMTok: number;
+  readonly cacheMissPerMTok: number;
+  readonly outputPerMTok: number;
+}
+
+export const TIER_PRICING_USD: Record<ModelTier, TierPricing> = {
+  flash: {
+    cacheHitPerMTok: 0.028,
+    cacheMissPerMTok: 0.28,
+    outputPerMTok: 0.42,
+  },
+  pro: {
+    cacheHitPerMTok: 0.07,
+    cacheMissPerMTok: 0.56,
+    outputPerMTok: 1.68,
+  },
+};
+
+const TOKENS_PER_MTOK = 1_000_000;
+
+/**
+ * Compute one model call's cost in USD from provider usage (issue #58).
+ * When the provider omits the cache split, all prompt tokens charge at
+ * the cache-miss rate.
+ */
+export function computeCostUsd(tier: ModelTier, usage: ModelUsage): number {
+  const pricing = TIER_PRICING_USD[tier];
+  const cacheHit = usage.cacheHitTokens ?? 0;
+  const cacheMiss =
+    usage.cacheMissTokens ?? Math.max(0, usage.promptTokens - cacheHit);
+
+  return (
+    (cacheHit * pricing.cacheHitPerMTok +
+      cacheMiss * pricing.cacheMissPerMTok +
+      usage.completionTokens * pricing.outputPerMTok) /
+    TOKENS_PER_MTOK
+  );
+}
+
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 const TOOL_ARGUMENT_PREVIEW_CHARS = 200;
 

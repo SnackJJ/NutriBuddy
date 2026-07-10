@@ -29,7 +29,7 @@ import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.4.0";
+export const SCHEMA_VERSION = "1.5.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
@@ -127,6 +127,8 @@ export interface TurnModelCallEvent extends TurnEvent {
   readonly usage?: ModelUsage;
   /** Round-trip latency in milliseconds (issue #51). */
   readonly latencyMs?: number;
+  /** Call cost in USD from usage and the tier pricing table (issue #58). */
+  readonly costUsd?: number;
 }
 
 export interface TurnEndEvent extends TurnEvent {
@@ -292,6 +294,7 @@ function parseModelCallPayload(
       thinking: obj.thinking,
       latencyMs: obj.latencyMs,
       usage: parseModelUsage(obj.usage) ?? null,
+      costUsd: typeof obj.costUsd === "number" ? obj.costUsd : null,
     };
   } catch {
     return null;
@@ -337,6 +340,7 @@ function createTurnModelCallEvent(
     thinking: payload.thinking,
     usage: payload.usage ?? undefined,
     latencyMs: payload.latencyMs,
+    costUsd: payload.costUsd ?? undefined,
   };
 }
 
@@ -844,6 +848,7 @@ function createRunTurnInput(
     userContext: ports.userContext,
     interactionStore: ports.interactionStore,
     queryCatalog: ports.queryCatalog,
+    clock: ports.clock,
   };
 }
 

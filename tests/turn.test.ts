@@ -27,6 +27,7 @@ import {
   type ToolHandler,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
+import { TIER_PRICING_USD } from "../src/harness/modelAdapter";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
 import type { Conflict } from "../src/harness/advisoryGate";
 import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
@@ -4185,7 +4186,7 @@ describe("turn event enrichment (issue #51)", () => {
     expect(startEvent.profileVersion).toBeUndefined();
   });
 
-  it("turn_start event schema is bumped to 1.4.0 for enriched fields", async () => {
+  it("turn_start event schema is bumped to 1.5.0 for enriched fields", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
     const ports = createPorts(() => ({ content: "ok", stop: true }));
 
@@ -4193,7 +4194,7 @@ describe("turn event enrichment (issue #51)", () => {
     const startEvent = expectStartEvent(events);
 
     expect(startEvent.schema).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe("1.4.0");
+    expect(SCHEMA_VERSION).toBe("1.5.0");
   });
 
   it("emits model_call events between thought and subsequent steps", async () => {
@@ -4366,6 +4367,58 @@ describe("turn event enrichment (issue #51)", () => {
       cacheHitTokens: 80,
       cacheMissTokens: 20,
     });
+  });
+
+  it("model_call events carry costUsd from the tier pricing table (issue #58)", async () => {
+    const usage = {
+      promptTokens: 100_000,
+      completionTokens: 50_000,
+      totalTokens: 150_000,
+      cacheHitTokens: 80_000,
+      cacheMissTokens: 20_000,
+    };
+    const adapter: ModelAdapter = {
+      generate: async () => ({ content: "ok", stop: true, usage }),
+    };
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(undefined, { adapter });
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    const pricing = TIER_PRICING_USD.flash;
+    const expected =
+      (usage.cacheHitTokens * pricing.cacheHitPerMTok +
+        usage.cacheMissTokens * pricing.cacheMissPerMTok +
+        usage.completionTokens * pricing.outputPerMTok) /
+      1_000_000;
+    expect(modelCallEvents[0]?.costUsd).toBeCloseTo(expected, 10);
+  });
+
+  it("model_call omits costUsd when the adapter reports no usage", async () => {
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    expect(modelCallEvents[0]?.costUsd).toBeUndefined();
+  });
+
+  it("loop latency derives from the injected clock port (issue #58)", async () => {
+    const fixed = new Date("2026-07-10T12:00:00Z");
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      clock: () => fixed,
+    });
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    expect(modelCallEvents[0]?.latencyMs).toBe(0);
+    for (const event of events) {
+      expect(event.timestamp).toBe(fixed.toISOString());
+    }
   });
 });
 
