@@ -13,11 +13,7 @@ import type {
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
 import { checkPostGate, type UserContext } from "./gate";
-import {
-  getInteractions,
-  type DrugNutrientInteraction,
-  type InteractionStore,
-} from "../lib/drugInteractions";
+import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import type { Observation } from "../catalog/queryCatalog";
 import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 
@@ -208,6 +204,11 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
  *  All checks — lexical backstop, numeric provenance, advisory structure —
  *  share one regenerate budget. */
 const MAX_OUTPUT_GATE_RETRIES = 2;
+const OUTPUT_LEXICAL_BACKSTOP_CHECK = "output_lexical_backstop";
+const OUTPUT_NUMERIC_PROVENANCE_CHECK = "output_numeric_provenance";
+const OUTPUT_ADVISORY_STRUCTURE_CHECK = "output_advisory_structure";
+const OUTPUT_GATE_SUMMARY_CHECK = "post_gate_output_check";
+const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
 function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
   return (
@@ -225,6 +226,133 @@ function consolidatedGateRefusalReply(reasons: readonly string[]): string {
     `after ${MAX_OUTPUT_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
     `Please consult a doctor or registered dietitian for personalized advice.`
   );
+}
+
+interface OutputGateCheck {
+  readonly verdict: GateVerdictEventDetails;
+  readonly reasons: readonly string[];
+}
+
+function createOutputGateCheck(
+  checkName: string,
+  passed: boolean,
+  reasons: readonly string[],
+  passEvidence: string,
+): OutputGateCheck {
+  return {
+    verdict: {
+      checkpoint: "output",
+      verdict: passed ? "pass" : "block",
+      checkName,
+      evidence: reasons.join("; ") || passEvidence,
+    },
+    reasons: passed ? [] : reasons,
+  };
+}
+
+function createLexicalBackstopCheck(
+  prose: string,
+  userContext: UserContext | undefined,
+  interactions: readonly DrugNutrientInteraction[],
+): OutputGateCheck | undefined {
+  if (!userContext) {
+    return undefined;
+  }
+
+  const check = checkPostGate(prose, userContext, interactions);
+  return createOutputGateCheck(
+    OUTPUT_LEXICAL_BACKSTOP_CHECK,
+    check.passed,
+    check.reasons,
+    NO_SAFETY_VIOLATIONS_EVIDENCE,
+  );
+}
+
+function createNumericProvenanceCheck(
+  output: TypedOutput,
+  observations: readonly Observation[],
+): OutputGateCheck {
+  const check = checkNumericProvenance({ output, observations });
+  const passEvidence =
+    observations.length > 0
+      ? "All numeric facts trace to observations"
+      : "No observations to check — numeric gate skipped";
+
+  return createOutputGateCheck(
+    OUTPUT_NUMERIC_PROVENANCE_CHECK,
+    check.passed,
+    check.reasons,
+    passEvidence,
+  );
+}
+
+function createAdvisoryStructureCheck(
+  output: TypedOutput,
+  conflicts: readonly Conflict[],
+): OutputGateCheck {
+  const check = checkAdvisoryStructure({ output, conflicts });
+  return createOutputGateCheck(
+    OUTPUT_ADVISORY_STRUCTURE_CHECK,
+    check.passed,
+    check.reasons,
+    "Advisory structure valid",
+  );
+}
+
+function outputTextForGate(result: TurnResult): string {
+  return result.output?.prose ?? result.reply;
+}
+
+function collectOutputGateChecks(
+  result: TurnResult,
+  userContext: UserContext | undefined,
+  observations: readonly Observation[],
+  conflicts: readonly Conflict[],
+): OutputGateCheck[] {
+  const checks: OutputGateCheck[] = [];
+  const lexicalCheck = createLexicalBackstopCheck(
+    outputTextForGate(result),
+    userContext,
+    result.interactions ?? [],
+  );
+
+  if (lexicalCheck) {
+    checks.push(lexicalCheck);
+  }
+
+  if (!result.output) {
+    return checks;
+  }
+
+  checks.push(
+    createNumericProvenanceCheck(result.output, observations),
+    createAdvisoryStructureCheck(result.output, conflicts),
+  );
+  return checks;
+}
+
+function failReasonsFromOutputChecks(
+  checks: readonly OutputGateCheck[],
+): readonly string[] {
+  return checks.flatMap((check) => check.reasons);
+}
+
+function createOutputGateBlockedResult(
+  result: TurnResult,
+  reasons: readonly string[],
+  tracer: TurnPorts["tracer"],
+): TurnResult {
+  tracer.record({
+    step: result.steps,
+    type: "gate_block",
+    payload: reasons.join("; "),
+  });
+
+  return {
+    reply: consolidatedGateRefusalReply(reasons),
+    steps: result.steps,
+    stopReason: "gate_blocked",
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -339,19 +467,7 @@ async function* runUtteranceTurn(
   const conflicts = ports.conflicts ?? [];
   let result: TurnResult | undefined;
   let lastWriteProposalData: WriteProposalData | undefined;
-
-  // Pre-compute drug-nutrient interactions once for the lexical backstop
-  // (same query that loop.ts's buildPreGateContext performs).
-  // This avoids a second DB round-trip and keeps the turn layer self-contained.
-  let preGateInteractions: readonly DrugNutrientInteraction[] = [];
-  if (ports.userContext && ports.interactionStore) {
-    preGateInteractions =
-      ports.userContext.medications.length > 0
-        ? await getInteractions(ports.userContext.medications, ports.interactionStore)
-        : [];
-  }
-
-  let allFailReasons: string[] = [];
+  let outputGateFailReasons: readonly string[] = [];
 
   for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
     const history: ChatMessage[] = [...(ports.history ?? [])];
@@ -362,7 +478,7 @@ async function* runUtteranceTurn(
         { role: "assistant", content: result.reply },
         {
           role: "user",
-          content: buildConsolidatedGateFeedback(allFailReasons),
+          content: buildConsolidatedGateFeedback(outputGateFailReasons),
         },
       );
     }
@@ -409,144 +525,33 @@ async function* runUtteranceTurn(
     // run together at the turn boundary with one retry budget and one
     // combined feedback message. The inner loop no longer re-gates.
 
-    // No typed output — lexical backstop only on prose
-    if (!result.output) {
-      if (ports.userContext) {
-        const lexicalCheck = checkPostGate(
-          result.reply,
-          ports.userContext,
-          preGateInteractions,
-        );
-
-        yield createGateVerdictEvent(
-          {
-            checkpoint: "output",
-            verdict: lexicalCheck.passed ? "pass" : "block",
-            checkName: "output_lexical_backstop",
-            evidence:
-              lexicalCheck.reasons.join("; ") || "No safety violations detected",
-          },
-          nextMetadata,
-        );
-
-        if (!lexicalCheck.passed) {
-          allFailReasons = [...lexicalCheck.reasons];
-
-          if (attempt < MAX_OUTPUT_GATE_RETRIES) {
-            continue; // retry
-          }
-
-          // Retries exhausted — refuse
-          ports.tracer.record({
-            step: result.steps,
-            type: "gate_block",
-            payload: allFailReasons.join("; "),
-          });
-          result = {
-            reply: consolidatedGateRefusalReply(allFailReasons),
-            steps: result.steps,
-            stopReason: "gate_blocked",
-          };
-        }
-      }
-      break;
-    }
-
-    // TypedOutput present — run all three checks
-    allFailReasons = [];
-
-    // (a) Lexical backstop — allergen/drug-nutrient word matching
-    if (ports.userContext) {
-      const lexicalCheck = checkPostGate(
-        result.output.prose,
-        ports.userContext,
-        preGateInteractions,
-      );
-
-      yield createGateVerdictEvent(
-        {
-          checkpoint: "output",
-          verdict: lexicalCheck.passed ? "pass" : "block",
-          checkName: "output_lexical_backstop",
-          evidence:
-            lexicalCheck.reasons.join("; ") || "No safety violations detected",
-        },
-        nextMetadata,
-      );
-
-      if (!lexicalCheck.passed) {
-        allFailReasons.push(...lexicalCheck.reasons);
-      }
-    }
-
-    // (b) Numeric provenance — every unit-attached number traces to an observation
-    const numericResult = checkNumericProvenance({
-      output: result.output,
+    const outputGateChecks = collectOutputGateChecks(
+      result,
+      ports.userContext,
       observations,
-    });
-
-    yield createGateVerdictEvent(
-      {
-        checkpoint: "output",
-        verdict: numericResult.passed ? "pass" : "block",
-        checkName: "output_numeric_provenance",
-        evidence:
-          numericResult.reasons.join("; ") ||
-          (observations.length > 0
-            ? "All numeric facts trace to observations"
-            : "No observations to check — numeric gate skipped"),
-      },
-      nextMetadata,
-    );
-
-    if (!numericResult.passed) {
-      allFailReasons.push(...numericResult.reasons);
-    }
-
-    // (c) Advisory structure — ruleRefs present when conflicts + foodRefs exist
-    const advisoryResult = checkAdvisoryStructure({
-      output: result.output,
       conflicts,
-    });
-
-    yield createGateVerdictEvent(
-      {
-        checkpoint: "output",
-        verdict: advisoryResult.passed ? "pass" : "block",
-        checkName: "output_advisory_structure",
-        evidence:
-          advisoryResult.reasons.join("; ") || "Advisory structure valid",
-      },
-      nextMetadata,
     );
 
-    if (!advisoryResult.passed) {
-      allFailReasons.push(...advisoryResult.reasons);
+    for (const check of outputGateChecks) {
+      yield createGateVerdictEvent(check.verdict, nextMetadata);
     }
 
-    // All checks passed — release
-    if (allFailReasons.length === 0) {
+    outputGateFailReasons = failReasonsFromOutputChecks(outputGateChecks);
+
+    if (outputGateFailReasons.length === 0) {
       break;
     }
 
-    // One or more checks failed
-    if (attempt >= MAX_OUTPUT_GATE_RETRIES) {
-      ports.tracer.record({
-        step: result.steps,
-        type: "gate_block",
-        payload: allFailReasons.join("; "),
-      });
-
-      // Retries exhausted — refuse
-      result = {
-        reply: consolidatedGateRefusalReply(allFailReasons),
-        steps: result.steps,
-        stopReason: "gate_blocked",
-      };
-      break;
+    if (attempt < MAX_OUTPUT_GATE_RETRIES) {
+      continue;
     }
 
-    // Will retry — feedback injected at top of next iteration
+    result = createOutputGateBlockedResult(
+      result,
+      outputGateFailReasons,
+      ports.tracer,
+    );
+    break;
   }
 
   return { result: result!, writeProposal: lastWriteProposalData };
@@ -853,7 +858,7 @@ export async function* turn(
       {
         checkpoint: "output",
         verdict: isGateBlocked ? "block" : "pass",
-        checkName: "post_gate_output_check",
+        checkName: OUTPUT_GATE_SUMMARY_CHECK,
         evidence: outputEvidence,
       },
       nextMetadata,
