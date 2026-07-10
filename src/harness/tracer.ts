@@ -9,6 +9,8 @@ export const TRACE_EVENT_TYPES = [
   "gate_block",
   "gate_exhausted",
   "tool_call",
+  "observation",
+  "model_call_usage",
 ] as const;
 
 export type TraceEventType = (typeof TRACE_EVENT_TYPES)[number];

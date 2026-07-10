@@ -288,6 +288,7 @@ describe("turn (utterance)", () => {
       "gate_verdict",
       "step",
       "step",
+      "model_call",
       "gate_verdict",
       "gate_verdict",
       "turn_end",
@@ -889,6 +890,7 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
       "gate_verdict",
       "step",
       "step",
+      "model_call",
       "gate_verdict",
       "gate_verdict",
       "turn_end",
@@ -3642,6 +3644,210 @@ describe("consolidated output gate (issue #47)", () => {
     // The consolidated gate should still block
     expect(result.stopReason).toBe("gate_blocked");
     expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── Issue #51: Event enrichment (catalogVersion, profileVersion, model_call) ─
+
+describe("turn event enrichment (issue #51)", () => {
+  it("turn_start event carries catalogVersion when provided in ports", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      catalogVersion: "usda-snapshot-2026-07-10",
+      profileVersion: "profile-v3",
+    });
+
+    const { events } = await collect(turn(input, ports));
+    const startEvent = expectStartEvent(events);
+
+    expect(startEvent.catalogVersion).toBe("usda-snapshot-2026-07-10");
+    expect(startEvent.profileVersion).toBe("profile-v3");
+  });
+
+  it("turn_start event omits catalogVersion and profileVersion when not provided", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+    const startEvent = expectStartEvent(events);
+
+    expect(startEvent.catalogVersion).toBeUndefined();
+    expect(startEvent.profileVersion).toBeUndefined();
+  });
+
+  it("turn_start event schema is bumped to 1.4.0 for enriched fields", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+    const startEvent = expectStartEvent(events);
+
+    expect(startEvent.schema).toBe(SCHEMA_VERSION);
+    expect(SCHEMA_VERSION).toBe("1.4.0");
+  });
+
+  it("emits model_call events between thought and subsequent steps", async () => {
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: "Looking up...",
+          stop: false,
+          toolCalls: [
+            { id: "call-1", name: "search_food", args: { food: "chicken" } },
+          ],
+        };
+      }
+      return { content: "Chicken has 31g protein per 100g.", stop: true };
+    });
+    const tools = new Map([
+      ["search_food", async () => "chicken: 31g protein/100g"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "chicken protein?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    const { events } = await collect(turn(input, ports));
+
+    const modelCallEvents = eventsOfType(events, "model_call");
+    // Two model calls — one per step
+    expect(modelCallEvents.length).toBeGreaterThanOrEqual(2);
+
+    // Each model_call carries step number
+    for (const mc of modelCallEvents) {
+      expect(mc.type).toBe("model_call");
+      expect(typeof mc.step).toBe("number");
+      expect(typeof mc.model).toBe("string");
+      expect(typeof mc.thinking).toBe("boolean");
+    }
+  });
+
+  it("model_call event shape is compatible with TurnEvent base", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    const modelCallEvents = eventsOfType(events, "model_call");
+    // At least one model call for the single-step turn
+    expect(modelCallEvents.length).toBeGreaterThanOrEqual(1);
+
+    for (const mc of modelCallEvents) {
+      expect(mc.schema).toBe(SCHEMA_VERSION);
+      expect(typeof mc.seq).toBe("number");
+      expect(typeof mc.timestamp).toBe("string");
+    }
+
+    // model_call appears after turn_start and in the step sequence
+    const seqs = modelCallEvents.map((mc) => mc.seq);
+    const startSeq = events.find((e) => e.type === "turn_start")!.seq;
+    for (const seq of seqs) {
+      expect(seq).toBeGreaterThan(startSeq);
+    }
+  });
+
+  it("model_call events are absent in proposal_confirm turns (no model calls)", async () => {
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: "p1",
+      confirmed: true,
+    };
+    const ports = createPorts();
+
+    const { events } = await collect(turn(input, ports));
+
+    const modelCallEvents = eventsOfType(events, "model_call");
+    expect(modelCallEvents).toHaveLength(0);
+  });
+
+  it("event stream includes model_call events in the AnyTurnEvent union type", async () => {
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+
+    // Every event should match one of the known types
+    const knownTypes = [
+      "turn_start",
+      "step",
+      "gate_verdict",
+      "model_call",
+      "turn_end",
+    ];
+    for (const event of events) {
+      expect(knownTypes).toContain(event.type);
+    }
+  });
+
+  it("scorer can iterate enriched event stream without regression", async () => {
+    // Simulate the eval scorer's consumption of the event stream
+    const adapter = stubAdapter(() => ({
+      content: "I recommend chicken for protein!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: { all: async () => [] },
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // The scorer reads these events — verify all expected types are present
+    expect(events.some((e) => e.type === "turn_start")).toBe(true);
+    expect(events.some((e) => e.type === "step")).toBe(true);
+    expect(events.some((e) => e.type === "gate_verdict")).toBe(true);
+    expect(events.some((e) => e.type === "model_call")).toBe(true);
+    expect(events.some((e) => e.type === "turn_end")).toBe(true);
+
+    // The result is still readable
+    expect(typeof result.reply).toBe("string");
+    expect(STOP_REASONS).toContain(result.stopReason);
+  });
+
+  it("tracer records model_call_usage events with structured payloads", async () => {
+    const tracer = new Tracer();
+    const input: TurnInput = { tag: "utterance", content: "hi" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      tracer,
+    });
+
+    await collect(turn(input, ports));
+
+    const usageEvents = tracer
+      .events()
+      .filter((e) => e.type === "model_call_usage");
+    expect(usageEvents.length).toBeGreaterThanOrEqual(1);
+
+    for (const ue of usageEvents) {
+      const payload: Record<string, unknown> = JSON.parse(ue.payload);
+      expect(typeof payload.model).toBe("string");
+      expect(typeof payload.thinking).toBe("boolean");
+      expect(typeof payload.latencyMs).toBe("number");
+    }
+  });
+
+  it("adapter stub responses can carry usage metadata", async () => {
+    // Verify that ModelResponse.usage field is type-compatible
+    const adapter: ModelAdapter = {
+      generate: async () => ({
+        content: "ok",
+        stop: true,
+        usage: {
+          promptTokens: 100,
+          completionTokens: 50,
+          totalTokens: 150,
+          cacheHitTokens: 80,
+          cacheMissTokens: 20,
+        },
+      }),
+    };
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(undefined, { adapter });
+
+    const { result } = await collect(turn(input, ports));
+    expect(result.reply).toBe("ok");
   });
 });
 

@@ -353,13 +353,29 @@ export async function* run(
     yield { type: "thought", step };
 
     // ── Act ──────────────────────────────────────────────────────────
+    const callStart = Date.now();
     const response = await adapter.generate({
       model: tier,
       thinking,
       messages,
       tools: toolSchemas,
     });
+    const latencyMs = Date.now() - callStart;
+
     tracer.record({ step, type: "model_return", payload: response.content });
+
+    // Issue #51: Record model call usage and latency in the tracer
+    // so the turn layer can emit TurnModelCallEvent for the event stream.
+    tracer.record({
+      step,
+      type: "model_call_usage",
+      payload: JSON.stringify({
+        model: tier,
+        thinking,
+        latencyMs,
+        usage: response.usage ?? null,
+      }),
+    });
 
     if (response.toolCalls && response.toolCalls.length > 0) {
       // ── Terminal: submit_answer ──────────────────────────────────

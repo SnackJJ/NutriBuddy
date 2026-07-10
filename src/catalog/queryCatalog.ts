@@ -331,6 +331,103 @@ export async function executeQuery(
   return { type: "observation", observation };
 }
 
+// ─── observation rendering and capping ──────────────────────────────────────
+
+/** Default max rows in the canonical observation text sent to the model. */
+export const MAX_OBSERVATION_ROWS = 25;
+
+/** Default max bytes in the canonical observation text sent to the model. */
+export const MAX_OBSERVATION_BYTES = 4096;
+
+/**
+ * Render a single observation row as a canonical text line.
+ * Columns are rendered as "name: value unit" for the model to read.
+ */
+export function renderObservationRow(
+  row: ObservationRow,
+  columns: readonly ColumnDef[],
+): string {
+  const parts: string[] = [];
+  for (const col of columns) {
+    const value = row[col.name];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    const unit = col.unit ? ` ${col.unit}` : "";
+    parts.push(`${col.name}: ${String(value)}${unit}`);
+  }
+  return parts.join(" | ");
+}
+
+/** Result of rendering an observation for model context. */
+export interface RenderedObservation {
+  /** Canonical text rendering (may be truncated). */
+  readonly text: string;
+  /** True when the rendering was truncated (rows or bytes capped). */
+  readonly truncated: boolean;
+  /** Number of rows rendered (≤ observation.rowCount). */
+  readonly renderedRows: number;
+}
+
+/**
+ * Render an observation as canonical text for model context.
+ *
+ * Applies top-K row cap and byte ceiling. When truncated, includes a notice
+ * so the model knows it's seeing a subset. Full fidelity is preserved in the
+ * session trace via the tracer.
+ */
+export function renderObservationText(
+  obs: Observation,
+  maxRows: number = MAX_OBSERVATION_ROWS,
+  maxBytes: number = MAX_OBSERVATION_BYTES,
+): RenderedObservation {
+  const header = `[query result: ${obs.templateId}]`;
+  const cappedRows = Math.min(obs.rows.length, maxRows);
+  const renderedRows: string[] = [header];
+
+  const truncatedByRows = maxRows < obs.rows.length;
+
+  for (let i = 0; i < cappedRows; i++) {
+    const line = renderObservationRow(obs.rows[i], obs.columns);
+    if (i === 0 && line.length > maxBytes) {
+      // First row alone exceeds byte ceiling — render just the first row truncated
+      const short = line.slice(0, maxBytes - 3) + "...";
+      renderedRows.push(
+        `[row 1 of ${obs.rowCount} truncated at ${maxBytes}B] ${short}`,
+      );
+      return { text: renderedRows.join("\n"), truncated: true, renderedRows: 1 };
+    }
+
+    const candidate = [...renderedRows, line].join("\n");
+    if (candidate.length > maxBytes) {
+      const omitted = obs.rowCount - i;
+      renderedRows.push(
+        `[${omitted} row(s) omitted — full data available in session trace]`,
+      );
+      return {
+        text: renderedRows.join("\n"),
+        truncated: true,
+        renderedRows: i,
+      };
+    }
+
+    renderedRows.push(line);
+  }
+
+  if (truncatedByRows) {
+    const omitted = obs.rowCount - cappedRows;
+    renderedRows.push(
+      `[${omitted} row(s) omitted — full data available in session trace]`,
+    );
+  }
+
+  return {
+    text: renderedRows.join("\n"),
+    truncated: truncatedByRows || (obs.truncated && obs.rowCount > 0),
+    renderedRows: cappedRows,
+  };
+}
+
 // ─── reviewed query templates ──────────────────────────────────────────────
 
 /**

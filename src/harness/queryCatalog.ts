@@ -10,8 +10,13 @@ import type {
   QueryResult,
   QueryRunner,
 } from "../catalog/queryCatalog";
-import { executeQuery, FOOD_LOOKUP_TEMPLATE } from "../catalog/queryCatalog";
+import {
+  executeQuery,
+  FOOD_LOOKUP_TEMPLATE,
+  renderObservationText,
+} from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
+import type { Tracer } from "./tracer";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +64,8 @@ export interface QueryCatalogHandlerDeps {
   readonly runner: QueryRunner;
   /** Authenticated user identity bound by the caller, not model-fillable. */
   readonly userId: string;
+  /** Optional tracer for recording full-fidelity observations (issue #51). */
+  readonly tracer?: Tracer;
 }
 
 // ─── Handler helpers ──────────────────────────────────────────────────────
@@ -104,7 +111,7 @@ function templateParams(
 export function createQueryCatalogHandler(
   deps: QueryCatalogHandlerDeps,
 ): ToolHandler {
-  const { queryCatalog, runner, userId } = deps;
+  const { queryCatalog, runner, userId, tracer } = deps;
 
   return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
     const templateId = args.template_id;
@@ -125,6 +132,31 @@ export function createQueryCatalogHandler(
         userId,
         runner,
       );
+
+      // ── Issue #51: Context-split observations ──────────────────────────
+      // Model gets canonical (possibly capped) text; full fidelity goes to
+      // the session trace via the tracer for offline consumers (eval, RL).
+      if (result.type === "observation") {
+        const rendered = renderObservationText(result.observation);
+
+        // Record full-fidelity observation in the tracer for eval/RL.
+        tracer?.record({
+          step: 0, // step set by the turn layer when consumed
+          type: "observation",
+          payload: JSON.stringify({
+            observation: result.observation,
+            truncated: rendered.truncated,
+            renderedRows: rendered.renderedRows,
+          }),
+        });
+
+        return JSON.stringify({
+          type: "observation",
+          text: rendered.text,
+          observation: result.observation,
+        });
+      }
+
       return JSON.stringify(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
