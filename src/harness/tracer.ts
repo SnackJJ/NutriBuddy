@@ -1,10 +1,10 @@
 // ⑦ Tracer：记录 turn 内每一步（模型看到什么 / 决定什么 / 返回什么）。
 // 早做可观测，debug 快十倍（PRD §10）。
 //
-// Issue #50：Tracer 降级为 turn 事件流的渲染 sink。`tool_call` 和
-// `gate_block` 不再由 loop/turn 直接录制，而是从 turn 事件流中提取。
-// 内部事件（user_input / model_prompt / model_return / max_steps_reached）
-// 仍由 loop 录制，保持 CLI trace 渲染等效。
+// Loop 仍直接记录内部事件；工具调用和 gate block 从 turn 事件流派生，
+// 再作为 render()/events() 可消费的 trace 事件暴露。
+
+import type { AnyTurnEvent } from "./turn";
 
 export const TRACE_EVENT_TYPES = [
   "user_input",
@@ -28,20 +28,50 @@ export interface TraceEvent extends TraceInput {
   readonly seq: number;
 }
 
-/**
- * Turn event sink payload：从 turn 事件流提取的可渲染信息。
- * 调用方（CLI / eval runner）从 AnyTurnEvent[] 中提取后喂入 tracer，
- * tracer 将其转换为等效的 TraceEvent 供 render() 消费。
- */
 export interface TurnEventSink {
-  /** 从 step (act) 事件提取的工具调用。 */
   readonly toolCalls: readonly {
-    step: number;
-    name: string;
-    args: Readonly<Record<string, unknown>>;
+    readonly step: number;
+    readonly name: string;
+    readonly args: Readonly<Record<string, unknown>>;
   }[];
-  /** 从 gate_verdict (verdict="block") 事件提取的拦截记录。 */
-  readonly gateBlocks: readonly { step: number; evidence: string }[];
+  readonly gateBlocks: readonly {
+    readonly step: number;
+    readonly evidence: string;
+  }[];
+}
+
+type TurnEventSinkToolCall = TurnEventSink["toolCalls"][number];
+type TurnEventSinkGateBlock = TurnEventSink["gateBlocks"][number];
+
+export function buildTurnEventSink(
+  events: readonly AnyTurnEvent[],
+  terminalStep: number,
+): TurnEventSink {
+  const toolCalls: TurnEventSinkToolCall[] = [];
+  const gateBlocks: TurnEventSinkGateBlock[] = [];
+
+  for (const event of events) {
+    if (
+      event.type === "step" &&
+      event.agentEvent.type === "act" &&
+      event.agentEvent.toolCall
+    ) {
+      toolCalls.push({
+        step: event.agentEvent.step,
+        name: event.agentEvent.toolCall.name,
+        args: event.agentEvent.toolCall.args,
+      });
+    }
+
+    if (event.type === "gate_verdict" && event.verdict === "block") {
+      gateBlocks.push({
+        step: terminalStep,
+        evidence: event.evidence,
+      });
+    }
+  }
+
+  return { toolCalls, gateBlocks };
 }
 
 export class Tracer {
@@ -52,10 +82,7 @@ export class Tracer {
     this.log.push({ ...event, seq: this.log.length });
   }
 
-  /**
-   * 喂入 turn 事件流提取的渲染信息。
-   * 调用方在 turn 完成后调用一次；重复调用以最后一次为准。
-   */
+  /** Replace the derived turn-event snapshot used by render()/events(). */
   sink(entries: TurnEventSink): void {
     this.sinkSnapshot = entries;
   }

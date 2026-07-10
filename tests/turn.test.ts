@@ -16,7 +16,7 @@ import {
 import {
   TRACE_EVENT_TYPES,
   Tracer,
-  type TurnEventSink,
+  buildTurnEventSink,
 } from "../src/harness/tracer";
 import {
   STOP_REASONS,
@@ -51,38 +51,6 @@ type TurnEventOf<T extends AnyTurnEvent["type"]> = Extract<
 
 function stubAdapter(impl: AdapterImpl): ModelAdapter {
   return { generate: async (req) => impl(req) };
-}
-
-/** Issue #50: 从 turn 事件流构建 tracer sink，用于测试中验证 tracer 渲染等效。 */
-function buildSinkFromTurnEvents(
-  events: readonly AnyTurnEvent[],
-  steps: number,
-): TurnEventSink {
-  const toolCalls: { step: number; name: string; args: Readonly<Record<string, unknown>> }[] = [];
-  const gateBlocks: { step: number; evidence: string }[] = [];
-
-  for (const event of events) {
-    if (
-      event.type === "step" &&
-      event.agentEvent.type === "act" &&
-      event.agentEvent.toolCall
-    ) {
-      toolCalls.push({
-        step: event.agentEvent.step,
-        name: event.agentEvent.toolCall.name,
-        args: event.agentEvent.toolCall.args,
-      });
-    }
-
-    if (event.type === "gate_verdict" && event.verdict === "block") {
-      gateBlocks.push({
-        step: steps,
-        evidence: event.evidence,
-      });
-    }
-  }
-
-  return { toolCalls, gateBlocks };
 }
 
 function createPorts(
@@ -1270,9 +1238,7 @@ describe("gate verdict events", () => {
 
       const { events, result } = await collect(turn(input, ports));
 
-      // Issue #50: tool_call 不再由 loop 直接录制到 tracer；
-      // 改为从 turn 事件流提取后经由 Tracer.sink() 喂入。
-      tracer.sink(buildSinkFromTurnEvents(events, result.steps));
+      tracer.sink(buildTurnEventSink(events, result.steps));
 
       const toolCallEvents = tracer
         .events()

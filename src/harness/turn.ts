@@ -188,16 +188,6 @@ function createToolGateVerdict(
   };
 }
 
-function extractGateEvidence(result: TurnResult): string {
-  // Issue #50: gate_block 不再由 tracer 直接录制，而是从 turn 事件流
-  // gate_verdict (verdict="block") 中获取。此处从已 blocked 的 result
-  // 构造简洁证据字符串；详细拦截原因在 gate_verdict 事件中。
-  if (result.stopReason === "gate_blocked") {
-    return `Output blocked by consolidated safety gate`;
-  }
-  return "No safety violations detected";
-}
-
 /** Max retry attempts for the consolidated output gate (issue #47).
  *  All checks — lexical backstop, numeric provenance, advisory structure —
  *  share one regenerate budget. */
@@ -339,9 +329,6 @@ function createOutputGateBlockedResult(
   result: TurnResult,
   reasons: readonly string[],
 ): TurnResult {
-  // Issue #50: gate_block 不再直接录制到 tracer；改为从 gate_verdict
-  // 事件流提取后经由 Tracer.sink() 喂入，保持 CLI trace 渲染等效。
-
   return {
     reply: consolidatedGateRefusalReply(reasons),
     steps: result.steps,
@@ -730,7 +717,7 @@ async function handleProposalConfirm(
 
 function createOutputEvidence(result: TurnResult): string {
   if (result.stopReason === "gate_blocked") {
-    return extractGateEvidence(result);
+    return "Output blocked by consolidated safety gate";
   }
 
   if (result.stopReason === "write_proposal") {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { Tracer } from "../src/harness/tracer";
+import { buildTurnEventSink, Tracer } from "../src/harness/tracer";
+import type { AnyTurnEvent } from "../src/harness/turn";
 
 describe("Tracer", () => {
   it("records events in order with an increasing sequence number", () => {
@@ -32,5 +33,53 @@ describe("Tracer", () => {
 
     tracer.events().pop();
     expect(tracer.events()).toHaveLength(1);
+  });
+
+  it("builds renderable sink entries from turn events", () => {
+    const baseEvent = {
+      schema: "1.3.0",
+      timestamp: "2026-07-05T12:00:00.000Z",
+    };
+    const events: AnyTurnEvent[] = [
+      {
+        ...baseEvent,
+        seq: 0,
+        type: "step",
+        agentEvent: {
+          type: "act",
+          step: 2,
+          toolCall: {
+            id: "call-1",
+            name: "search_food",
+            args: { food: "chicken" },
+          },
+        },
+      },
+      {
+        ...baseEvent,
+        seq: 1,
+        type: "gate_verdict",
+        checkpoint: "output",
+        verdict: "block",
+        checkName: "post_gate_output_check",
+        evidence: "blocked food",
+      },
+    ];
+
+    expect(buildTurnEventSink(events, 3)).toEqual({
+      toolCalls: [
+        {
+          step: 2,
+          name: "search_food",
+          args: { food: "chicken" },
+        },
+      ],
+      gateBlocks: [
+        {
+          step: 3,
+          evidence: "blocked food",
+        },
+      ],
+    });
   });
 });

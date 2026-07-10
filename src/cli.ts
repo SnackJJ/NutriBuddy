@@ -7,7 +7,7 @@
 // API key 从环境变量 DEEPSEEK_API_KEY 读取（对齐 .sandcastle/.env）。
 
 import { consumeTurn, turn, type AnyTurnEvent } from "./harness/turn";
-import { Tracer, type TurnEventSink } from "./harness/tracer";
+import { buildTurnEventSink, Tracer } from "./harness/tracer";
 import type { EventLog } from "./harness/eventLog";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
 import type { ModelAdapter } from "./harness/types";
@@ -28,41 +28,6 @@ export interface CliDeps {
   readonly stdout?: (s: string) => void;
   readonly stderr?: (s: string) => void;
   readonly readStdin?: () => Promise<string>;
-}
-
-/**
- * Issue #50: 从 turn 事件流提取工具调用和 gate 拦截信息，
- * 构建 Tracer 渲染 sink。
- */
-function buildSinkFromTurnEvents(
-  events: readonly AnyTurnEvent[],
-  steps: number,
-): TurnEventSink {
-  const toolCalls: { step: number; name: string; args: Readonly<Record<string, unknown>> }[] = [];
-  const gateBlocks: { step: number; evidence: string }[] = [];
-
-  for (const event of events) {
-    if (
-      event.type === "step" &&
-      event.agentEvent.type === "act" &&
-      event.agentEvent.toolCall
-    ) {
-      toolCalls.push({
-        step: event.agentEvent.step,
-        name: event.agentEvent.toolCall.name,
-        args: event.agentEvent.toolCall.args,
-      });
-    }
-
-    if (event.type === "gate_verdict" && event.verdict === "block") {
-      gateBlocks.push({
-        step: steps,
-        evidence: event.evidence,
-      });
-    }
-  }
-
-  return { toolCalls, gateBlocks };
 }
 
 export async function main(
@@ -86,8 +51,6 @@ export async function main(
   // adapter 延迟到确有输入时才构造：缺 key 时真实 adapter 会抛，空输入路径不应触发。
   const adapter = deps.adapter ?? new DeepSeekAdapter();
 
-  // Issue #50: 收集 turn 事件流，提取工具调用和 gate 拦截信息喂入 tracer sink，
-  // 使 tracer.render() 的 CLI trace 输出保持等效。
   const turnEvents: AnyTurnEvent[] = [];
 
   const result = await consumeTurn(
@@ -98,7 +61,7 @@ export async function main(
     (event) => turnEvents.push(event),
   );
 
-  tracer.sink(buildSinkFromTurnEvents(turnEvents, result.steps));
+  tracer.sink(buildTurnEventSink(turnEvents, result.steps));
 
   stdout(`${result.reply}\n`);
 
