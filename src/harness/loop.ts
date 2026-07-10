@@ -42,74 +42,95 @@ const MAX_POST_GATE_RETRIES = 2;
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CODE_ACT_TOOL = "code_act";
 
-// ─── Tool argument schema validation (issue #45) ─────────────────────────
-//
-// Validates model-supplied arguments against the tool's declared JSON Schema
-// (from ToolSchema.function.parameters). The provider's strict schema mode is
-// Beta-only and unreliable; this harness-side check ensures arguments conform
-// before dispatch. Returns null on success, or an error message on failure.
-
-interface PropertyDef {
+interface ToolPropertySchema {
   readonly type?: string;
   readonly enum?: readonly unknown[];
   readonly description?: string;
 }
 
-interface SchemaParams {
+interface ToolParameterSchema {
   readonly type?: string;
-  readonly properties?: Record<string, PropertyDef>;
+  readonly properties?: Record<string, ToolPropertySchema>;
   readonly required?: readonly string[];
+}
+
+function validateArgType(
+  name: string,
+  value: unknown,
+  expectedType: string | undefined,
+): string | null {
+  switch (expectedType) {
+    case "string":
+      return typeof value === "string"
+        ? null
+        : `argument "${name}" must be a string, got ${typeof value}`;
+    case "number":
+      return typeof value === "number"
+        ? null
+        : `argument "${name}" must be a number, got ${typeof value}`;
+    case "boolean":
+      return typeof value === "boolean"
+        ? null
+        : `argument "${name}" must be a boolean, got ${typeof value}`;
+    default:
+      return null;
+  }
+}
+
+function validateEnumValue(
+  name: string,
+  value: unknown,
+  allowedValues: readonly unknown[] | undefined,
+): string | null {
+  if (!allowedValues || allowedValues.length === 0) {
+    return null;
+  }
+
+  if (allowedValues.includes(value)) {
+    return null;
+  }
+
+  const allowed = allowedValues.map(String).join(", ");
+  return `argument "${name}" value "${String(value)}" not in allowed enum: [${allowed}]`;
 }
 
 function validateArgs(
   args: Readonly<Record<string, unknown>>,
   schema: ToolSchema,
 ): string | null {
-  const params = schema.function.parameters as SchemaParams;
+  const params = schema.function.parameters as ToolParameterSchema;
 
-  // Required fields
   const required = params.required ?? [];
-  for (const key of required) {
-    if (!(key in args)) {
-      const missing = required.filter((k) => !(k in args));
-      return `missing required argument(s): ${missing.join(", ")}`;
-    }
+  const missing = required.filter((key) => !(key in args));
+  if (missing.length > 0) {
+    return `missing required argument(s): ${missing.join(", ")}`;
   }
 
-  // Property types and enum constraints
   const properties = params.properties ?? {};
-  for (const [key, value] of Object.entries(args)) {
-    const propDef = properties[key];
-    if (!propDef) continue; // extra properties are forwarded (lenient)
-
-    const propType = propDef.type;
-    if (propType === "string" && typeof value !== "string") {
-      return `argument "${key}" must be a string, got ${typeof value}`;
-    }
-    if (propType === "number" && typeof value !== "number") {
-      // JSON Schema "number" accepts both JS number and integer
-      return `argument "${key}" must be a number, got ${typeof value}`;
-    }
-    if (propType === "boolean" && typeof value !== "boolean") {
-      return `argument "${key}" must be a boolean, got ${typeof value}`;
+  for (const [name, value] of Object.entries(args)) {
+    const property = properties[name];
+    if (!property) {
+      continue;
     }
 
-    // Enum constraint
-    if (propDef.enum && propDef.enum.length > 0) {
-      if (!propDef.enum.includes(value)) {
-        const allowed = propDef.enum.map(String).join(", ");
-        return `argument "${key}" value "${String(value)}" not in allowed enum: [${allowed}]`;
-      }
+    const typeError = validateArgType(name, value, property.type);
+    if (typeError) {
+      return typeError;
+    }
+
+    const enumError = validateEnumValue(name, value, property.enum);
+    if (enumError) {
+      return enumError;
     }
   }
 
   return null;
 }
 
-/**
- * Dispatch a tool call: validate args against the declared schema, then
- * invoke the handler. Returns the result and whether the dispatch was valid.
- */
+function toolDispatchError(name: string, result: string): ToolResult {
+  return { name, result, dispatchError: true };
+}
+
 async function dispatchTool(
   toolCall: ToolCall,
   tools: ReadonlyMap<string, ToolHandler> | undefined,
@@ -117,11 +138,8 @@ async function dispatchTool(
   tracer: Tracer,
   step: number,
 ): Promise<ToolResult> {
-  const schema = toolSchemas?.find(
-    (s) => s.function.name === toolCall.name,
-  );
+  const schema = toolSchemas?.find((s) => s.function.name === toolCall.name);
 
-  // Record tool_call trace event for scorer visibility
   tracer.record({
     step,
     type: "tool_call",
@@ -131,23 +149,24 @@ async function dispatchTool(
     }),
   });
 
-  // Unknown tool
   const handler = tools?.get(toolCall.name);
   if (!handler) {
-    const errorMsg = `tool "${toolCall.name}" not found — no handler registered`;
-    return { name: toolCall.name, result: errorMsg, dispatchError: true };
+    return toolDispatchError(
+      toolCall.name,
+      `tool "${toolCall.name}" not found — no handler registered`,
+    );
   }
 
-  // Schema validation (only when a schema is declared)
   if (schema) {
     const validationError = validateArgs(toolCall.args, schema);
     if (validationError) {
-      const errorMsg = `argument validation failed for "${toolCall.name}": ${validationError}`;
-      return { name: toolCall.name, result: errorMsg, dispatchError: true };
+      return toolDispatchError(
+        toolCall.name,
+        `argument validation failed for "${toolCall.name}": ${validationError}`,
+      );
     }
   }
 
-  // Valid dispatch: call handler
   const result = await handler(toolCall.args);
   return { name: toolCall.name, result };
 }
@@ -358,9 +377,7 @@ export async function* run(
           toolResult,
         };
 
-        working.push(
-          createToolResultMessage(tc, toolResult.result),
-        );
+        working.push(createToolResultMessage(tc, toolResult.result));
       }
       // 工具调用后继续循环（不在此步交卷）
       continue;

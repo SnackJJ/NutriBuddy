@@ -6,6 +6,7 @@ import type {
   AgentEvent,
   ChatMessage,
   TerminalResult,
+  ToolResult,
   TypedOutput,
   WriteProposalData,
 } from "./types";
@@ -121,6 +122,7 @@ type GateVerdictEventDetails = Pick<
 type CommitGateVerdict = Omit<GateVerdictEventDetails, "checkpoint">;
 
 const COMMIT_GATE_CHECK = "commit_gate_check";
+const TOOL_GATE_CHECK = "tool_gate_check";
 
 function createEventMetadata(clock: Clock): NextEventMetadata {
   let seq = 0;
@@ -161,6 +163,26 @@ function createGateVerdictEvent(
     ...nextMetadata(),
     type: "gate_verdict",
     ...details,
+  };
+}
+
+function createToolGateVerdict(
+  toolResult: ToolResult,
+): GateVerdictEventDetails {
+  if (toolResult.dispatchError) {
+    return {
+      checkpoint: "tool",
+      verdict: "error",
+      checkName: TOOL_GATE_CHECK,
+      evidence: `Tool ${toolResult.name} dispatch error: ${toolResult.result}`,
+    };
+  }
+
+  return {
+    checkpoint: "tool",
+    verdict: "pass",
+    checkName: TOOL_GATE_CHECK,
+    evidence: `Tool ${toolResult.name} executed successfully`,
   };
 }
 
@@ -317,16 +339,8 @@ async function* runUtteranceTurn(
 
       // Emit tool gate verdict after each tool observation
       if (next.value.type === "observe" && next.value.toolResult) {
-        const dispatchOk = !next.value.toolResult.dispatchError;
         yield createGateVerdictEvent(
-          {
-            checkpoint: "tool",
-            verdict: dispatchOk ? "pass" : "error",
-            checkName: "tool_gate_check",
-            evidence: dispatchOk
-              ? `Tool ${next.value.toolResult.name} executed successfully`
-              : `Tool ${next.value.toolResult.name} dispatch error: ${next.value.toolResult.result}`,
-          },
+          createToolGateVerdict(next.value.toolResult),
           nextMetadata,
         );
 
