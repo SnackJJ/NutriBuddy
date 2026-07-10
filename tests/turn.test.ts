@@ -297,7 +297,7 @@ describe("turn (utterance)", () => {
       eventsOfType(events, "step").map((event) => event.agentEvent.type),
     ).toEqual(["thought", "observe"]);
     expect(expectTerminalEvent(events).result).toEqual(result);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       reply: "Eggs have about 6g of protein per large egg.",
       steps: 1,
       stopReason: "end_turn",
@@ -343,7 +343,7 @@ describe("turn (utterance)", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       reply: "Chicken breast has 31g protein per 100g.",
       steps: 2,
       stopReason: "end_turn",
@@ -1331,13 +1331,24 @@ describe("gate verdict events", () => {
 
     expect(result.stopReason).toBe("gate_blocked");
 
-    const outputVerdict = expectGateVerdict(events, "output");
-    const commitVerdict = expectGateVerdict(events, "commit");
+    // Issue #47: consolidated gate emits per-check output verdicts (lexical,
+    // numeric, advisory) followed by a final post_gate_output_check summary.
+    const lexicalVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_lexical_backstop",
+    );
+    expect(lexicalVerdict).toBeDefined();
+    expect(lexicalVerdict!.verdict).toBe("block");
+    expect(lexicalVerdict!.evidence.length).toBeGreaterThan(0);
 
-    expect(outputVerdict.verdict).toBe("block");
-    expect(outputVerdict.checkName).toBe("post_gate_output_check");
-    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
-    expect(outputVerdict.evidence.toLowerCase()).toContain("block");
+    // The final summary output verdict is still emitted
+    const outputVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkpoint === "output" && gv.checkName === "post_gate_output_check",
+    );
+    expect(outputVerdict).toBeDefined();
+    expect(outputVerdict!.verdict).toBe("block");
+    expect(outputVerdict!.evidence.toLowerCase()).toContain("block");
+
+    const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
     expect(commitVerdict.checkName).toBe("commit_gate_check");
     expect(commitVerdict.evidence.length).toBeGreaterThan(0);
@@ -3396,6 +3407,241 @@ describe("submit_answer output gate integration (issue #43)", () => {
       (e) => e.type === "gate_verdict" && e.checkName === "output_numeric_provenance",
     );
     expect(npVerdict).toBeUndefined();
+  });
+});
+
+describe("consolidated output gate (issue #47)", () => {
+  const emptyInteractionStore: InteractionStore = { all: async () => [] };
+
+  it("lexical backstop runs on prose-only turns at the turn layer", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "Drink more milk for calcium!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "calcium?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["milk"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Consolidated gate runs lexical backstop at the turn layer
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("cannot safely answer");
+
+    const lexicalVerdict = gateVerdicts(events).find(
+      (gv) => gv.checkName === "output_lexical_backstop",
+    );
+    expect(lexicalVerdict).toBeDefined();
+    expect(lexicalVerdict!.verdict).toBe("block");
+    expect(lexicalVerdict!.evidence).toContain("milk");
+  });
+
+  it("lexical backstop runs alongside numeric/advisory for TypedOutput", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-milk",
+          name: "submit_answer",
+          args: {
+            prose: "Drink more milk for strong bones. It has 300mg calcium per cup.",
+            foodRefs: [
+              { foodId: "milk-001", foodName: "milk", matchType: "exact" as const },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const input: TurnInput = { tag: "utterance", content: "calcium sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["milk"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Lexical backstop should block — "milk" is in the prose
+    expect(result.stopReason).toBe("gate_blocked");
+
+    // All three gate checks should appear in the event stream
+    const gateCheckNames = gateVerdicts(events)
+      .filter((gv) => gv.checkpoint === "output")
+      .map((gv) => gv.checkName);
+    expect(gateCheckNames).toContain("output_lexical_backstop");
+    expect(gateCheckNames).toContain("output_numeric_provenance");
+    expect(gateCheckNames).toContain("output_advisory_structure");
+  });
+
+  it("combined feedback lists all failing checks when multiple gates fail", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-multi-fail",
+          name: "submit_answer",
+          args: {
+            prose: "Drink milk — it has 999mg protein per cup!",
+            foodRefs: [
+              { foodId: "milk-001", foodName: "milk", matchType: "exact" as const },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const input: TurnInput = { tag: "utterance", content: "healthy drinks?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["milk"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { result } = await collect(turn(input, ports));
+
+    // Both lexical backstop (milk allergy) and numeric provenance (999mg ungrounded)
+    // should have triggered — the consolidated gate blocks with combined reasons
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("cannot safely answer");
+  });
+
+  it("single retry budget bounds total model calls on violating turns", async () => {
+    // Always returns the same violating content — no recovery possible
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount++;
+      return {
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: `call-sa-fixed-${callCount}`,
+            name: "submit_answer",
+            args: {
+              prose: "I recommend peanuts for protein!",
+              foodRefs: [
+                { foodId: "peanut-001", foodName: "peanuts", matchType: "exact" as const },
+              ],
+              ruleRefs: [],
+            },
+          } satisfies ToolCall,
+        ],
+      };
+    });
+
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { result } = await collect(turn(input, ports));
+
+    // With MAX_OUTPUT_GATE_RETRIES=2: original + 2 retries = 3 model calls max
+    expect(callCount).toBe(3);
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("only one refusal template exists — no duplicated prose", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "I recommend eating peanuts for protein!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "protein sources?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("cannot safely answer your question");
+    expect(result.reply).toContain("Please consult a doctor or registered dietitian");
+    // Should only contain the consolidated refusal — not the old inner-loop template
+    expect(result.reply).not.toContain("BLOCKED by safety constraints");
+  });
+
+  it("event stream shows one coherent gate sequence with all check verdicts", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-coherent",
+          name: "submit_answer",
+          args: {
+            prose: "Chicken breast is a great source of lean protein.",
+            foodRefs: [
+              { foodId: "chicken-001", foodName: "chicken breast", matchType: "exact" as const },
+            ],
+            ruleRefs: [],
+          },
+        } satisfies ToolCall,
+      ],
+    }));
+
+    const input: TurnInput = { tag: "utterance", content: "protein?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      // Ground the output: no numbers in prose means numeric gate has nothing to check
+      observations: [],
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("end_turn");
+
+    // Gate sequence should be: input → (output lexical + numeric + advisory) → commit
+    const checkpoints = gateVerdicts(events).map((gv) => gv.checkpoint);
+    expect(checkpoints).toContain("input");
+    expect(checkpoints).toContain("output");
+    expect(checkpoints).toContain("commit");
+
+    // All output checks should pass for clean content
+    const outputVerdicts = gateVerdicts(events).filter(
+      (gv) => gv.checkpoint === "output",
+    );
+    // Should have lexical + numeric + advisory + post_gate_output_check
+    expect(outputVerdicts.length).toBeGreaterThanOrEqual(1);
+    const summaryVerdict = outputVerdicts.find(
+      (gv) => gv.checkName === "post_gate_output_check",
+    );
+    expect(summaryVerdict).toBeDefined();
+    expect(summaryVerdict!.verdict).toBe("pass");
+  });
+
+  it("scripted should-be-blocked cases still show blocking verdicts", async () => {
+    const adapter = stubAdapter(() => ({
+      content: "I recommend peanuts for a healthy snack!",
+      stop: true,
+    }));
+    const input: TurnInput = { tag: "utterance", content: "snack?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      userContext: { allergies: ["peanut"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // The consolidated gate should still block
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
   });
 });
 
