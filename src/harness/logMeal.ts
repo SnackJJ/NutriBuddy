@@ -109,6 +109,12 @@ export interface MealLogEntry {
   readonly carbsG: number;
   /** The committed proposal that authorised this write (issue #37). */
   readonly proposalId: string;
+  /** Resolver-minted food id copied from the proposal (issue #59). Legacy rows lack it. */
+  readonly foodId?: string;
+  /** Resolver match type copied from the proposal (issue #59). */
+  readonly matchType?: string;
+  /** Allergen tags copied from the proposal (issue #59). */
+  readonly allergenTags?: readonly string[];
 }
 
 /** 插入餐食记录所需的参数（不含 id / loggedAt，由 store 生成）。 */
@@ -126,6 +132,12 @@ export interface MealLogInsert {
    * Meal ledger rows always reference their source proposal (issue #37).
    */
   readonly proposalId: string;
+  /** Resolver-minted food id from the committed proposal (issue #59). */
+  readonly foodId: string;
+  /** Resolver match type from the committed proposal (issue #59). */
+  readonly matchType: string;
+  /** Allergen tags from the committed proposal (issue #59). */
+  readonly allergenTags: readonly string[];
 }
 
 /** 餐食存储端口。可注入 Supabase 实现或单测 mock。 */

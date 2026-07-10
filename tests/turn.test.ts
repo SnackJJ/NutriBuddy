@@ -268,6 +268,9 @@ function memMealLogStore(state?: MemMealLedgerState): {
           fatG: params.fatG,
           carbsG: params.carbsG,
           proposalId: params.proposalId,
+          foodId: params.foodId,
+          matchType: params.matchType,
+          allergenTags: params.allergenTags,
         };
         s.entries.push(entry);
         return entry;
@@ -2656,6 +2659,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(entry.carbsG).toBe(0);
     // The meal ledger row references the committed proposal id
     expect(entry.proposalId).toBe(proposal.id);
+    // Entity lineage copied from the committed proposal (issue #59)
+    expect(entry.foodId).toBe("food-test-001");
+    expect(entry.matchType).toBe("exact");
+    expect(entry.allergenTags).toEqual([]);
 
     // Commit gate verdict passes
     const commitVerdict = expectGateVerdict(events, "commit");

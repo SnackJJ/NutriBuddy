@@ -23,6 +23,9 @@ interface MealLogDbRow {
   readonly fat_g: number;
   readonly carbs_g: number;
   readonly proposal_id: string;
+  readonly food_id: string | null;
+  readonly match_type: string | null;
+  readonly allergen_tags: string[] | null;
   readonly created_at: string;
 }
 
@@ -39,6 +42,9 @@ function rowToEntry(row: MealLogDbRow): MealLogEntry {
     fatG: row.fat_g,
     carbsG: row.carbs_g,
     proposalId: row.proposal_id,
+    foodId: row.food_id ?? undefined,
+    matchType: row.match_type ?? undefined,
+    allergenTags: row.allergen_tags ?? undefined,
   };
 }
 
@@ -62,6 +68,9 @@ export function createSupabaseMealLogStore(
           fat_g: params.fatG,
           carbs_g: params.carbsG,
           proposal_id: params.proposalId,
+          food_id: params.foodId,
+          match_type: params.matchType,
+          allergen_tags: [...params.allergenTags],
         })
         .select()
         .single();

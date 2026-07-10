@@ -920,6 +920,9 @@ async function insertMealLogFromProposal(
     fatG: proposal.fatG,
     carbsG: proposal.carbsG,
     proposalId: proposal.id,
+    foodId: proposal.foodId,
+    matchType: proposal.matchType,
+    allergenTags: proposal.allergenTags,
   });
 }
 
