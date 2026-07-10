@@ -1205,6 +1205,100 @@ describe("gate verdict events", () => {
       expect(passVerdicts.length).toBe(0);
     });
 
+    describe("typed handler results (issue #56)", () => {
+      function toolCallAdapter(toolName: string) {
+        let callCount = 0;
+        return stubAdapter(() => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              content: "Calling tool...",
+              stop: false,
+              toolCalls: [{ id: "call-1", name: toolName, args: {} }],
+            };
+          }
+          return { content: "Recovered.", stop: true };
+        });
+      }
+
+      it("emits error verdict for query_catalog typed error results", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "query_catalog",
+            async () =>
+              JSON.stringify({
+                type: "error",
+                templateId: "invented_template",
+                message: "Unknown template: invented_template",
+                availableTemplates: ["food_lookup"],
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "kcal?" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("query_catalog"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("error");
+        expect(toolVerdict.evidence).toContain("typed error");
+        expect(toolVerdict.evidence).toContain("Unknown template");
+      });
+
+      it("emits error verdict for log_meal typed argument errors", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "log_meal",
+            async () =>
+              JSON.stringify({
+                error:
+                  "missing or invalid portion_g: must be a positive number (grams)",
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "log it" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("log_meal"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("error");
+        expect(toolVerdict.evidence).toContain("typed error");
+      });
+
+      it("emits pass verdict with miss evidence for resolver misses", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "log_meal",
+            async () =>
+              JSON.stringify({
+                error: 'food not found in catalog: "dragonfruit"',
+                match_type: "miss_unknown",
+                catalog_snapshot: "test-snapshot",
+                message: "Try a different name or check the spelling.",
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "log df" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("log_meal"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("pass");
+        expect(toolVerdict.evidence).toContain("typed miss");
+      });
+    });
+
     it("tracer records tool_call events for dispatched tools", async () => {
       let callCount = 0;
       const adapter = stubAdapter(() => {

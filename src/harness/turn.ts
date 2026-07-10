@@ -340,6 +340,46 @@ function createTurnModelCallEvent(
   };
 }
 
+/**
+ * Typed handler results the tool gate distinguishes (issue #56):
+ * - typed_error: the handler returned a structured error (query_catalog
+ *   `{type:"error"}`, log_meal `{error:...}`) — verdict "error".
+ * - typed_miss: a resolver miss carrying `match_type: miss_*` — the designed
+ *   clarification flow (#44), verdict "pass" with distinguishing evidence.
+ */
+interface ParsedHandlerResult {
+  readonly kind: "typed_error" | "typed_miss";
+  readonly message: string;
+}
+
+function parseHandlerResult(result: string): ParsedHandlerResult | null {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    if (parsed.type === "error") {
+      const message = readString(parsed, "message");
+      return { kind: "typed_error", message: message ?? "typed error result" };
+    }
+
+    const error = readString(parsed, "error");
+    if (error === undefined) {
+      return null;
+    }
+
+    const matchType = readString(parsed, "match_type");
+    if (matchType?.startsWith("miss_")) {
+      return { kind: "typed_miss", message: error };
+    }
+
+    return { kind: "typed_error", message: error };
+  } catch {
+    return null;
+  }
+}
+
 function createToolGateVerdict(
   toolResult: ToolResult,
 ): GateVerdictEventDetails {
@@ -349,6 +389,26 @@ function createToolGateVerdict(
       verdict: "error",
       checkName: TOOL_GATE_CHECK,
       evidence: `Tool ${toolResult.name} dispatch error: ${toolResult.result}`,
+    };
+  }
+
+  const handlerResult = parseHandlerResult(toolResult.result);
+
+  if (handlerResult?.kind === "typed_error") {
+    return {
+      checkpoint: "tool",
+      verdict: "error",
+      checkName: TOOL_GATE_CHECK,
+      evidence: `Tool ${toolResult.name} returned a typed error: ${handlerResult.message}`,
+    };
+  }
+
+  if (handlerResult?.kind === "typed_miss") {
+    return {
+      checkpoint: "tool",
+      verdict: "pass",
+      checkName: TOOL_GATE_CHECK,
+      evidence: `Tool ${toolResult.name} returned a typed miss (clarification): ${handlerResult.message}`,
     };
   }
 
