@@ -26,7 +26,7 @@ import {
   type GateCheckpoint,
   type GateVerdict,
 } from "../harness/turn";
-import { Tracer } from "../harness/tracer";
+import { Tracer, type TurnEventSink } from "../harness/tracer";
 import type {
   ModelAdapter,
   ToolHandler,
@@ -177,12 +177,40 @@ function recordTurnEvent(signals: TurnEventSignals, event: AnyTurnEvent): void {
   }
 }
 
-function countGateBlocks(gateVerdictBlocks: number, tracer: Tracer): number {
-  return Math.max(gateVerdictBlocks, countTracerGateBlocks(tracer));
-}
+/**
+ * Issue #50: 从 turn 事件流提取工具调用和 gate 拦截信息，构建 tracer 渲染 sink。
+ * Gate block 现在仅从 gate_verdict (verdict="block") 事件计数，消除原先的
+ * Math.max 双重计数 workaround。
+ */
+function buildSinkFromTurnEvents(
+  events: readonly AnyTurnEvent[],
+  steps: number,
+): TurnEventSink {
+  const toolCalls: { step: number; name: string; args: Readonly<Record<string, unknown>> }[] = [];
+  const gateBlocks: { step: number; evidence: string }[] = [];
 
-function countTracerGateBlocks(tracer: Tracer): number {
-  return tracer.events().filter((event) => event.type === "gate_block").length;
+  for (const event of events) {
+    if (
+      event.type === "step" &&
+      event.agentEvent.type === "act" &&
+      event.agentEvent.toolCall
+    ) {
+      toolCalls.push({
+        step: event.agentEvent.step,
+        name: event.agentEvent.toolCall.name,
+        args: event.agentEvent.toolCall.args,
+      });
+    }
+
+    if (event.type === "gate_verdict" && event.verdict === "block") {
+      gateBlocks.push({
+        step: steps,
+        evidence: event.evidence,
+      });
+    }
+  }
+
+  return { toolCalls, gateBlocks };
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────
@@ -216,6 +244,9 @@ export async function runLiveComplianceEval(
     let stopReason: StopReason = "end_turn";
     let typedOutput = buildTypedOutputSignal(undefined);
 
+    // Issue #50: 收集 turn 事件流用于 gate block 计数和 tracer sink。
+    const turnEvents: AnyTurnEvent[] = [];
+
     const shouldRunGate =
       c.userContext !== undefined && interactionStore !== undefined;
 
@@ -231,28 +262,32 @@ export async function runLiveComplianceEval(
             interactionStore: shouldRunGate ? interactionStore : undefined,
           },
         ),
-        (event: AnyTurnEvent) => recordTurnEvent(eventSignals, event),
+        (event: AnyTurnEvent) => {
+          turnEvents.push(event);
+          recordTurnEvent(eventSignals, event);
+        },
       );
 
       reply = result.reply;
       steps = result.steps;
       stopReason = result.stopReason;
       typedOutput = buildTypedOutputSignal(result.output);
+      tracer.sink(buildSinkFromTurnEvents(turnEvents, result.steps));
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
       steps = eventSignals.steps;
+      tracer.sink(buildSinkFromTurnEvents(turnEvents, steps));
     }
 
     const durationMs = Date.now() - start;
-    const gateBlocks = countGateBlocks(eventSignals.gateVerdictBlocks, tracer);
 
     const scored = scoreHarness(
       reply,
       eventSignals.toolCalls,
       c.expected,
       c.userContext,
-      gateBlocks,
+      eventSignals.gateVerdictBlocks,
     );
 
     signals.push({

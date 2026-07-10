@@ -139,19 +139,11 @@ async function dispatchTool(
   toolCall: ToolCall,
   tools: ReadonlyMap<string, ToolHandler> | undefined,
   toolSchemas: readonly ToolSchema[] | undefined,
-  tracer: Tracer,
   step: number,
 ): Promise<ToolResult> {
+  // Issue #50: tool_call 不再由 loop 直接录制到 tracer；改为从 turn 事件流
+  // 提取后经由 Tracer.sink() 喂入，保持 CLI trace 渲染等效。
   const schema = toolSchemas?.find((s) => s.function.name === toolCall.name);
-
-  tracer.record({
-    step,
-    type: "tool_call",
-    payload: JSON.stringify({
-      name: toolCall.name,
-      args: toolCall.args,
-    }),
-  });
 
   const handler = tools?.get(toolCall.name);
   if (!handler) {
@@ -410,7 +402,6 @@ export async function* run(
           tc,
           tools,
           toolSchemas,
-          tracer,
           step,
         );
 

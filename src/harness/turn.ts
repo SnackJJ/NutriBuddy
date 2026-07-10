@@ -188,16 +188,14 @@ function createToolGateVerdict(
   };
 }
 
-function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
-  const gateBlocks = tracer
-    .events()
-    .filter((event) => event.type === "gate_block");
-  if (gateBlocks.length === 0) {
-    return "No safety violations detected";
+function extractGateEvidence(result: TurnResult): string {
+  // Issue #50: gate_block 不再由 tracer 直接录制，而是从 turn 事件流
+  // gate_verdict (verdict="block") 中获取。此处从已 blocked 的 result
+  // 构造简洁证据字符串；详细拦截原因在 gate_verdict 事件中。
+  if (result.stopReason === "gate_blocked") {
+    return `Output blocked by consolidated safety gate`;
   }
-
-  const lastBlock = gateBlocks[gateBlocks.length - 1];
-  return `Blocked: ${lastBlock.payload}`;
+  return "No safety violations detected";
 }
 
 /** Max retry attempts for the consolidated output gate (issue #47).
@@ -340,13 +338,9 @@ function failReasonsFromOutputChecks(
 function createOutputGateBlockedResult(
   result: TurnResult,
   reasons: readonly string[],
-  tracer: TurnPorts["tracer"],
 ): TurnResult {
-  tracer.record({
-    step: result.steps,
-    type: "gate_block",
-    payload: reasons.join("; "),
-  });
+  // Issue #50: gate_block 不再直接录制到 tracer；改为从 gate_verdict
+  // 事件流提取后经由 Tracer.sink() 喂入，保持 CLI trace 渲染等效。
 
   return {
     reply: consolidatedGateRefusalReply(reasons),
@@ -549,7 +543,6 @@ async function* runUtteranceTurn(
     result = createOutputGateBlockedResult(
       result,
       outputGateFailReasons,
-      ports.tracer,
     );
     break;
   }
@@ -735,12 +728,9 @@ async function handleProposalConfirm(
   );
 }
 
-function createOutputEvidence(
-  result: TurnResult,
-  tracer: TurnPorts["tracer"],
-): string {
+function createOutputEvidence(result: TurnResult): string {
   if (result.stopReason === "gate_blocked") {
-    return extractGateEvidence(tracer);
+    return extractGateEvidence(result);
   }
 
   if (result.stopReason === "write_proposal") {
@@ -851,7 +841,7 @@ export async function* turn(
   }
 
   const isGateBlocked = result.stopReason === "gate_blocked";
-  const outputEvidence = createOutputEvidence(result, ports.tracer);
+  const outputEvidence = createOutputEvidence(result);
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
