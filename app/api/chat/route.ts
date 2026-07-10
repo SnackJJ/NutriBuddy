@@ -17,7 +17,7 @@ import {
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "@/lib/chatApi";
-import { createLogMealHandler } from "@/harness/logMeal";
+import { createLogMealHandler, LOG_MEAL_SCHEMA } from "@/harness/logMeal";
 import { createGetFoodNutrition } from "@/harness/foodNutrition";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 import type {
@@ -242,7 +242,11 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── Wire tools for authenticated utterance turns ─────────────────
   if (turnInput.tag === "utterance" && sessionUserId) {
-    ports = { ...ports, tools: buildToolMap(sessionUserId) };
+    ports = {
+      ...ports,
+      tools: buildToolMap(sessionUserId),
+      toolSchemas: [LOG_MEAL_SCHEMA],
+    };
   }
 
   // ── Load user safety context (fail-soft) ──────────────────────────

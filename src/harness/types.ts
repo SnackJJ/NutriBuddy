@@ -1,11 +1,35 @@
 // 八模块共享的窄类型。本切片只用到 Loop / ContextAssembler / ModelAdapter / Tracer
 // 所需的最小子集；工具 / 检索 / 记忆 / Verifier 的类型留到各自切片再加。
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+/** OpenAI-compatible tool_call delta embedded in an assistant message. */
+export interface ToolCallDelta {
+  readonly id: string;
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly arguments: string; // JSON string
+  };
+}
 
 export interface ChatMessage {
   readonly role: ChatRole;
   readonly content: string;
+  /** Tool calls emitted by the assistant (OpenAI native format). */
+  readonly tool_calls?: readonly ToolCallDelta[];
+  /** Tool call ID for role: "tool" messages — matches the id in the assistant's tool_calls. */
+  readonly tool_call_id?: string;
+}
+
+/** OpenAI function-calling tool schema sent to the model API. */
+export interface ToolSchema {
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly description: string;
+    readonly parameters: Record<string, unknown>;
+  };
 }
 
 /** 模型档位旋钮：能力/成本（见 CONTEXT.md「Model tier」）。 */
@@ -24,9 +48,13 @@ export interface ModelKnobs {
 
 export interface ModelRequest extends ModelKnobs {
   readonly messages: readonly ChatMessage[];
+  /** Native function-calling tool schemas (OpenAI format). */
+  readonly tools?: readonly ToolSchema[];
 }
 
 export interface ToolCall {
+  /** Unique tool call id for matching role:"tool" responses. */
+  readonly id: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
 }
@@ -47,6 +75,12 @@ export interface ModelResponse {
   readonly toolCalls?: readonly ToolCall[];
   /** Structured final answer data for gateable, auditable responses. */
   readonly output?: TypedOutput;
+  /**
+   * Raw finish_reason from the model API.
+   * "stop" = model finished normally; "tool_calls" = model wants to call tools;
+   * "length" = token limit reached.
+   */
+  readonly finishReason?: string;
 }
 
 export interface ModelAdapter {

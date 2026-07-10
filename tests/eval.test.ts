@@ -544,7 +544,7 @@ describe("runHarnessEval", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+          toolCalls: [{ id: "call-1", name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
@@ -648,7 +648,7 @@ describe("runHarnessEval", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
+          toolCalls: [{ id: "call-1", name: "search_food", args: { food: "chicken" } } satisfies ToolCall],
         };
       }
       throw new Error("model offline at step 2");

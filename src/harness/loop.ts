@@ -5,8 +5,10 @@
 // 调用方（CLI / Next.js route / 测试）可逐事件消费。runTurn() 是
 // 同步收集的便捷包装，兼容既有调用方。
 //
-// 工具调用检测：模型产出 toolCalls 时，loop 通过注入的 tools Map
-// dispatch 每条调用，将 tool_result 回灌为 user 消息后继续循环。
+// Issue #41：工具调用切换到原生 DeepSeek/OpenAI 协议：
+//   - 模型 assistant 消息携带 tool_calls[]（非 [tool_call] 伪标签）
+//   - 工具结果以 role:"tool" + tool_call_id 回灌（非 [tool_result] 伪标签）
+//   - 多条 tool_calls 在同一响应中按序 dispatch
 
 import {
   assembleContext,
@@ -21,7 +23,9 @@ import type {
   ModelAdapter,
   ModelTier,
   TerminalResult,
+  ToolCallDelta,
   ToolHandler,
+  ToolSchema,
 } from "./types";
 import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
@@ -55,6 +59,8 @@ export interface RunTurnInput {
   readonly signal?: AbortSignal;
   /** 工具调度表：工具名 → 处理器。未注册的工具调用记录 act 事件后静默跳过。 */
   readonly tools?: ReadonlyMap<string, ToolHandler>;
+  /** Native function-calling tool schemas sent to the model API (issue #41). */
+  readonly toolSchemas?: readonly ToolSchema[];
   /** Pre/post-gate：用户安全上下文（过敏 + 用药）。缺省时不启用 gate。 */
   readonly userContext?: UserContext;
   /** Pre/post-gate：药物-营养素相互作用数据源。userContext 存在时需传入。 */
@@ -102,6 +108,7 @@ export async function* run(
     maxSteps = MAX_STEPS,
     signal,
     tools,
+    toolSchemas,
     userContext,
     interactionStore,
     queryCatalog,
@@ -180,11 +187,33 @@ export async function* run(
       model: tier,
       thinking,
       messages,
+      tools: toolSchemas,
     });
     tracer.record({ step, type: "model_return", payload: response.content });
 
     // 工具调用检测：模型产出 toolCalls → dispatch → 注入 tool_result
+    // Issue #41：原生协议——assistant 消息带 tool_calls[]，
+    // 结果以 role:"tool" + tool_call_id 回灌。
     if (response.toolCalls && response.toolCalls.length > 0) {
+      // Build assistant message with native tool_calls
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: response.content || "",
+        tool_calls: response.toolCalls.map((tc) => {
+          const delta: ToolCallDelta = {
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.args),
+            },
+          };
+          return delta;
+        }),
+      };
+      working.push(assistantMsg);
+
+      // Dispatch each tool call in order
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
@@ -199,14 +228,11 @@ export async function* run(
           toolResult: { name: tc.name, result },
         };
 
-        // 将工具调用与结果回灌为对话历史，供下一步模型感知
+        // 将工具结果以原生 role:"tool" + tool_call_id 回灌
         working.push({
-          role: "assistant",
-          content: `[tool_call] ${tc.name}(${JSON.stringify(tc.args)})`,
-        });
-        working.push({
-          role: "user",
-          content: `[tool_result] ${result}`,
+          role: "tool",
+          content: result,
+          tool_call_id: tc.id,
         });
       }
       // 工具调用后继续循环（不在此步交卷）

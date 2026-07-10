@@ -113,7 +113,7 @@ describe("run", () => {
           content: "我需要查一下鸡蛋的营养数据。",
           stop: false,
           toolCalls: [
-            { name: "search_food", args: { food: "egg" } } satisfies ToolCall,
+            { id: "call-1", name: "search_food", args: { food: "egg" } } satisfies ToolCall,
           ],
         };
       }
@@ -169,7 +169,7 @@ describe("run", () => {
         return {
           content: "尝试调用不存在的工具。",
           stop: false,
-          toolCalls: [{ name: "nonexistent", args: {} } satisfies ToolCall],
+          toolCalls: [{ id: "call-1", name: "nonexistent", args: {} } satisfies ToolCall],
         };
       }
       return { content: "fallback answer", stop: true };
@@ -368,7 +368,7 @@ describe("run", () => {
         return {
           content: "查询中...",
           stop: false,
-          toolCalls: [{ name: "calc", args: { expr: "1+1" } } satisfies ToolCall],
+          toolCalls: [{ id: "call-1", name: "calc", args: { expr: "1+1" } } satisfies ToolCall],
         };
       }
       return { content: "结果是 2", stop: true };
@@ -384,6 +384,204 @@ describe("run", () => {
     const prompts = tracer.events().filter((e) => e.type === "model_prompt");
     expect(prompts).toHaveLength(2);
     expect(prompts[1].payload).toContain("2");
+  });
+
+  // ─── Native tool call protocol (issue #41) ──────────────────────────
+
+  it("injects tool results as role:tool messages with matching tool_call_id", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const capturedMessages: Array<Array<Record<string, unknown>>> = [];
+    const adapter = stubAdapter((req) => {
+      callCount += 1;
+      // Capture messages sent to the adapter for inspection
+      capturedMessages.push(
+        req.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          tool_call_id: m.tool_call_id,
+          hasToolCalls: !!(m.tool_calls && m.tool_calls.length > 0),
+        })),
+      );
+
+      if (callCount === 1) {
+        return {
+          content: "查询中...",
+          stop: false,
+          toolCalls: [
+            { id: "call-abc", name: "calc", args: { expr: "1+1" } } satisfies ToolCall,
+          ],
+        };
+      }
+      return { content: "结果是 2", stop: true };
+    });
+
+    const tools = new Map([["calc", async () => "2"]]);
+
+    await collect(run({ userInput: "计算", adapter, tracer, tools }));
+
+    // Step 2's messages must contain the tool result from step 1
+    expect(capturedMessages.length).toBeGreaterThanOrEqual(2);
+
+    // The second model call's messages should include:
+    // - An assistant message with tool_calls (from step 1)
+    // - A tool result message with matching tool_call_id
+    const step2Messages = capturedMessages[1];
+    const assistantMsg = step2Messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.hasToolCalls).toBe(true);
+
+    const toolMsgs = step2Messages.filter((m) => m.role === "tool");
+    expect(toolMsgs.length).toBe(1);
+    expect(toolMsgs[0].tool_call_id).toBe("call-abc");
+    expect(toolMsgs[0].content).toContain("2");
+  });
+
+  it("emits no [tool_call] or [tool_result] text in the prompt", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const adapter = stubAdapter(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          content: "查询中...",
+          stop: false,
+          toolCalls: [
+            { id: "call-1", name: "search", args: { q: "egg" } } satisfies ToolCall,
+          ],
+        };
+      }
+      return { content: "鸡蛋有 6g 蛋白质。", stop: true };
+    });
+
+    const tools = new Map([["search", async () => "6g protein"]]);
+
+    await collect(run({ userInput: "鸡蛋营养？", adapter, tracer, tools }));
+
+    // Verify no fake-text markers in any prompt
+    for (const e of tracer.events()) {
+      if (e.type === "model_prompt") {
+        expect(e.payload).not.toContain("[tool_call]");
+        expect(e.payload).not.toContain("[tool_result]");
+      }
+    }
+  });
+
+  it("handles multiple tool_calls in one response as an array, dispatched in order", async () => {
+    const tracer = new Tracer();
+    const dispatchOrder: string[] = [];
+    const adapter = stubAdapter(() => {
+      const calls: ToolCall[] = [
+        { id: "call-a", name: "tool_a", args: { order: 1 } },
+        { id: "call-b", name: "tool_b", args: { order: 2 } },
+        { id: "call-c", name: "tool_c", args: { order: 3 } },
+      ];
+      return {
+        content: "调用多个工具...",
+        stop: false,
+        toolCalls: calls,
+      };
+    });
+
+    const tools = new Map([
+      ["tool_a", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`a:${args.order}`); return "a-result"; }],
+      ["tool_b", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`b:${args.order}`); return "b-result"; }],
+      ["tool_c", async (args: Readonly<Record<string, unknown>>) => { dispatchOrder.push(`c:${args.order}`); return "c-result"; }],
+    ]);
+
+    await collect(run({ userInput: "test multi", adapter, tracer, tools, maxSteps: 1 }));
+
+    // All three dispatched, in order
+    expect(dispatchOrder).toEqual(["a:1", "b:2", "c:3"]);
+
+    // Verify event flow: thought → act → observe × 3
+    const types = tracer.events().map((e) => e.type);
+    expect(types).toContain("user_input");
+    expect(types).toContain("model_prompt");
+    expect(types).toContain("model_return");
+  });
+
+  it("passes toolSchemas to the adapter when provided", async () => {
+    const generate = vi.fn<(req: ModelRequest) => Promise<ModelResponse>>(
+      async () => ({ content: "ok", stop: true }),
+    );
+
+    const toolSchemas = [
+      {
+        type: "function" as const,
+        function: {
+          name: "log_meal",
+          description: "Log a meal",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ];
+
+    await collect(
+      run({
+        userInput: "q",
+        adapter: { generate },
+        tracer: new Tracer(),
+        toolSchemas,
+      }),
+    );
+
+    expect(generate).toHaveBeenCalledOnce();
+    const req = generate.mock.calls[0][0];
+    expect(req.tools).toEqual(toolSchemas);
+  });
+
+  it("does not pass tools to the adapter when toolSchemas is absent (backward compat)", async () => {
+    const generate = vi.fn<(req: ModelRequest) => Promise<ModelResponse>>(
+      async () => ({ content: "ok", stop: true }),
+    );
+
+    await collect(
+      run({
+        userInput: "q",
+        adapter: { generate },
+        tracer: new Tracer(),
+      }),
+    );
+
+    const req = generate.mock.calls[0][0];
+    expect(req.tools).toBeUndefined();
+  });
+
+  it("generates fallback tool_call_id for tool calls without explicit id", async () => {
+    const tracer = new Tracer();
+    let callCount = 0;
+    const capturedMessages: Array<Array<Record<string, unknown>>> = [];
+    const adapter = stubAdapter((req) => {
+      callCount += 1;
+      capturedMessages.push(
+        req.messages.map((m) => ({
+          role: m.role,
+          tool_call_id: m.tool_call_id,
+        })),
+      );
+
+      if (callCount === 1) {
+        // Legacy ToolCall without explicit id
+        return {
+          content: "查询中...",
+          stop: false,
+          toolCalls: [
+            { id: "adapter-gen-id", name: "calc", args: { expr: "1+1" } } satisfies ToolCall,
+          ],
+        };
+      }
+      return { content: "结果", stop: true };
+    });
+
+    const tools = new Map([["calc", async () => "2"]]);
+
+    await collect(run({ userInput: "计算", adapter, tracer, tools }));
+
+    // Tool result message should have a tool_call_id matching the adapter-generated id
+    const step2Messages = capturedMessages[1];
+    const toolMsgs = step2Messages.filter((m) => m.role === "tool");
+    expect(toolMsgs.length).toBe(1);
+    expect(toolMsgs[0].tool_call_id).toBe("adapter-gen-id");
   });
 });
 

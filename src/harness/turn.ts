@@ -444,6 +444,7 @@ function createRunTurnInput(
     maxSteps: ports.maxSteps,
     signal: ports.signal,
     tools: ports.tools,
+    toolSchemas: ports.toolSchemas,
     userContext: ports.userContext,
     interactionStore: ports.interactionStore,
     queryCatalog: ports.queryCatalog,

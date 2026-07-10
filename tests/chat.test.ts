@@ -419,7 +419,7 @@ describe("turn event stream compatibility", () => {
           return {
             content: "Looking up...",
             stop: false,
-            toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+            toolCalls: [{ id: "call-1", name: "search_food", args: { food: "chicken" } }],
           };
         }
         return { content: "Chicken has 31g protein per 100g.", stop: true };

@@ -101,6 +101,7 @@ describe("runLiveComplianceEval", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "search_food",
               args: { food: "chicken" },
             } satisfies ToolCall,
@@ -238,6 +239,7 @@ describe("runLiveComplianceEval", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "search_food",
               args: { food: "chicken" },
             } satisfies ToolCall,
@@ -428,6 +430,7 @@ describe("runLiveComplianceEval", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "search_food",
               args: { food: "chicken" },
             } satisfies ToolCall,

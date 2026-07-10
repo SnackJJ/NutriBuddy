@@ -317,6 +317,7 @@ describe("turn (utterance)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "search_food",
               args: { food: "chicken" },
             } satisfies ToolCall,
@@ -811,6 +812,7 @@ describe("typed final output contract", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "search_food",
               args: { food: "chicken" },
             },
@@ -915,7 +917,7 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "egg" } }],
+          toolCalls: [{ id: "call-1", name: "search_food", args: { food: "egg" } }],
         };
       }
       return { content: "6g protein per egg.", stop: true };
@@ -987,7 +989,7 @@ describe("gate verdict events", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+          toolCalls: [{ id: "call-1", name: "search_food", args: { food: "chicken" } }],
         };
       }
       return { content: "Chicken has 31g protein/100g.", stop: true };
@@ -1145,6 +1147,7 @@ describe("gate verdict events", () => {
             stop: false,
             toolCalls: [
               {
+                id: "call-1",
                 name: "log_meal",
                 args: {
                   food_name: "chicken breast",
@@ -1187,6 +1190,7 @@ describe("gate verdict events", () => {
             stop: false,
             toolCalls: [
               {
+                id: "call-1",
                 name: "log_meal",
                 args: {
                   food_name: "chicken breast",
@@ -1227,6 +1231,7 @@ describe("gate verdict events", () => {
             stop: false,
             toolCalls: [
               {
+                id: "call-1",
                 name: "log_meal",
                 args: {
                   food_name: "chicken breast",
@@ -1770,6 +1775,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: {
                 food_name: "chicken breast",
@@ -1818,6 +1824,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: { food_name: "rice", portion_g: 150, meal_type: "dinner" },
             },
@@ -1851,6 +1858,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: {
                 food_name: "chicken breast",
@@ -1896,6 +1904,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: {
                 food_name: "chicken breast",
@@ -1944,7 +1953,7 @@ describe("write-proposal turn flow (issue #36)", () => {
         return {
           content: "Looking up...",
           stop: false,
-          toolCalls: [{ name: "search_food", args: { food: "chicken" } }],
+          toolCalls: [{ id: "call-1", name: "search_food", args: { food: "chicken" } }],
         };
       }
       return { content: "Chicken has 31g protein per 100g.", stop: true };
@@ -1972,6 +1981,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: { food_name: "chicken", portion_g: 150 },
             },
@@ -2006,6 +2016,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: { food_name: "chicken breast", portion_g: 200 },
             },
@@ -2017,7 +2028,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           content: "Now let me also log the rice.",
           stop: false,
           toolCalls: [
-            { name: "log_meal", args: { food_name: "rice", portion_g: 150 } },
+            { id: "call-2", name: "log_meal", args: { food_name: "rice", portion_g: 150 } },
           ],
         };
       }
@@ -2097,6 +2108,7 @@ describe("write-proposal turn flow (issue #36)", () => {
       stop: false,
       toolCalls: [
         {
+          id: "call-1",
           name: "scoped_tool",
           args: { user_id: "evil-user" },
         },
@@ -2128,6 +2140,7 @@ describe("write-proposal turn flow (issue #36)", () => {
           stop: false,
           toolCalls: [
             {
+              id: "call-1",
               name: "log_meal",
               args: { food_name: "chicken breast", portion_g: 200 },
             },
