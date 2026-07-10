@@ -12,6 +12,8 @@ import type {
 } from "./types";
 import { checkNumericProvenance } from "./numericProvenanceGate";
 import { checkAdvisoryStructure, type Conflict } from "./advisoryGate";
+import { checkPostGate, type UserContext } from "./gate";
+import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import type { Observation } from "../catalog/queryCatalog";
 import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 
@@ -198,24 +200,159 @@ function extractGateEvidence(tracer: TurnPorts["tracer"]): string {
   return `Blocked: ${lastBlock.payload}`;
 }
 
-/** Max retry attempts for output gate sub-checks (numeric provenance + advisory). */
+/** Max retry attempts for the consolidated output gate (issue #47).
+ *  All checks — lexical backstop, numeric provenance, advisory structure —
+ *  share one regenerate budget. */
 const MAX_OUTPUT_GATE_RETRIES = 2;
+const OUTPUT_LEXICAL_BACKSTOP_CHECK = "output_lexical_backstop";
+const OUTPUT_NUMERIC_PROVENANCE_CHECK = "output_numeric_provenance";
+const OUTPUT_ADVISORY_STRUCTURE_CHECK = "output_advisory_structure";
+const OUTPUT_GATE_SUMMARY_CHECK = "post_gate_output_check";
+const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
-function buildOutputGateFeedback(reasons: readonly string[]): string {
+function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
   return (
     `Your response was BLOCKED by safety checks:\n${reasons.map((r) => `  - ${r}`).join("\n")}\n\n` +
-    `Please regenerate your response. Make absolutely sure all numeric facts ` +
-    `come from tool results and all safety advisories are cited.`
+    `Please regenerate your response. Make absolutely sure you do NOT mention ` +
+    `or recommend any blocked foods or allergens, all numeric facts come from ` +
+    `tool results, and all safety advisories are cited. This is a hard requirement.`
   );
 }
 
-function outputGateRefusalReply(reasons: readonly string[]): string {
+function consolidatedGateRefusalReply(reasons: readonly string[]): string {
   const list = reasons.map((r) => `  - ${r}`).join("\n");
   return (
     `I cannot safely answer your question. My responses were blocked ` +
-    `after ${MAX_OUTPUT_GATE_RETRIES} retries due to output gate violations:\n${list}\n\n` +
+    `after ${MAX_OUTPUT_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
     `Please consult a doctor or registered dietitian for personalized advice.`
   );
+}
+
+interface OutputGateCheck {
+  readonly verdict: GateVerdictEventDetails;
+  readonly reasons: readonly string[];
+}
+
+function createOutputGateCheck(
+  checkName: string,
+  passed: boolean,
+  reasons: readonly string[],
+  passEvidence: string,
+): OutputGateCheck {
+  return {
+    verdict: {
+      checkpoint: "output",
+      verdict: passed ? "pass" : "block",
+      checkName,
+      evidence: reasons.join("; ") || passEvidence,
+    },
+    reasons: passed ? [] : reasons,
+  };
+}
+
+function createLexicalBackstopCheck(
+  prose: string,
+  userContext: UserContext | undefined,
+  interactions: readonly DrugNutrientInteraction[],
+): OutputGateCheck | undefined {
+  if (!userContext) {
+    return undefined;
+  }
+
+  const check = checkPostGate(prose, userContext, interactions);
+  return createOutputGateCheck(
+    OUTPUT_LEXICAL_BACKSTOP_CHECK,
+    check.passed,
+    check.reasons,
+    NO_SAFETY_VIOLATIONS_EVIDENCE,
+  );
+}
+
+function createNumericProvenanceCheck(
+  output: TypedOutput,
+  observations: readonly Observation[],
+): OutputGateCheck {
+  const check = checkNumericProvenance({ output, observations });
+  const passEvidence =
+    observations.length > 0
+      ? "All numeric facts trace to observations"
+      : "No observations to check — numeric gate skipped";
+
+  return createOutputGateCheck(
+    OUTPUT_NUMERIC_PROVENANCE_CHECK,
+    check.passed,
+    check.reasons,
+    passEvidence,
+  );
+}
+
+function createAdvisoryStructureCheck(
+  output: TypedOutput,
+  conflicts: readonly Conflict[],
+): OutputGateCheck {
+  const check = checkAdvisoryStructure({ output, conflicts });
+  return createOutputGateCheck(
+    OUTPUT_ADVISORY_STRUCTURE_CHECK,
+    check.passed,
+    check.reasons,
+    "Advisory structure valid",
+  );
+}
+
+function outputTextForGate(result: TurnResult): string {
+  return result.output?.prose ?? result.reply;
+}
+
+function collectOutputGateChecks(
+  result: TurnResult,
+  userContext: UserContext | undefined,
+  observations: readonly Observation[],
+  conflicts: readonly Conflict[],
+): OutputGateCheck[] {
+  const checks: OutputGateCheck[] = [];
+  const lexicalCheck = createLexicalBackstopCheck(
+    outputTextForGate(result),
+    userContext,
+    result.interactions ?? [],
+  );
+
+  if (lexicalCheck) {
+    checks.push(lexicalCheck);
+  }
+
+  if (!result.output) {
+    return checks;
+  }
+
+  checks.push(
+    createNumericProvenanceCheck(result.output, observations),
+    createAdvisoryStructureCheck(result.output, conflicts),
+  );
+  return checks;
+}
+
+function failReasonsFromOutputChecks(
+  checks: readonly OutputGateCheck[],
+): readonly string[] {
+  return checks.flatMap((check) => check.reasons);
+}
+
+function createOutputGateBlockedResult(
+  result: TurnResult,
+  reasons: readonly string[],
+  tracer: TurnPorts["tracer"],
+): TurnResult {
+  tracer.record({
+    step: result.steps,
+    type: "gate_block",
+    payload: reasons.join("; "),
+  });
+
+  return {
+    reply: consolidatedGateRefusalReply(reasons),
+    steps: result.steps,
+    stopReason: "gate_blocked",
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -330,18 +467,18 @@ async function* runUtteranceTurn(
   const conflicts = ports.conflicts ?? [];
   let result: TurnResult | undefined;
   let lastWriteProposalData: WriteProposalData | undefined;
-  let outputGateFailReasons: string[] = [];
+  let outputGateFailReasons: readonly string[] = [];
 
   for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
     const history: ChatMessage[] = [...(ports.history ?? [])];
 
-    // On retry, inject the blocked response and feedback as history
+    // On retry, inject the blocked response and combined feedback as history
     if (attempt > 0 && result) {
       history.push(
         { role: "assistant", content: result.reply },
         {
           role: "user",
-          content: buildOutputGateFeedback(outputGateFailReasons),
+          content: buildConsolidatedGateFeedback(outputGateFailReasons),
         },
       );
     }
@@ -383,80 +520,38 @@ async function* runUtteranceTurn(
 
     result = next.value;
 
-    // If already blocked by lexical backstop, don't bother with numeric/advisory
-    if (result.stopReason === "gate_blocked") {
-      break;
-    }
+    // ── Issue #47: Consolidated output gate ──────────────────────────
+    // All checks (lexical backstop, numeric provenance, advisory structure)
+    // run together at the turn boundary with one retry budget and one
+    // combined feedback message. The inner loop no longer re-gates.
 
-    // No typed output to check — pass through
-    if (!result.output) {
-      break;
-    }
-
-    const numericResult = checkNumericProvenance({
-      output: result.output,
+    const outputGateChecks = collectOutputGateChecks(
+      result,
+      ports.userContext,
       observations,
-    });
-
-    yield createGateVerdictEvent(
-      {
-        checkpoint: "output",
-        verdict: numericResult.passed ? "pass" : "block",
-        checkName: "output_numeric_provenance",
-        evidence:
-          numericResult.reasons.join("; ") ||
-          (observations.length > 0
-            ? "All numeric facts trace to observations"
-            : "No observations to check — numeric gate skipped"),
-      },
-      nextMetadata,
-    );
-
-    // Run advisory structure check
-    const advisoryResult = checkAdvisoryStructure({
-      output: result.output,
       conflicts,
-    });
-
-    yield createGateVerdictEvent(
-      {
-        checkpoint: "output",
-        verdict: advisoryResult.passed ? "pass" : "block",
-        checkName: "output_advisory_structure",
-        evidence:
-          advisoryResult.reasons.join("; ") || "Advisory structure valid",
-      },
-      nextMetadata,
     );
 
-    // Both passed — release
-    if (numericResult.passed && advisoryResult.passed) {
+    for (const check of outputGateChecks) {
+      yield createGateVerdictEvent(check.verdict, nextMetadata);
+    }
+
+    outputGateFailReasons = failReasonsFromOutputChecks(outputGateChecks);
+
+    if (outputGateFailReasons.length === 0) {
       break;
     }
 
-    // Collect reasons for feedback on retry
-    outputGateFailReasons = [
-      ...numericResult.reasons,
-      ...advisoryResult.reasons,
-    ];
-
-    if (attempt >= MAX_OUTPUT_GATE_RETRIES) {
-      ports.tracer.record({
-        step: result.steps,
-        type: "gate_block",
-        payload: outputGateFailReasons.join("; "),
-      });
-
-      // Retries exhausted — refuse
-      result = {
-        reply: outputGateRefusalReply(outputGateFailReasons),
-        steps: result.steps,
-        stopReason: "gate_blocked",
-      };
-      break;
+    if (attempt < MAX_OUTPUT_GATE_RETRIES) {
+      continue;
     }
 
-    // Will retry — feedback injected at top of next iteration
+    result = createOutputGateBlockedResult(
+      result,
+      outputGateFailReasons,
+      ports.tracer,
+    );
+    break;
   }
 
   return { result: result!, writeProposal: lastWriteProposalData };
@@ -763,7 +858,7 @@ export async function* turn(
       {
         checkpoint: "output",
         verdict: isGateBlocked ? "block" : "pass",
-        checkName: "post_gate_output_check",
+        checkName: OUTPUT_GATE_SUMMARY_CHECK,
         evidence: outputEvidence,
       },
       nextMetadata,

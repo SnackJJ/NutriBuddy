@@ -9,6 +9,10 @@
 //   - 模型 assistant 消息携带 tool_calls[]（非 [tool_call] 伪标签）
 //   - 工具结果以 role:"tool" + tool_call_id 回灌（非 [tool_result] 伪标签）
 //   - 多条 tool_calls 在同一响应中按序 dispatch
+//
+// Issue #47：输出 gate 已移至 turn 层统一执行。loop 不再自行 post-gate
+//   重试，而是将词法 backstop、numeric provenance、advisory structure
+//   全部交给 turn 边界的 consolidated output gate 处理。
 
 import {
   assembleContext,
@@ -32,18 +36,13 @@ import type {
 } from "./types";
 import type { Tracer } from "./tracer";
 import { EventLog } from "./eventLog";
-import { buildPreGateContext, checkPostGate, type UserContext } from "./gate";
-import type {
-  DrugNutrientInteraction,
-  InteractionStore,
-} from "../lib/drugInteractions";
+import { buildPreGateContext, type UserContext } from "./gate";
+import type { InteractionStore } from "../lib/drugInteractions";
 import type { QueryCatalog } from "../catalog/queryCatalog";
 import { SUBMIT_ANSWER_TOOL, parseSubmitAnswerArgs } from "./submitAnswer";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
-/** Post-gate 最大重试次数（issue #10）。 */
-const MAX_POST_GATE_RETRIES = 2;
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CODE_ACT_TOOL = "code_act";
 
@@ -244,135 +243,12 @@ function createToolResultMessage(
   };
 }
 
-/** Post-gate 重试耗尽后的兜底回复。 */
-function gateExhaustedReply(reasons: readonly string[]): string {
-  const list = reasons.map((r) => `  - ${r}`).join("\n");
-  return (
-    "I cannot safely answer your question. My responses were blocked " +
-    `after ${MAX_POST_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
-    "Please consult a doctor or registered dietitian for personalized advice."
-  );
-}
-
-type PostGateDecision =
-  | { readonly kind: "pass" }
-  | {
-      readonly kind: "retry";
-      readonly retryCount: number;
-      readonly reasons: readonly string[];
-      readonly feedback: string;
-    }
-  | { readonly kind: "refuse"; readonly reply: string };
-
-interface CheckTerminalPostGateInput {
-  readonly reply: string;
-  readonly step: number;
-  readonly retryCount: number;
-  readonly userContext: UserContext | undefined;
-  readonly interactionStore: InteractionStore | undefined;
-  readonly interactions: readonly DrugNutrientInteraction[];
-  readonly eventLog: EventLog | undefined;
-  readonly tracer: Tracer;
-}
-
-function formatGateReasons(reasons: readonly string[]): string {
-  return reasons.map((reason) => `  - ${reason}`).join("\n");
-}
-
-function createPostGateRetryFeedback(reasons: readonly string[]): string {
-  return (
-    `Your previous response was BLOCKED by safety constraints:\n${formatGateReasons(reasons)}\n\n` +
-    `Please regenerate your response. Make absolutely sure you do NOT mention ` +
-    `or recommend any of the blocked foods or allergens listed above. ` +
-    `This is a hard safety requirement.`
-  );
-}
-
-function createPostGateBlockPayload(
-  retryCount: number,
-  reasons: readonly string[],
-): string {
-  return `Post-gate blocked (attempt ${retryCount}/${MAX_POST_GATE_RETRIES}): ${reasons.join("; ")}`;
-}
-
-function createBlockedToolResult(reasons: readonly string[]): string {
-  return `BLOCKED: ${reasons.join("; ")}`;
-}
-
 function describeSubmitAnswerResult(output: TypedOutput | null): string {
   if (!output) {
     return "Answer submitted (prose-only fallback)";
   }
 
   return `Answer submitted with ${output.foodRefs.length} food ref(s) and ${output.ruleRefs.length} rule ref(s)`;
-}
-
-function checkTerminalPostGate(
-  input: CheckTerminalPostGateInput,
-): PostGateDecision {
-  const {
-    reply,
-    step,
-    retryCount,
-    userContext,
-    interactionStore,
-    interactions,
-    eventLog,
-    tracer,
-  } = input;
-
-  if (!userContext || !interactionStore) {
-    return { kind: "pass" };
-  }
-
-  const check = checkPostGate(reply, userContext, interactions);
-  if (check.passed) {
-    return { kind: "pass" };
-  }
-
-  eventLog?.record({
-    type: "gate_block",
-    data: {
-      attempt: retryCount + 1,
-      maxRetries: MAX_POST_GATE_RETRIES,
-      reasons: check.reasons,
-      blockedContent: reply,
-      step,
-    },
-  });
-
-  if (retryCount < MAX_POST_GATE_RETRIES) {
-    const nextRetryCount = retryCount + 1;
-    tracer.record({
-      step,
-      type: "gate_block",
-      payload: createPostGateBlockPayload(nextRetryCount, check.reasons),
-    });
-
-    return {
-      kind: "retry",
-      retryCount: nextRetryCount,
-      reasons: check.reasons,
-      feedback: createPostGateRetryFeedback(check.reasons),
-    };
-  }
-
-  const refusal = gateExhaustedReply(check.reasons);
-  eventLog?.record({
-    type: "agent_response",
-    data: {
-      content: refusal,
-      step,
-      gateExhausted: true,
-    },
-  });
-  tracer.record({
-    step,
-    type: "gate_exhausted",
-    payload: `Post-gate retries exhausted after ${MAX_POST_GATE_RETRIES} attempts.`,
-  });
-
-  return { kind: "refuse", reply: refusal };
 }
 
 /**
@@ -382,6 +258,11 @@ function checkTerminalPostGate(
  *   thought → [act → observe]×N → observe
  *
  * 终止时返回 TerminalResult。
+ *
+ * Issue #47: 输出 gate 已从上移至 turn 层。loop 不再自行 post-gate
+ * 重试——词法 backstop、numeric provenance、advisory structure 全部
+ * 由 turn 边界的 consolidated output gate 统一处理。loop 返回
+ * replies 和 interactions（供 lexical backstop 使用），不做拦截。
  */
 export async function* run(
   input: RunTurnInput,
@@ -441,7 +322,6 @@ export async function* run(
   // 回灌为 assistant 消息。
   const working: ChatMessage[] = [...history];
   let reply = "";
-  let postGateRetries = 0;
 
   for (let step = 1; step <= maxSteps; step++) {
     if (signal?.aborted) {
@@ -503,43 +383,8 @@ export async function* run(
 
         reply = output?.prose ?? response.content;
 
-        const postGateDecision = checkTerminalPostGate({
-          reply,
-          step,
-          retryCount: postGateRetries,
-          userContext,
-          interactionStore,
-          interactions,
-          eventLog,
-          tracer,
-        });
-
-        if (postGateDecision.kind === "retry") {
-          postGateRetries = postGateDecision.retryCount;
-          working.push(
-            createAssistantToolCallMessage(
-              response.content,
-              response.toolCalls,
-            ),
-          );
-          working.push(
-            createToolResultMessage(
-              submitAnswerCall,
-              createBlockedToolResult(postGateDecision.reasons),
-            ),
-          );
-          working.push({ role: "user", content: postGateDecision.feedback });
-          continue;
-        }
-
-        if (postGateDecision.kind === "refuse") {
-          return {
-            reply: postGateDecision.reply,
-            steps: step,
-            stopReason: "gate_blocked",
-          };
-        }
-
+        // Issue #47: 不再在 loop 内做 post-gate 重试。
+        // 词法 backstop 交给 turn 层的 consolidated output gate。
         eventLog?.record({
           type: "agent_response",
           data: { content: reply, step },
@@ -549,6 +394,7 @@ export async function* run(
           steps: step,
           stopReason: "end_turn",
           output: output ?? undefined,
+          interactions,
         };
       }
 
@@ -586,35 +432,8 @@ export async function* run(
     reply = response.content;
 
     if (response.stop) {
-      // ─── Post-gate：检查输出是否违反硬约束 ──────────────────────
-      const postGateDecision = checkTerminalPostGate({
-        reply,
-        step,
-        retryCount: postGateRetries,
-        userContext,
-        interactionStore,
-        interactions,
-        eventLog,
-        tracer,
-      });
-
-      if (postGateDecision.kind === "retry") {
-        postGateRetries = postGateDecision.retryCount;
-        working.push(
-          { role: "assistant", content: reply },
-          { role: "user", content: postGateDecision.feedback },
-        );
-        continue;
-      }
-
-      if (postGateDecision.kind === "refuse") {
-        return {
-          reply: postGateDecision.reply,
-          steps: step,
-          stopReason: "gate_blocked",
-        };
-      }
-
+      // Issue #47: 不再在 loop 内做 post-gate 重试。
+      // 词法 backstop 交给 turn 层的 consolidated output gate。
       eventLog?.record({
         type: "agent_response",
         data: { content: response.content, step },
@@ -624,6 +443,7 @@ export async function* run(
         steps: step,
         stopReason: "end_turn",
         output: response.output,
+        interactions,
       };
     }
 
@@ -641,7 +461,7 @@ export async function* run(
     type: "error",
     data: { reason: "max_steps_reached", maxSteps, step: maxSteps },
   });
-  return { reply, steps: maxSteps, stopReason: "max_steps" };
+  return { reply, steps: maxSteps, stopReason: "max_steps", interactions };
 }
 
 /**

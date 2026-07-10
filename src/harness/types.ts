@@ -151,6 +151,12 @@ export interface TerminalResult {
    * Contains the resolved entities and confirmation payload (issue #36).
    */
   readonly proposal?: WriteProposalData;
+  /**
+   * Pre-gate drug-nutrient interactions computed during the loop.
+   * Carried so the turn-layer consolidated output gate can run the
+   * lexical backstop without re-querying (issue #47).
+   */
+  readonly interactions?: readonly import("../lib/drugInteractions").DrugNutrientInteraction[];
 }
 
 /** 工具处理器：接收 args 返回字符串结果。 */

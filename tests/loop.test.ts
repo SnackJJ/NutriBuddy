@@ -942,20 +942,21 @@ describe("runTurn (backward compat)", () => {
     expect(prompt?.payload).not.toContain("SAFETY CONSTRAINT");
   });
 
-  it("post-gate: retries on block and returns clean response when model fixes it", async () => {
+  // ─── Post-gate moved to turn layer (issue #47) ──────────────────────
+  // The inner run() loop no longer gates — it returns whatever the model
+  // outputs. All output checks (lexical backstop, numeric provenance,
+  // advisory structure) now run together in the turn-layer consolidated
+  // output gate.
+
+  it("run() no longer post-gates — blocked content passes through", async () => {
     const tracer = new Tracer();
     const { sink, deps } = fixedDeps();
     const eventLog = new EventLog("sess-gate-1", deps);
 
-    // First call returns blocked content, second call returns safe content
-    let calls = 0;
-    const adapter = stubAdapter(() => {
-      calls++;
-      if (calls === 1) {
-        return { content: "I recommend drinking milk daily.", stop: true };
-      }
-      return { content: "I recommend drinking water.", stop: true };
-    });
+    const adapter = stubAdapter(() => ({
+      content: "I recommend drinking milk daily.",
+      stop: true,
+    }));
 
     const result = await runTurn({
       userInput: "what should I drink?",
@@ -966,31 +967,19 @@ describe("runTurn (backward compat)", () => {
       interactionStore: fakeInteractionStore([]),
     });
 
-    // Should return the clean (second) response
-    expect(result.reply).toBe("I recommend drinking water.");
+    // Issue #47: run() no longer post-gates — returns model output as-is
+    expect(result.reply).toBe("I recommend drinking milk daily.");
+    expect(result.stopReason).toBe("end_turn");
 
-    // Should have gate_block event for the first (blocked) response
+    // No gate_block events — inner loop doesn't gate anymore
     const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
     const gateBlocks = events.filter((e) => e.type === "gate_block");
-    expect(gateBlocks).toHaveLength(1);
-    expect(gateBlocks[0].data).toMatchObject({
-      attempt: 1,
-      maxRetries: 2,
-    });
-    expect(gateBlocks[0].data.reasons).toBeDefined();
-
-    // One agent_response for the clean (second) response;
-    // the blocked first response is NOT recorded as agent_response.
-    const responses = events.filter((e) => e.type === "agent_response");
-    expect(responses).toHaveLength(1);
+    expect(gateBlocks).toHaveLength(0);
   });
 
-  it("post-gate: returns fallback message after 2 retries exhausted", async () => {
+  it("run() never returns gate_blocked — gating is a turn-layer concern", async () => {
     const tracer = new Tracer();
-    const { sink, deps } = fixedDeps();
-    const eventLog = new EventLog("sess-gate-2", deps);
 
-    // Always returns blocked content
     const adapter = stubAdapter(() => ({
       content: "Drink more milk for calcium!",
       stop: true,
@@ -1000,62 +989,34 @@ describe("runTurn (backward compat)", () => {
       userInput: "how can I get more calcium?",
       adapter,
       tracer,
-      eventLog,
       userContext: { allergies: ["milk"], medications: [] },
       interactionStore: fakeInteractionStore([]),
     });
 
-    // Fallback: cannot safely answer
-    expect(result.reply).toContain("cannot safely answer");
-
-    // Should have 3 gate_block events: original + 2 retries all blocked
-    const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
-    const gateBlocks = events.filter((e) => e.type === "gate_block");
-    expect(gateBlocks).toHaveLength(3);
-    expect(gateBlocks[0].data.attempt).toBe(1);
-    expect(gateBlocks[1].data.attempt).toBe(2);
-    expect(gateBlocks[2].data.attempt).toBe(3);
-
-    // One agent_response for the exhaustion fallback
-    const responses = events.filter((e) => e.type === "agent_response");
-    expect(responses).toHaveLength(1);
-    expect(responses[0].data.gateExhausted).toBe(true);
+    // Issue #47: run() returns model output as-is — no gate_blocked
+    expect(result.reply).toBe("Drink more milk for calcium!");
+    expect(result.stopReason).toBe("end_turn");
   });
 
-  it("post-gate: blocks on high-severity drug-nutrient conflict in output", async () => {
+  it("run() passes through high-severity drug-nutrient conflict content", async () => {
     const tracer = new Tracer();
-    const { sink, deps } = fixedDeps();
-    const eventLog = new EventLog("sess-gate-3", deps);
 
-    let calls = 0;
-    const adapter = stubAdapter(() => {
-      calls++;
-      if (calls === 1) {
-        return {
-          content: "A kale salad would be great for your health!",
-          stop: true,
-        };
-      }
-      return { content: "A cucumber salad is a safe choice.", stop: true };
-    });
+    const adapter = stubAdapter(() => ({
+      content: "A kale salad would be great for your health!",
+      stop: true,
+    }));
 
     const result = await runTurn({
       userInput: "what salad should I make?",
       adapter,
       tracer,
-      eventLog,
       userContext: { allergies: [], medications: ["warfarin"] },
       interactionStore: fakeInteractionStore(HIGH_SEVERITY_INTERACTIONS),
     });
 
-    expect(result.reply).toBe("A cucumber salad is a safe choice.");
-
-    const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
-    const gateBlocks = events.filter((e) => e.type === "gate_block");
-    expect(gateBlocks).toHaveLength(1);
-    const reason = (gateBlocks[0].data.reasons as string[])[0];
-    expect(reason).toContain("kale");
-    expect(reason).toContain("warfarin");
+    // Issue #47: run() doesn't gate — returns content as-is
+    expect(result.reply).toContain("kale");
+    expect(result.stopReason).toBe("end_turn");
   });
   describe("submit_answer terminal tool call (issue #43)", () => {
     function fakeInteractionStore(
@@ -1192,65 +1153,41 @@ describe("runTurn (backward compat)", () => {
       expect(result.reply).toBe("Fallback prose from model content.");
     });
 
-    it("submit_answer with post-gate block retries and returns clean response", async () => {
+    it("submit_answer passes through content as-is — gating is a turn-layer concern (issue #47)", async () => {
       const tracer = new Tracer();
-      const { sink, deps } = fixedDeps();
-      const eventLog = new EventLog("sess-sa-gate-1", deps);
 
-      let calls = 0;
-      const adapter = stubAdapter(() => {
-        calls++;
-        if (calls === 1) {
-          return {
-            content: "",
-            stop: false,
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: "call-sa-blocked",
-                name: "submit_answer",
-                args: {
-                  prose: "I recommend drinking milk daily for calcium.",
-                  foodRefs: [{ foodId: "f-milk", foodName: "milk", matchType: "exact" }],
-                  ruleRefs: [],
-                },
-              } satisfies ToolCall,
-            ],
-          };
-        }
-        return {
-          content: "",
-          stop: false,
-          finishReason: "tool_calls",
-          toolCalls: [
-            {
-              id: "call-sa-clean",
-              name: "submit_answer",
-              args: { prose: "I recommend drinking water.", foodRefs: [], ruleRefs: [] },
-            } satisfies ToolCall,
-          ],
-        };
-      });
+      const adapter = stubAdapter(() => ({
+        content: "",
+        stop: false,
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "call-sa-unblocked",
+            name: "submit_answer",
+            args: {
+              prose: "I recommend drinking milk daily for calcium.",
+              foodRefs: [{ foodId: "f-milk", foodName: "milk", matchType: "exact" }],
+              ruleRefs: [],
+            },
+          } satisfies ToolCall,
+        ],
+      }));
 
       const result = await runTurn({
         userInput: "what should I drink?",
         adapter,
         tracer,
-        eventLog,
         userContext: { allergies: ["milk"], medications: [] },
         interactionStore: fakeInteractionStore([]),
       });
 
-      expect(result.reply).toBe("I recommend drinking water.");
+      // Issue #47: run() no longer post-gates — submit_answer content passes through
+      expect(result.reply).toBe("I recommend drinking milk daily for calcium.");
       expect(result.output).toBeDefined();
       expect(result.stopReason).toBe("end_turn");
-
-      const events: LogEvent[] = sink.writes.map((w) => JSON.parse(w.line));
-      const gateBlocks = events.filter((e) => e.type === "gate_block");
-      expect(gateBlocks).toHaveLength(1);
     });
 
-    it("submit_answer with exhausted post-gate retries returns gate_blocked", async () => {
+    it("submit_answer with blocked content passes through — turn layer handles gating", async () => {
       const tracer = new Tracer();
       const adapter = stubAdapter(() => ({
         content: "",
@@ -1258,7 +1195,7 @@ describe("runTurn (backward compat)", () => {
         finishReason: "tool_calls",
         toolCalls: [
           {
-            id: "call-sa-always-blocked",
+            id: "call-sa-passthrough",
             name: "submit_answer",
             args: {
               prose: "Drink more milk for calcium!",
@@ -1277,8 +1214,10 @@ describe("runTurn (backward compat)", () => {
         interactionStore: fakeInteractionStore([]),
       });
 
-      expect(result.reply).toContain("cannot safely answer");
-      expect(result.stopReason).toBe("gate_blocked");
+      // Issue #47: run() returns model output as-is — no gate_blocked
+      expect(result.reply).toBe("Drink more milk for calcium!");
+      expect(result.stopReason).toBe("end_turn");
+      expect(result.output).toBeDefined();
     });
   });
 
