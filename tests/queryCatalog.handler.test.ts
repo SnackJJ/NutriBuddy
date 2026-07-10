@@ -596,6 +596,51 @@ describe("createInMemoryQueryRunner", () => {
       expect(parsed.type).toBe("error");
       expect(parsed.text).toBeUndefined();
     });
+
+    it("caps the model-facing observation rows; tracer keeps full fidelity (issue #57)", async () => {
+      const totalRows = 40; // exceeds MAX_OBSERVATION_ROWS (25)
+      const wideColumns: ColumnDef[] = [
+        { name: "date", type: "string", description: "day" },
+        { name: "total_kcal", type: "number", unit: "kcal", description: "" },
+      ];
+      const manyRowsRunner: QueryRunner = async () => ({
+        templateId: FOOD_LOOKUP_ID,
+        columns: wideColumns,
+        rows: Array.from({ length: totalRows }, (_, i) => ({
+          date: `2026-06-${String((i % 30) + 1).padStart(2, "0")}`,
+          total_kcal: 100 + i,
+        })),
+        rowCount: totalRows,
+        truncated: false,
+      });
+
+      const tracer = new Tracer();
+      const handler = createQueryCatalogHandler({
+        queryCatalog: seedQueryCatalog(),
+        runner: manyRowsRunner,
+        userId: USER_ID,
+        tracer,
+      });
+
+      const result = await handler({
+        template_id: FOOD_LOOKUP_ID,
+        food_id: "food-salmon-001",
+      });
+
+      // Model-facing observation is capped and flagged
+      const observation = expectObservationResult(result);
+      expect(observation.truncated).toBe(true);
+      expect(observation.rows.length).toBeLessThan(totalRows);
+      expect(observation.rowCount).toBe(totalRows);
+
+      // Trace destination keeps every row
+      const obsEvents = tracer.events().filter((e) => e.type === "observation");
+      const tracePayload: Record<string, unknown> = JSON.parse(
+        obsEvents[0].payload,
+      );
+      const traceObs = tracePayload.observation as { rows: unknown[] };
+      expect(traceObs.rows).toHaveLength(totalRows);
+    });
   });
 });
 
