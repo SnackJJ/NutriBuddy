@@ -62,6 +62,8 @@ export interface ToolCall {
 export interface ToolResult {
   readonly name: string;
   readonly result: string;
+  /** true when the tool dispatch was invalid (unknown tool or schema mismatch). */
+  readonly dispatchError?: boolean;
 }
 
 export interface ModelResponse {

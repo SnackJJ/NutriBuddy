@@ -26,6 +26,7 @@ import type {
   ToolCall,
   ToolCallDelta,
   ToolHandler,
+  ToolResult,
   ToolSchema,
 } from "./types";
 import type { Tracer } from "./tracer";
@@ -40,6 +41,116 @@ export const MAX_STEPS = 8;
 const MAX_POST_GATE_RETRIES = 2;
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CODE_ACT_TOOL = "code_act";
+
+// ─── Tool argument schema validation (issue #45) ─────────────────────────
+//
+// Validates model-supplied arguments against the tool's declared JSON Schema
+// (from ToolSchema.function.parameters). The provider's strict schema mode is
+// Beta-only and unreliable; this harness-side check ensures arguments conform
+// before dispatch. Returns null on success, or an error message on failure.
+
+interface PropertyDef {
+  readonly type?: string;
+  readonly enum?: readonly unknown[];
+  readonly description?: string;
+}
+
+interface SchemaParams {
+  readonly type?: string;
+  readonly properties?: Record<string, PropertyDef>;
+  readonly required?: readonly string[];
+}
+
+function validateArgs(
+  args: Readonly<Record<string, unknown>>,
+  schema: ToolSchema,
+): string | null {
+  const params = schema.function.parameters as SchemaParams;
+
+  // Required fields
+  const required = params.required ?? [];
+  for (const key of required) {
+    if (!(key in args)) {
+      const missing = required.filter((k) => !(k in args));
+      return `missing required argument(s): ${missing.join(", ")}`;
+    }
+  }
+
+  // Property types and enum constraints
+  const properties = params.properties ?? {};
+  for (const [key, value] of Object.entries(args)) {
+    const propDef = properties[key];
+    if (!propDef) continue; // extra properties are forwarded (lenient)
+
+    const propType = propDef.type;
+    if (propType === "string" && typeof value !== "string") {
+      return `argument "${key}" must be a string, got ${typeof value}`;
+    }
+    if (propType === "number" && typeof value !== "number") {
+      // JSON Schema "number" accepts both JS number and integer
+      return `argument "${key}" must be a number, got ${typeof value}`;
+    }
+    if (propType === "boolean" && typeof value !== "boolean") {
+      return `argument "${key}" must be a boolean, got ${typeof value}`;
+    }
+
+    // Enum constraint
+    if (propDef.enum && propDef.enum.length > 0) {
+      if (!propDef.enum.includes(value)) {
+        const allowed = propDef.enum.map(String).join(", ");
+        return `argument "${key}" value "${String(value)}" not in allowed enum: [${allowed}]`;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Dispatch a tool call: validate args against the declared schema, then
+ * invoke the handler. Returns the result and whether the dispatch was valid.
+ */
+async function dispatchTool(
+  toolCall: ToolCall,
+  tools: ReadonlyMap<string, ToolHandler> | undefined,
+  toolSchemas: readonly ToolSchema[] | undefined,
+  tracer: Tracer,
+  step: number,
+): Promise<ToolResult> {
+  const schema = toolSchemas?.find(
+    (s) => s.function.name === toolCall.name,
+  );
+
+  // Record tool_call trace event for scorer visibility
+  tracer.record({
+    step,
+    type: "tool_call",
+    payload: JSON.stringify({
+      name: toolCall.name,
+      args: toolCall.args,
+    }),
+  });
+
+  // Unknown tool
+  const handler = tools?.get(toolCall.name);
+  if (!handler) {
+    const errorMsg = `tool "${toolCall.name}" not found — no handler registered`;
+    return { name: toolCall.name, result: errorMsg, dispatchError: true };
+  }
+
+  // Schema validation (only when a schema is declared)
+  if (schema) {
+    const validationError = validateArgs(toolCall.args, schema);
+    if (validationError) {
+      const errorMsg = `argument validation failed for "${toolCall.name}": ${validationError}`;
+      return { name: toolCall.name, result: errorMsg, dispatchError: true };
+    }
+  }
+
+  // Valid dispatch: call handler
+  const result = await handler(toolCall.args);
+  return { name: toolCall.name, result };
+}
 
 export interface RunTurnInput {
   readonly userInput: string;
@@ -233,18 +344,23 @@ export async function* run(
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
-        const handler = tools?.get(tc.name);
-        const result = handler
-          ? await handler(tc.args)
-          : `tool "${tc.name}" not found — no handler registered`;
+        const toolResult = await dispatchTool(
+          tc,
+          tools,
+          toolSchemas,
+          tracer,
+          step,
+        );
 
         yield {
           type: "observe",
           step,
-          toolResult: { name: tc.name, result },
+          toolResult,
         };
 
-        working.push(createToolResultMessage(tc, result));
+        working.push(
+          createToolResultMessage(tc, toolResult.result),
+        );
       }
       // 工具调用后继续循环（不在此步交卷）
       continue;

@@ -317,12 +317,15 @@ async function* runUtteranceTurn(
 
       // Emit tool gate verdict after each tool observation
       if (next.value.type === "observe" && next.value.toolResult) {
+        const dispatchOk = !next.value.toolResult.dispatchError;
         yield createGateVerdictEvent(
           {
             checkpoint: "tool",
-            verdict: "pass",
+            verdict: dispatchOk ? "pass" : "error",
             checkName: "tool_gate_check",
-            evidence: `Tool ${next.value.toolResult.name} executed successfully`,
+            evidence: dispatchOk
+              ? `Tool ${next.value.toolResult.name} executed successfully`
+              : `Tool ${next.value.toolResult.name} dispatch error: ${next.value.toolResult.result}`,
           },
           nextMetadata,
         );
