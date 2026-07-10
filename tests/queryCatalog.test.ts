@@ -4,12 +4,20 @@ import {
   validateParams,
   executeQuery,
   FOOD_LOOKUP_TEMPLATE,
+  MEAL_SUMMARY_TEMPLATE,
+  DAILY_TOTALS_TEMPLATE,
+  WEEKLY_TOTALS_TEMPLATE,
+  DAILY_AVERAGE_TEMPLATE,
+  RANGE_COMPARISON_TEMPLATE,
+  TOP_K_BY_NUTRIENT_TEMPLATE,
+  ALL_QUERY_TEMPLATES,
   type QueryCatalog,
   type QueryTemplate,
   type Observation,
   type ParamDef,
   type ColumnDef,
   type QueryResult,
+  type MealRecord,
 } from "../src/catalog/queryCatalog";
 import { buildTemplatePromptSection } from "../src/harness/contextAssembler";
 import {
@@ -18,6 +26,7 @@ import {
   type Catalog,
 } from "../src/catalog/catalog";
 import { resolveFood } from "../src/catalog/resolver";
+import { createInMemoryQueryRunner } from "../src/harness/queryCatalog";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -110,6 +119,10 @@ function expectColumn(
   expect(column).toBeDefined();
   expect(column!.type).toBe(expected.type);
   expect(column!.unit).toBe(expected.unit);
+}
+
+function round1dp(value: number): number {
+  return Math.round(value * 10) / 10;
 }
 
 // ─── template definitions ──────────────────────────────────────────────────
@@ -782,5 +795,1005 @@ describe("template signature exposure for prompt injection", () => {
     expect(promptSection).toContain("number (optional)");
     expect(promptSection).toContain("kcal");
     expect(promptSection).toContain("protein_g");
+  });
+});
+
+// ─── template definitions: templates 2–7 ───────────────────────────────────
+
+function assertTemplateShape(template: QueryTemplate, expectedId: string): void {
+  expect(template.id).toBe(expectedId);
+  expect(template.description.length).toBeGreaterThan(0);
+  expect(template.parameters.length).toBeGreaterThan(0);
+  expect(template.resultSchema.length).toBeGreaterThan(0);
+
+  for (const p of template.parameters) {
+    expect(p.name.length).toBeGreaterThan(0);
+    expect(p.description.length).toBeGreaterThan(0);
+    expect(["string", "number", "enum", "date"]).toContain(p.type);
+  }
+
+  for (const c of template.resultSchema) {
+    expect(c.name.length).toBeGreaterThan(0);
+    expect(c.description.length).toBeGreaterThan(0);
+    expect(["string", "number", "date", "boolean"]).toContain(c.type);
+  }
+}
+
+/** Assert that every numeric column carrying a unit name-match has a non-empty unit. */
+function assertNumericColumnsHaveUnits(
+  schema: readonly ColumnDef[],
+  unitColumnPatterns: string[],
+): void {
+  const unitCols = new Set(
+    schema.filter((c) => c.type === "number" && c.unit !== undefined).map((c) => c.name),
+  );
+  for (const pattern of unitColumnPatterns) {
+    const col = schema.find((c) => c.name.includes(pattern));
+    if (col && col.type === "number") {
+      expect(col.unit).toBeDefined();
+      expect(col.unit!.length).toBeGreaterThan(0);
+    }
+  }
+}
+
+const ALL_SEVEN = [
+  FOOD_LOOKUP_TEMPLATE,
+  MEAL_SUMMARY_TEMPLATE,
+  DAILY_TOTALS_TEMPLATE,
+  WEEKLY_TOTALS_TEMPLATE,
+  DAILY_AVERAGE_TEMPLATE,
+  RANGE_COMPARISON_TEMPLATE,
+  TOP_K_BY_NUTRIENT_TEMPLATE,
+];
+
+describe("QueryTemplate definitions — seven reviewed templates", () => {
+  it("ALL_QUERY_TEMPLATES contains exactly seven templates", () => {
+    expect(ALL_QUERY_TEMPLATES).toHaveLength(7);
+  });
+
+  it("every template has a unique id", () => {
+    const ids = ALL_SEVEN.map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("every template passes structural validation", () => {
+    for (const t of ALL_SEVEN) {
+      assertTemplateShape(t, t.id);
+    }
+  });
+
+  it("meal_summary has date range params and per-meal-type result schema", () => {
+    assertTemplateShape(MEAL_SUMMARY_TEMPLATE, "meal_summary");
+
+    const dateParams = MEAL_SUMMARY_TEMPLATE.parameters.filter(
+      (p) => p.type === "date",
+    );
+    expect(dateParams).toHaveLength(2);
+    expect(dateParams.every((p) => p.required)).toBe(true);
+
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "meal_type", {
+      type: "string",
+    });
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "meal_count", {
+      type: "number",
+    });
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "total_kcal", {
+      type: "number",
+      unit: "kcal",
+    });
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "total_protein_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "total_fat_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(MEAL_SUMMARY_TEMPLATE.resultSchema, "total_carbs_g", {
+      type: "number",
+      unit: "g",
+    });
+  });
+
+  it("daily_totals has date params and per-day result schema", () => {
+    assertTemplateShape(DAILY_TOTALS_TEMPLATE, "daily_totals");
+
+    const dateParams = DAILY_TOTALS_TEMPLATE.parameters.filter(
+      (p) => p.type === "date",
+    );
+    expect(dateParams).toHaveLength(2);
+    expect(dateParams.every((p) => p.required)).toBe(true);
+
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "date", { type: "date" });
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "total_kcal", {
+      type: "number",
+      unit: "kcal",
+    });
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "total_protein_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "total_fat_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "total_carbs_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(DAILY_TOTALS_TEMPLATE.resultSchema, "meal_count", {
+      type: "number",
+    });
+  });
+
+  it("weekly_totals has week_start date column and day_count", () => {
+    assertTemplateShape(WEEKLY_TOTALS_TEMPLATE, "weekly_totals");
+
+    expectColumn(WEEKLY_TOTALS_TEMPLATE.resultSchema, "week_start", {
+      type: "date",
+    });
+    expectColumn(WEEKLY_TOTALS_TEMPLATE.resultSchema, "day_count", {
+      type: "number",
+    });
+    expectColumn(WEEKLY_TOTALS_TEMPLATE.resultSchema, "total_kcal", {
+      type: "number",
+      unit: "kcal",
+    });
+  });
+
+  it("daily_average exposes averages with total_days denominator", () => {
+    assertTemplateShape(DAILY_AVERAGE_TEMPLATE, "daily_average");
+
+    expectColumn(DAILY_AVERAGE_TEMPLATE.resultSchema, "avg_kcal", {
+      type: "number",
+      unit: "kcal",
+    });
+    expectColumn(DAILY_AVERAGE_TEMPLATE.resultSchema, "avg_protein_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(DAILY_AVERAGE_TEMPLATE.resultSchema, "days_with_meals", {
+      type: "number",
+    });
+    expectColumn(DAILY_AVERAGE_TEMPLATE.resultSchema, "total_days", {
+      type: "number",
+    });
+  });
+
+  it("range_comparison exposes diff columns for model-free comparison", () => {
+    assertTemplateShape(RANGE_COMPARISON_TEMPLATE, "range_comparison");
+
+    // Four date params
+    const dateParams = RANGE_COMPARISON_TEMPLATE.parameters.filter(
+      (p) => p.type === "date",
+    );
+    expect(dateParams).toHaveLength(4);
+
+    // Difference columns must exist — the no-arithmetic contract depends on them
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "diff_kcal", {
+      type: "number",
+      unit: "kcal",
+    });
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "diff_protein_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "diff_fat_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "diff_carbs_g", {
+      type: "number",
+      unit: "g",
+    });
+
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "range1_days", {
+      type: "number",
+    });
+    expectColumn(RANGE_COMPARISON_TEMPLATE.resultSchema, "range2_days", {
+      type: "number",
+    });
+  });
+
+  it("top_k_by_nutrient has enum param for nutrient and number param for k", () => {
+    assertTemplateShape(TOP_K_BY_NUTRIENT_TEMPLATE, "top_k_by_nutrient");
+
+    const nutrientParam = TOP_K_BY_NUTRIENT_TEMPLATE.parameters.find(
+      (p) => p.name === "nutrient",
+    );
+    expect(nutrientParam).toBeDefined();
+    expect(nutrientParam!.type).toBe("enum");
+    expect(nutrientParam!.enumValues).toEqual(["kcal", "protein", "fat", "carbs"]);
+
+    const kParam = TOP_K_BY_NUTRIENT_TEMPLATE.parameters.find(
+      (p) => p.name === "k",
+    );
+    expect(kParam).toBeDefined();
+    expect(kParam!.type).toBe("number");
+    expect(kParam!.required).toBe(true);
+
+    expectColumn(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema, "rank", {
+      type: "number",
+    });
+    expectColumn(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema, "food_name", {
+      type: "string",
+    });
+    expectColumn(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema, "total_portion_g", {
+      type: "number",
+      unit: "g",
+    });
+    expectColumn(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema, "meal_count", {
+      type: "number",
+    });
+  });
+});
+
+// ─── query catalog: seven-template construction ───────────────────────────
+
+describe("createQueryCatalog — seven templates", () => {
+  it("creates a catalog from all seven templates", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+
+    expect(catalog.templates.size).toBe(7);
+    expect(catalog.templateList).toHaveLength(7);
+  });
+
+  it("every template is reachable by id", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+
+    for (const t of ALL_QUERY_TEMPLATES) {
+      expect(catalog.templates.get(t.id)).toBe(t);
+    }
+  });
+
+  it("rejects duplicate across different template groups", () => {
+    expect(() =>
+      createQueryCatalog([FOOD_LOOKUP_TEMPLATE, FOOD_LOOKUP_TEMPLATE]),
+    ).toThrow(/duplicate/i);
+  });
+});
+
+// ─── parameter validation: templates 2–7 ──────────────────────────────────
+
+describe("validateParams — templates 2–7", () => {
+  const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+
+  it("meal_summary requires date_from and date_to", () => {
+    const t = catalog.templates.get("meal_summary")!;
+    expect(validateParams(t, {})).toHaveLength(2);
+
+    const valid = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("meal_summary rejects non-date strings for date params", () => {
+    const t = catalog.templates.get("meal_summary")!;
+    const errors = validateParams(t, {
+      date_from: "not-a-date",
+      date_to: "2026-07-07",
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].param).toBe("date_from");
+  });
+
+  it("daily_totals requires date_from and date_to", () => {
+    const t = catalog.templates.get("daily_totals")!;
+    expect(validateParams(t, {})).toHaveLength(2);
+
+    const valid = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("weekly_totals requires date_from and date_to", () => {
+    const t = catalog.templates.get("weekly_totals")!;
+    expect(validateParams(t, {})).toHaveLength(2);
+
+    const valid = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-14",
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("daily_average requires date_from and date_to", () => {
+    const t = catalog.templates.get("daily_average")!;
+    expect(validateParams(t, {})).toHaveLength(2);
+
+    const valid = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("range_comparison requires four date params", () => {
+    const t = catalog.templates.get("range_comparison")!;
+    expect(validateParams(t, {})).toHaveLength(4);
+
+    const valid = validateParams(t, {
+      range1_from: "2026-06-26",
+      range1_to: "2026-07-02",
+      range2_from: "2026-07-03",
+      range2_to: "2026-07-09",
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("range_comparison rejects extra unknown params", () => {
+    const t = catalog.templates.get("range_comparison")!;
+    const errors = validateParams(t, {
+      range1_from: "2026-06-26",
+      range1_to: "2026-07-02",
+      range2_from: "2026-07-03",
+      range2_to: "2026-07-09",
+      user_id: "hacker",
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].param).toBe("user_id");
+  });
+
+  it("top_k_by_nutrient requires date_from, date_to, nutrient, k", () => {
+    const t = catalog.templates.get("top_k_by_nutrient")!;
+    expect(validateParams(t, {})).toHaveLength(4);
+
+    const valid = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+      nutrient: "protein",
+      k: 5,
+    });
+    expect(valid).toHaveLength(0);
+  });
+
+  it("top_k_by_nutrient rejects invalid nutrient enum values", () => {
+    const t = catalog.templates.get("top_k_by_nutrient")!;
+    const errors = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+      nutrient: "fiber",
+      k: 3,
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].param).toBe("nutrient");
+    expect(errors[0].message).toMatch(/enum/i);
+  });
+
+  it("top_k_by_nutrient rejects non-positive k", () => {
+    const t = catalog.templates.get("top_k_by_nutrient")!;
+    const errors = validateParams(t, {
+      date_from: "2026-07-01",
+      date_to: "2026-07-07",
+      nutrient: "kcal",
+      k: 0,
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].param).toBe("k");
+  });
+});
+
+// ─── in-memory runner: meal-based templates ───────────────────────────────
+
+function makeMeal(overrides: Partial<MealRecord> = {}): MealRecord {
+  return {
+    userId: "user-001",
+    foodName: "chicken breast",
+    portionG: 200,
+    mealType: "lunch",
+    loggedAt: "2026-07-06T12:00:00Z",
+    kcal: 330,
+    proteinG: 62,
+    fatG: 7.2,
+    carbsG: 0,
+    ...overrides,
+  };
+}
+
+function makeWeekMeals(): MealRecord[] {
+  return [
+    // Monday 2026-07-06
+    makeMeal({ foodName: "oatmeal", mealType: "breakfast", loggedAt: "2026-07-06T08:00:00Z", kcal: 170, proteinG: 6, fatG: 3.6, carbsG: 29, portionG: 240 }),
+    makeMeal({ foodName: "chicken breast", mealType: "lunch", loggedAt: "2026-07-06T12:00:00Z", kcal: 330, proteinG: 62, fatG: 7.2, carbsG: 0, portionG: 200 }),
+    makeMeal({ foodName: "salmon", mealType: "dinner", loggedAt: "2026-07-06T19:00:00Z", kcal: 354, proteinG: 34, fatG: 22.1, carbsG: 0, portionG: 170 }),
+    // Tuesday 2026-07-07
+    makeMeal({ foodName: "egg", mealType: "breakfast", loggedAt: "2026-07-07T08:00:00Z", kcal: 310, proteinG: 26, fatG: 22, carbsG: 2.2, portionG: 200 }),
+    makeMeal({ foodName: "white rice", mealType: "lunch", loggedAt: "2026-07-07T12:00:00Z", kcal: 260, proteinG: 5.4, fatG: 0.6, carbsG: 56, portionG: 200 }),
+    makeMeal({ foodName: "broccoli", mealType: "dinner", loggedAt: "2026-07-07T19:00:00Z", kcal: 34, proteinG: 2.8, fatG: 0.4, carbsG: 7, portionG: 100 }),
+    // Wednesday 2026-07-08
+    makeMeal({ foodName: "chicken breast", mealType: "lunch", loggedAt: "2026-07-08T12:00:00Z", kcal: 330, proteinG: 62, fatG: 7.2, carbsG: 0, portionG: 200 }),
+    // Thursday 2026-07-09
+    makeMeal({ foodName: "salmon", mealType: "dinner", loggedAt: "2026-07-09T19:00:00Z", kcal: 354, proteinG: 34, fatG: 22.1, carbsG: 0, portionG: 170 }),
+    makeMeal({ foodName: "banana", mealType: "snack", loggedAt: "2026-07-09T15:00:00Z", kcal: 105, proteinG: 1.3, fatG: 0.4, carbsG: 27.1, portionG: 118 }),
+  ];
+}
+
+describe("createInMemoryQueryRunner — food_lookup (existing)", () => {
+  const catalog = seedCatalog();
+  const runner = createInMemoryQueryRunner(catalog);
+
+  it("returns observation for valid food", async () => {
+    const obs = await runner("food_lookup", { food_id: "food-salmon-001" }, "user-001");
+    expect(obs.templateId).toBe("food_lookup");
+    expect(obs.rows[0].food_name).toBe("salmon");
+  });
+});
+
+describe("createInMemoryQueryRunner — meal_summary", () => {
+  const catalog = seedCatalog();
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("aggregates meals by meal type within date range", async () => {
+    const obs = await runner("meal_summary", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.templateId).toBe("meal_summary");
+    expect(obs.rowCount).toBeGreaterThan(0);
+    expect(obs.truncated).toBe(false);
+
+    // Find lunch row
+    const lunch = obs.rows.find((r) => r.meal_type === "lunch");
+    expect(lunch).toBeDefined();
+    expect(lunch!.meal_count).toBe(3); // Mon lunch, Tue lunch, Wed lunch
+    expect(lunch!.total_kcal).toBeGreaterThan(0);
+    expect(lunch!.total_protein_g).toBeGreaterThan(0);
+  });
+
+  it("returns only rows for meal types that have data", async () => {
+    const obs = await runner("meal_summary", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+    }, "user-001");
+
+    const mealTypes = obs.rows.map((r) => r.meal_type);
+    // breakfast, lunch, dinner, snack should all be present in our test data
+    expect(mealTypes).toContain("breakfast");
+    expect(mealTypes).toContain("lunch");
+    expect(mealTypes).toContain("dinner");
+    expect(mealTypes).toContain("snack");
+    // No rows for meal types with zero meals
+    for (const r of obs.rows) {
+      expect(r.meal_count).toBeGreaterThan(0);
+    }
+  });
+
+  it("scopes to user identity", async () => {
+    const mixedMeals = [
+      makeMeal({ userId: "user-A", foodName: "chicken breast", loggedAt: "2026-07-06T12:00:00Z", kcal: 330 }),
+      makeMeal({ userId: "user-B", foodName: "salmon", loggedAt: "2026-07-06T12:00:00Z", kcal: 354 }),
+    ];
+    const mixedRunner = createInMemoryQueryRunner(catalog, mixedMeals);
+
+    const obsA = await mixedRunner("meal_summary", {
+      date_from: "2026-07-01", date_to: "2026-07-10",
+    }, "user-A");
+    expect(obsA.rows).toHaveLength(1);
+    expect(obsA.rows[0].meal_type).toBe("lunch");
+    expect(obsA.rows[0].total_kcal).toBe(330);
+
+    const obsB = await mixedRunner("meal_summary", {
+      date_from: "2026-07-01", date_to: "2026-07-10",
+    }, "user-B");
+    expect(obsB.rows).toHaveLength(1);
+    expect(obsB.rows[0].total_kcal).toBe(354);
+  });
+
+  it("returns empty when no meals in range", async () => {
+    const obs = await runner("meal_summary", {
+      date_from: "2020-01-01",
+      date_to: "2020-01-07",
+    }, "user-001");
+
+    expect(obs.rows).toHaveLength(0);
+    expect(obs.rowCount).toBe(0);
+  });
+
+  it("carries schema-declared columns with unit metadata", async () => {
+    const obs = await runner("meal_summary", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.columns).toBe(MEAL_SUMMARY_TEMPLATE.resultSchema);
+
+    // Nutrition columns must carry units; count columns are unitless
+    const unitColumns = obs.columns.filter((c) => c.type === "number" && c.name.startsWith("total_"));
+    for (const col of unitColumns) {
+      expect(col.unit).toBeDefined();
+    }
+  });
+});
+
+describe("createInMemoryQueryRunner — daily_totals", () => {
+  const catalog = seedCatalog();
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("returns one row per day with meals", async () => {
+    const obs = await runner("daily_totals", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.templateId).toBe("daily_totals");
+    // 4 days (Mon–Thu) all have meals
+    expect(obs.rowCount).toBe(4);
+
+    const dates = obs.rows.map((r) => r.date);
+    expect(dates).toContain("2026-07-06");
+    expect(dates).toContain("2026-07-07");
+    expect(dates).toContain("2026-07-08");
+    expect(dates).toContain("2026-07-09");
+  });
+
+  it("sums nutrition correctly for a day", async () => {
+    const obs = await runner("daily_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-06",
+    }, "user-001");
+
+    expect(obs.rowCount).toBe(1);
+    const day = obs.rows[0];
+    // Mon: oatmeal(170) + chicken(330) + salmon(354) = 854 kcal
+    expect(day.total_kcal).toBe(854);
+    expect(day.meal_count).toBe(3);
+  });
+
+  it("days with no meals are omitted", async () => {
+    const obs = await runner("daily_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    // July 8 (Wed) has 1 meal, July 9 (Thu) has 2 meals
+    // All 4 days have at least 1 meal
+    const day6 = obs.rows.find((r) => r.date === "2026-07-06");
+    expect(day6).toBeDefined();
+    expect(day6!.meal_count).toBe(3);
+
+    const day8 = obs.rows.find((r) => r.date === "2026-07-08");
+    expect(day8).toBeDefined();
+    expect(day8!.meal_count).toBe(1);
+  });
+
+  it("carries schema-declared columns", async () => {
+    const obs = await runner("daily_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-06",
+    }, "user-001");
+
+    expect(obs.columns).toBe(DAILY_TOTALS_TEMPLATE.resultSchema);
+  });
+});
+
+describe("createInMemoryQueryRunner — weekly_totals", () => {
+  const catalog = seedCatalog();
+  // Week covering Mon 2026-07-06 through Thu 2026-07-09 (same ISO week)
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("groups by ISO week and returns week_start Mondays", async () => {
+    const obs = await runner("weekly_totals", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.templateId).toBe("weekly_totals");
+    expect(obs.rowCount).toBe(1); // All meals in one ISO week
+    expect(obs.rows[0].week_start).toBe("2026-07-06"); // Monday of that week
+  });
+
+  it("counts distinct days and total meals", async () => {
+    const obs = await runner("weekly_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    const week = obs.rows[0];
+    expect(week.meal_count).toBe(9); // All 9 meals
+    expect(week.day_count).toBe(4); // Mon–Thu
+  });
+
+  it("totals nutrition across the week", async () => {
+    const obs = await runner("weekly_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    const week = obs.rows[0];
+    // All meals combined: need to sum from makeWeekMeals
+    // oatmeal(170) + chicken(330) + salmon(354) + egg(310) + rice(260) +
+    // broccoli(34) + chicken(330) + salmon(354) + banana(105) = 2247
+    expect(week.total_kcal).toBeGreaterThan(2000);
+    expect(week.total_kcal).toBe(2247);
+  });
+
+  it("carries schema-declared columns", async () => {
+    const obs = await runner("weekly_totals", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.columns).toBe(WEEKLY_TOTALS_TEMPLATE.resultSchema);
+  });
+});
+
+describe("createInMemoryQueryRunner — daily_average", () => {
+  const catalog = seedCatalog();
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("computes average per day over the full range", async () => {
+    const obs = await runner("daily_average", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.templateId).toBe("daily_average");
+    expect(obs.rowCount).toBe(1);
+
+    const row = obs.rows[0];
+    expect(row.total_days).toBe(4); // 4 days inclusive
+    expect(row.days_with_meals).toBe(4);
+    // Total kcal = 2247, avg = 2247/4 = 561.75 → round to 561.8
+    expect(row.avg_kcal).toBe(561.8);
+    expect(row.avg_protein_g).toBeGreaterThan(0);
+    expect(row.avg_fat_g).toBeGreaterThan(0);
+    expect(row.avg_carbs_g).toBeGreaterThan(0);
+  });
+
+  it("denominator is total days, not days with meals", async () => {
+    // Only 1 day of meals out of a 7-day range
+    const singleDayMeals = [makeMeal({ loggedAt: "2026-07-06T12:00:00Z", kcal: 500 })];
+    const singleRunner = createInMemoryQueryRunner(catalog, singleDayMeals);
+
+    const obs = await singleRunner("daily_average", {
+      date_from: "2026-07-01", date_to: "2026-07-07",
+    }, "user-001");
+
+    expect(obs.rows[0].total_days).toBe(7);
+    expect(obs.rows[0].days_with_meals).toBe(1);
+    expect(obs.rows[0].avg_kcal).toBe(71.4); // 500/7 ≈ 71.4
+  });
+
+  it("carries schema-declared columns", async () => {
+    const obs = await runner("daily_average", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.columns).toBe(DAILY_AVERAGE_TEMPLATE.resultSchema);
+  });
+});
+
+describe("createInMemoryQueryRunner — range_comparison", () => {
+  const catalog = seedCatalog();
+
+  // Week 1 (2026-07-06 to 2026-07-07): 5 meals, 2 days
+  // Week 2 (2026-07-08 to 2026-07-09): 3 meals, 2 days
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("computes per-range averages and diff columns", async () => {
+    const obs = await runner("range_comparison", {
+      range1_from: "2026-07-06",
+      range1_to: "2026-07-07",
+      range2_from: "2026-07-08",
+      range2_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.templateId).toBe("range_comparison");
+    expect(obs.rowCount).toBe(1);
+
+    const row = obs.rows[0];
+    // R1: Mon(854) + Tue(604) = 1458 over 2 days = 729 avg
+    // R2: Wed(330) + Thu(354+105) = 789 over 2 days = 394.5 avg
+    expect(row.range1_avg_kcal).toBe(729);
+    expect(row.range2_avg_kcal).toBe(394.5);
+    expect(row.diff_kcal).toBe(394.5 - 729); // -334.5
+    expect(row.range1_days).toBe(2);
+    expect(row.range2_days).toBe(2);
+  });
+
+  it("diff column is observed, not model-computed", async () => {
+    const obs = await runner("range_comparison", {
+      range1_from: "2026-07-06",
+      range1_to: "2026-07-07",
+      range2_from: "2026-07-08",
+      range2_to: "2026-07-09",
+    }, "user-001");
+
+    const row = obs.rows[0];
+    // The diff MUST be available as a column so the model reads it
+    expect(typeof row.diff_kcal).toBe("number");
+    expect(typeof row.diff_protein_g).toBe("number");
+    expect(typeof row.diff_fat_g).toBe("number");
+    expect(typeof row.diff_carbs_g).toBe("number");
+
+    // Verify: diff ≈ range2 - range1 (within 0.2 for floating point / rounding)
+    // Runner computes diff from raw values before display rounding,
+    // so re-deriving from display values may differ by ≤0.1.
+    const tolerance = 0.2;
+    expect(Math.abs(Number(row.diff_kcal) - (Number(row.range2_avg_kcal) - Number(row.range1_avg_kcal)))).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(Number(row.diff_protein_g) - (Number(row.range2_avg_protein_g) - Number(row.range1_avg_protein_g)))).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(Number(row.diff_fat_g) - (Number(row.range2_avg_fat_g) - Number(row.range1_avg_fat_g)))).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(Number(row.diff_carbs_g) - (Number(row.range2_avg_carbs_g) - Number(row.range1_avg_carbs_g)))).toBeLessThanOrEqual(tolerance);
+  });
+
+  it("carries schema-declared columns", async () => {
+    const obs = await runner("range_comparison", {
+      range1_from: "2026-07-06",
+      range1_to: "2026-07-07",
+      range2_from: "2026-07-08",
+      range2_to: "2026-07-09",
+    }, "user-001");
+
+    expect(obs.columns).toBe(RANGE_COMPARISON_TEMPLATE.resultSchema);
+  });
+});
+
+describe("createInMemoryQueryRunner — top_k_by_nutrient", () => {
+  const catalog = seedCatalog();
+  const meals = makeWeekMeals();
+  const runner = createInMemoryQueryRunner(catalog, meals);
+
+  it("ranks foods by the specified nutrient descending", async () => {
+    const obs = await runner("top_k_by_nutrient", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+      nutrient: "protein",
+      k: 3,
+    }, "user-001");
+
+    expect(obs.templateId).toBe("top_k_by_nutrient");
+    expect(obs.rowCount).toBe(3);
+
+    // Rank 1 must have highest protein
+    expect(obs.rows[0].rank).toBe(1);
+    expect(obs.rows[0].total_protein_g).toBeGreaterThanOrEqual(
+      Number(obs.rows[1].total_protein_g),
+    );
+  });
+
+  it("returns at most k rows", async () => {
+    const obs = await runner("top_k_by_nutrient", {
+      date_from: "2026-07-06",
+      date_to: "2026-07-09",
+      nutrient: "kcal",
+      k: 5,
+    }, "user-001");
+
+    expect(obs.rowCount).toBeLessThanOrEqual(5);
+    // There are 6 distinct foods, so we should get 5
+    expect(obs.rowCount).toBe(5);
+  });
+
+  it("returns fewer rows when there are fewer distinct foods than k", async () => {
+    // Only 1 food type
+    const singleFoodMeals = [
+      makeMeal({ loggedAt: "2026-07-06T12:00:00Z" }),
+      makeMeal({ loggedAt: "2026-07-06T19:00:00Z" }),
+    ];
+    const singleRunner = createInMemoryQueryRunner(catalog, singleFoodMeals);
+
+    const obs = await singleRunner("top_k_by_nutrient", {
+      date_from: "2026-07-01", date_to: "2026-07-10",
+      nutrient: "protein", k: 10,
+    }, "user-001");
+
+    expect(obs.rowCount).toBe(1);
+    expect(obs.rows[0].rank).toBe(1);
+  });
+
+  it("supports ranking by all four nutrient types", async () => {
+    for (const nutrient of ["kcal", "protein", "fat", "carbs"] as const) {
+      const obs = await runner("top_k_by_nutrient", {
+        date_from: "2026-07-06", date_to: "2026-07-09",
+        nutrient, k: 3,
+      }, "user-001");
+
+      expect(obs.rowCount).toBeGreaterThan(0);
+      // Rows must be sorted by the chosen nutrient descending
+      for (let i = 0; i < obs.rowCount - 1; i++) {
+        const nutrientCol = nutrient === "kcal" ? "total_kcal"
+          : nutrient === "protein" ? "total_protein_g"
+          : nutrient === "fat" ? "total_fat_g"
+          : "total_carbs_g";
+        expect(Number(obs.rows[i][nutrientCol])).toBeGreaterThanOrEqual(
+          Number(obs.rows[i + 1][nutrientCol]),
+        );
+      }
+    }
+  });
+
+  it("carries schema-declared columns", async () => {
+    const obs = await runner("top_k_by_nutrient", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+      nutrient: "kcal", k: 3,
+    }, "user-001");
+
+    expect(obs.columns).toBe(TOP_K_BY_NUTRIENT_TEMPLATE.resultSchema);
+  });
+
+  it("total_portion_g tracks cumulative portion across meals", async () => {
+    const obs = await runner("top_k_by_nutrient", {
+      date_from: "2026-07-06", date_to: "2026-07-09",
+      nutrient: "protein", k: 5,
+    }, "user-001");
+
+    const chicken = obs.rows.find((r) => r.food_name === "chicken breast");
+    expect(chicken).toBeDefined();
+    // chicken breast appears twice: 200g + 200g = 400g
+    expect(chicken!.total_portion_g).toBe(400);
+    expect(chicken!.meal_count).toBe(2);
+  });
+});
+
+// ─── full catalog prompt section ──────────────────────────────────────────
+
+describe("buildTemplatePromptSection — seven templates", () => {
+  it("renders all seven template ids", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("food_lookup");
+    expect(section).toContain("meal_summary");
+    expect(section).toContain("daily_totals");
+    expect(section).toContain("weekly_totals");
+    expect(section).toContain("daily_average");
+    expect(section).toContain("range_comparison");
+    expect(section).toContain("top_k_by_nutrient");
+  });
+
+  it("includes parameter type annotations for all templates", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("(required)");
+    // meal_summary and daily_totals have required date params
+    expect(section).toContain("date (required)");
+    // top_k_by_nutrient has enum param
+    expect(section).toContain("enum (required)");
+    expect(section).toContain("kcal");
+    expect(section).toContain("protein");
+    expect(section).toContain("fat");
+    expect(section).toContain("carbs");
+  });
+
+  it("includes unit-bearing result columns for all templates", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    // Unit-bearing columns must appear for numeric gate consumption
+    expect(section).toContain("(kcal)");
+    expect(section).toContain("(g)");
+  });
+
+  it("range_comparison section includes diff columns", () => {
+    const catalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+    const section = buildTemplatePromptSection(catalog)!;
+
+    expect(section).toContain("diff_kcal");
+    expect(section).toContain("diff_protein_g");
+  });
+
+  it("returns undefined for empty catalog", () => {
+    const section = buildTemplatePromptSection(createQueryCatalog([]));
+    expect(section).toBeUndefined();
+  });
+
+  it("returns undefined for undefined catalog", () => {
+    const section = buildTemplatePromptSection(undefined);
+    expect(section).toBeUndefined();
+  });
+});
+
+// ─── executeQuery with all seven templates ─────────────────────────────────
+
+describe("executeQuery — all seven templates through catalog layer", () => {
+  const foodCatalog = seedCatalog();
+  const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+  // Runner with no meal data (only food_lookup will return non-empty)
+  const runner = createInMemoryQueryRunner(foodCatalog, []);
+
+  it("executes food_lookup successfully", async () => {
+    const result = await executeQuery(
+      queryCatalog, "food_lookup",
+      { food_id: "food-salmon-001" },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+  });
+
+  it("executes meal_summary (empty meals) and returns empty observation", async () => {
+    const result = await executeQuery(
+      queryCatalog, "meal_summary",
+      { date_from: "2026-07-01", date_to: "2026-07-07" },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rowCount).toBe(0);
+    }
+  });
+
+  it("executes daily_totals (empty meals) and returns empty observation", async () => {
+    const result = await executeQuery(
+      queryCatalog, "daily_totals",
+      { date_from: "2026-07-01", date_to: "2026-07-07" },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rowCount).toBe(0);
+    }
+  });
+
+  it("executes weekly_totals (empty meals) and returns empty observation", async () => {
+    const result = await executeQuery(
+      queryCatalog, "weekly_totals",
+      { date_from: "2026-07-01", date_to: "2026-07-14" },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rowCount).toBe(0);
+    }
+  });
+
+  it("executes daily_average (empty meals) and returns zero averages", async () => {
+    const result = await executeQuery(
+      queryCatalog, "daily_average",
+      { date_from: "2026-07-01", date_to: "2026-07-07" },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rows[0].avg_kcal).toBe(0);
+      expect(result.observation.rows[0].total_days).toBe(7);
+      expect(result.observation.rows[0].days_with_meals).toBe(0);
+    }
+  });
+
+  it("executes range_comparison (empty meals) and returns zero diffs", async () => {
+    const result = await executeQuery(
+      queryCatalog, "range_comparison",
+      {
+        range1_from: "2026-07-01", range1_to: "2026-07-07",
+        range2_from: "2026-07-08", range2_to: "2026-07-14",
+      },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rows[0].diff_kcal).toBe(0);
+    }
+  });
+
+  it("executes top_k_by_nutrient (empty meals) and returns empty observation", async () => {
+    const result = await executeQuery(
+      queryCatalog, "top_k_by_nutrient",
+      {
+        date_from: "2026-07-01", date_to: "2026-07-07",
+        nutrient: "protein", k: 5,
+      },
+      "user-001", runner,
+    );
+    expect(result.type).toBe("observation");
+    if (result.type === "observation") {
+      expect(result.observation.rowCount).toBe(0);
+    }
+  });
+
+  it("returns typed error for unknown template among seven", async () => {
+    const result = await executeQuery(
+      queryCatalog, "nonexistent",
+      {}, "user-001", runner,
+    );
+    expect(result.type).toBe("error");
+    if (result.type === "error") {
+      expect(result.availableTemplates).toHaveLength(7);
+      expect(result.availableTemplates).toContain("meal_summary");
+      expect(result.availableTemplates).toContain("range_comparison");
+    }
   });
 });
