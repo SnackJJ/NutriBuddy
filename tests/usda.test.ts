@@ -519,9 +519,10 @@ describe("mapToCatalogFood", () => {
     expect(result.per100g.vitaminDMcg).toBe(0);
   });
 
-  it("emits empty allergen tags (fail-closed)", () => {
+  it("omits allergen tags — unreviewed foods fail closed at the entity check (issue #66)", () => {
     const result = mapToCatalogFood(appleFood(), 0);
-    expect(result.allergenTags).toEqual([]);
+    // An empty array would falsely mean "reviewed, no allergens"
+    expect(result.allergenTags).toBeUndefined();
   });
 
   it("derives aliases from comma-separated USDA food descriptions", () => {

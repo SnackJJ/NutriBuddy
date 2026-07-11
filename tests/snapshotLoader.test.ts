@@ -91,6 +91,10 @@ describe("loadCatalogSnapshot (issue #60)", () => {
       expect(result.matchType).toBe("exact");
       expect(result.catalogSnapshotId).toBe(snapshot.version);
       expect(result.foodRef?.foodId).toBe(snapshot.foods[0].id);
+
+      // Ingested foods stay unreviewed after the round-trip (issue #66):
+      // the output entity check fails closed on them
+      expect(catalog.allFoods[0].allergenTags).toBeUndefined();
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

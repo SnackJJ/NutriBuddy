@@ -398,7 +398,7 @@ function matchingAllergenTags(
   food: Catalog["allFoods"][number],
   userAllergySet: ReadonlySet<string>,
 ): readonly string[] {
-  return food.allergenTags.filter((tag) =>
+  return (food.allergenTags ?? []).filter((tag) =>
     userAllergySet.has(tag.toLowerCase()),
   );
 }

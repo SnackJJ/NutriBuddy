@@ -394,7 +394,9 @@ function runFoodLookup(
         protein_g: round(food.per100g.proteinG),
         fat_g: round(food.per100g.fatG),
         carbs_g: round(food.per100g.carbsG),
-        allergen_tags: food.allergenTags.join(", "),
+        allergen_tags: food.allergenTags
+          ? food.allergenTags.join(", ")
+          : "unreviewed",
       },
     ],
   );

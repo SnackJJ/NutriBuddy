@@ -93,8 +93,12 @@ export interface CatalogFood {
   readonly aliases: readonly string[];
   /** Per-100g nutrition values from USDA SR Legacy. */
   readonly per100g: NutritionPer100g;
-  /** FDA big-9 allergen tags (empty array = no allergens). */
-  readonly allergenTags: readonly string[];
+  /**
+   * FDA big-9 allergen tags. Empty array = reviewed, no allergens.
+   * undefined = tags not yet reviewed: loggable, not recommendable —
+   * the output entity check fails closed on it (ADD §Gates check (a)).
+   */
+  readonly allergenTags?: readonly string[];
   /** Portion descriptions → estimated grams. */
   readonly portionAliases: Readonly<Record<string, number>>;
   /** Food category for grouping. */
@@ -121,8 +125,8 @@ export interface FoodRef {
   readonly canonicalName: string;
   /** Per-100g nutrition from the catalog. */
   readonly per100g: NutritionPer100g;
-  /** FDA big-9 allergen tags from the catalog. */
-  readonly allergenTags: readonly string[];
+  /** FDA big-9 allergen tags from the catalog; undefined = not yet reviewed. */
+  readonly allergenTags?: readonly string[];
   /** How the resolver matched this food. */
   readonly matchType: "exact" | "alias" | "fuzzy";
   /** Match score (1.0 for exact/alias; 0-1 for fuzzy). */

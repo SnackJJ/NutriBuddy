@@ -387,7 +387,10 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
         carbsG: scaled.carbsG,
         nutritionSource: resolved.catalogSnapshotId,
         matchType: foodRef.matchType,
-        allergenTags: foodRef.allergenTags,
+        // Record path: unreviewed tags degrade to [] in the ledger row.
+        // The recommendation surface is protected by the output entity
+        // check, which reads the catalog entry itself (issue #66).
+        allergenTags: foodRef.allergenTags ?? [],
       });
 
       return proposalResponse(proposal);

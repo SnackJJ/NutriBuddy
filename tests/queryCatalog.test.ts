@@ -101,7 +101,7 @@ function createStubRunner(catalog: Catalog) {
           protein_g: round(food.per100g.proteinG),
           fat_g: round(food.per100g.fatG),
           carbs_g: round(food.per100g.carbsG),
-          allergen_tags: food.allergenTags.join(", "),
+          allergen_tags: (food.allergenTags ?? []).join(", "),
         },
       ],
       rowCount: 1,
@@ -701,8 +701,9 @@ describe("observation → numeric tracing", () => {
       expect(row.fat_g).toBe(food.per100g.fatG);
       expect(row.carbs_g).toBe(food.per100g.carbsG);
 
-      if (food.allergenTags.length > 0) {
-        expect(row.allergen_tags).toBe(food.allergenTags.join(", "));
+      const tags = food.allergenTags ?? [];
+      if (tags.length > 0) {
+        expect(row.allergen_tags).toBe(tags.join(", "));
       } else {
         expect(row.allergen_tags).toBe("");
       }

@@ -125,6 +125,35 @@ describe("createLogMealHandler", () => {
     expect(typeof handler).toBe("function");
   });
 
+  it("logs an unreviewed food with empty ledger tags — loggable, not recommendable (issue #66)", async () => {
+    const unreviewed: (typeof SEED_FOODS)[number] = {
+      ...SEED_FOODS[0],
+      id: "food-unreviewed-001",
+      canonicalName: "mystery stew",
+      aliases: [],
+      allergenTags: undefined,
+    };
+    const { store, state } = memProposalStore();
+    const handler = createLogMealHandler({
+      catalog: createCatalog([...SEED_FOODS, unreviewed]),
+      proposalStore: store,
+      userId: TEST_USER,
+    });
+
+    const result = await handler({
+      food_name: "mystery stew",
+      portion_g: 150,
+      meal_type: "dinner",
+    });
+    const parsed = JSON.parse(result);
+
+    // The record path degrades unreviewed tags to [] — the recommendation
+    // surface is guarded by the output entity check reading the catalog.
+    expect(parsed.error).toBeUndefined();
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0].allergenTags).toEqual([]);
+  });
+
   // ─── Input Validation ──────────────────────────────────────────────────
 
   describe("input validation", () => {

@@ -4179,13 +4179,14 @@ describe("output entity check (issue #54)", () => {
   });
 
   it("fails closed on a catalog food without a reviewed allergen tag row", async () => {
-    const unreviewed = {
+    // allergenTags omitted = unreviewed (a first-class state since issue #66)
+    const unreviewed: (typeof SEED_FOODS)[number] = {
       ...SEED_FOODS[0],
       id: "food-mystery-001",
       canonicalName: "mystery stew",
       aliases: [],
       allergenTags: undefined,
-    } as unknown as (typeof SEED_FOODS)[number];
+    };
     const catalog = createCatalog([...SEED_FOODS, unreviewed]);
     const adapter = submitAnswerAdapter({
       prose: "Try this hearty option.",

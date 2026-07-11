@@ -386,7 +386,10 @@ export function mapToCatalogFood(
       vitaminCMg: food.vitamin_c_mg,
       vitaminDMcg: food.vitamin_d_mcg,
     },
-    allergenTags: [],
+    // Allergen tags are NOT derivable from USDA data. Omitting the field
+    // marks the food unreviewed (loggable, not recommendable) so the output
+    // entity check fails closed — an empty array would falsely mean
+    // "reviewed, no allergens" (issue #66 / ADD §Gates check (a)).
     portionAliases: {},
     category,
   };
