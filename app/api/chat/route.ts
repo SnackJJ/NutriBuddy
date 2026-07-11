@@ -39,6 +39,7 @@ import {
   listUserMealRecords,
 } from "@/lib/mealLogStore";
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
+import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
 import { getSessionFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
@@ -214,17 +215,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     };
 
     if (turnInput.tag === "utterance") {
-      // Interim until the SQL executor (#64): feed the user's ledger rows
-      // to the in-memory runner so templates 2-7 see real data (issue #55).
-      const meals = await loadUserMeals(userClient, session.userId);
+      // SQL runner when configured (issue #64): reviewed SQL under the
+      // SELECT-only role, identity bound via the session JWT. Otherwise
+      // the in-memory runner fed with the user's ledger rows (issue #55) —
+      // scripted CI stays here with zero network.
+      const queryRunner =
+        process.env.NUTRIBUDDY_QUERY_RUNNER === "sql"
+          ? createSupabaseQueryRunner(userClient, catalog)
+          : createInMemoryQueryRunner(
+              catalog,
+              await loadUserMeals(userClient, session.userId),
+            );
 
       ports = {
         ...ports,
-        tools: buildToolMap(
-          session.userId,
-          proposalStore,
-          createInMemoryQueryRunner(catalog, meals),
-        ),
+        tools: buildToolMap(session.userId, proposalStore, queryRunner),
         toolSchemas,
       };
     }
