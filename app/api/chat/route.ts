@@ -27,7 +27,7 @@ import {
   createInMemoryQueryRunner,
   QUERY_CATALOG_SCHEMA,
 } from "@/harness/queryCatalog";
-import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
+import { loadConfiguredCatalog } from "@/catalog/snapshotLoader";
 import {
   createQueryCatalog,
   ALL_QUERY_TEMPLATES,
@@ -44,8 +44,9 @@ import type { ChatMessage, ToolHandler } from "@/harness/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Module-level catalog (built once at cold start from seed data)
-const catalog = createCatalog(SEED_FOODS);
+// Module-level catalog (built once at cold start: CATALOG_SNAPSHOT_PATH
+// snapshot when configured, else seed data — issue #60)
+const catalog = loadConfiguredCatalog();
 const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
 const toolSchemas = [
   LOG_MEAL_SCHEMA,

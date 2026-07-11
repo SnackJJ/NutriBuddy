@@ -8,7 +8,6 @@
 // Configurable thresholds allow tuning the match/miss boundary.
 
 import {
-  CATALOG_SNAPSHOT_VERSION,
   type Catalog,
   type CatalogFood,
   type FoodRef,
@@ -107,11 +106,15 @@ type ScoreClassification =
       readonly candidates: readonly FoodRef[];
     };
 
-function makeFoodRefResult(input: string, foodRef: FoodRef): ResolveResult {
+function makeFoodRefResult(
+  input: string,
+  foodRef: FoodRef,
+  catalogSnapshotId: string,
+): ResolveResult {
   return {
     matchType: foodRef.matchType,
     foodRef,
-    catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+    catalogSnapshotId,
     input,
   };
 }
@@ -121,20 +124,26 @@ function makeMatchedResult(
   food: CatalogFood,
   matchType: FoodRefMatchType,
   matchScore: number,
+  catalogSnapshotId: string,
 ): ResolveResult {
-  return makeFoodRefResult(input, makeFoodRef(food, matchType, matchScore));
+  return makeFoodRefResult(
+    input,
+    makeFoodRef(food, matchType, matchScore),
+    catalogSnapshotId,
+  );
 }
 
 function makeMissResult(
   input: string,
   matchType: MissMatchType,
+  catalogSnapshotId: string,
   candidates?: readonly FoodRef[],
 ): ResolveResult {
   if (candidates === undefined) {
     return {
       matchType,
       foodRef: null,
-      catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+      catalogSnapshotId,
       input,
     };
   }
@@ -142,7 +151,7 @@ function makeMissResult(
   return {
     matchType,
     foodRef: null,
-    catalogSnapshotId: CATALOG_SNAPSHOT_VERSION,
+    catalogSnapshotId,
     candidates: candidates.length > 0 ? candidates : undefined,
     input,
   };
@@ -233,24 +242,27 @@ export function resolveFood(
   config?: Partial<ResolverConfig>,
 ): ResolveResult {
   const cfg: ResolverConfig = { ...DEFAULT_RESOLVER_CONFIG, ...config };
+  // Stamp results with the catalog's own snapshot identity so traces
+  // reproduce against the data actually loaded (issue #60).
+  const snapshotId = catalog.snapshot.version;
   const normalized = input.trim().replace(/\s+/g, " ");
 
   if (normalized.length === 0) {
-    return makeMissResult(input, "miss_unknown");
+    return makeMissResult(input, "miss_unknown", snapshotId);
   }
 
   const lower = normalized.toLowerCase();
 
   const exact = catalog.foods.get(lower);
   if (exact) {
-    return makeMatchedResult(input, exact, "exact", 1.0);
+    return makeMatchedResult(input, exact, "exact", 1.0, snapshotId);
   }
 
   const aliasTarget = catalog.aliasIndex.get(lower);
   if (aliasTarget) {
     const food = catalog.foods.get(aliasTarget);
     if (food) {
-      return makeMatchedResult(input, food, "alias", 1.0);
+      return makeMatchedResult(input, food, "alias", 1.0, snapshotId);
     }
   }
 
@@ -258,12 +270,13 @@ export function resolveFood(
   const classification = classifyByScore(scored, cfg);
 
   if (classification.matchType === "fuzzy") {
-    return makeFoodRefResult(input, classification.foodRef);
+    return makeFoodRefResult(input, classification.foodRef, snapshotId);
   }
 
   return makeMissResult(
     input,
     classification.matchType,
+    snapshotId,
     classification.candidates,
   );
 }

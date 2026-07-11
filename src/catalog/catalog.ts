@@ -172,8 +172,16 @@ export interface Catalog {
   readonly allFoods: readonly CatalogFood[];
 }
 
-/** Build a catalog from a list of food entries. */
-export function createCatalog(foods: readonly CatalogFood[]): Catalog {
+/**
+ * Build a catalog from a list of food entries.
+ *
+ * The snapshot version is carried as data (issue #60): pass the ingestion
+ * snapshot's version when loading from a file; defaults to the seed constant.
+ */
+export function createCatalog(
+  foods: readonly CatalogFood[],
+  version: string = CATALOG_SNAPSHOT_VERSION,
+): Catalog {
   const foodMap = new Map<string, CatalogFood>();
   const aliasMap = new Map<string, string>();
 
@@ -188,7 +196,7 @@ export function createCatalog(foods: readonly CatalogFood[]): Catalog {
 
   return {
     snapshot: {
-      version: CATALOG_SNAPSHOT_VERSION,
+      version,
       foodCount: foods.length,
     },
     foods: foodMap,
