@@ -7,6 +7,7 @@ import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
 import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
 import { buildTurnEventSink, Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
+import type { Catalog } from "../catalog/catalog";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 
@@ -16,12 +17,14 @@ import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
  * @param adapter — 模型适配器
  * @param tools — 工具调度表
  * @param interactionStore — 药物相互作用数据源（gate 需要）
+ * @param catalog — 食物目录（input gate 冲突扫描需要，issue #53）
  */
 export async function runHarnessEval(
   cases: readonly EvalCase[],
   adapter: ModelAdapter,
   tools: ReadonlyMap<string, ToolHandler>,
   interactionStore?: InteractionStore,
+  catalog?: Catalog,
 ): Promise<HarnessResult[]> {
   const results: HarnessResult[] = [];
 
@@ -48,6 +51,7 @@ export async function runHarnessEval(
             adapter,
             tracer,
             tools,
+            catalog,
             userContext: shouldRunGate ? c.userContext : undefined,
             interactionStore: shouldRunGate ? interactionStore : undefined,
           },

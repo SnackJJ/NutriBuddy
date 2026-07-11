@@ -171,6 +171,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     eventLog,
     sessionUserId,
     history: getRequestHistory(body, turnInput),
+    catalog,
   });
 
   // ── Wire Supabase-backed stores and tools for authenticated users ─

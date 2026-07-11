@@ -195,6 +195,13 @@ export interface RunTurnInput {
   readonly queryCatalog?: QueryCatalog;
   /** Injected clock port（ADD §Testing Seam）；latency 从这里读，缺省为系统时钟。 */
   readonly clock?: () => Date;
+  /**
+   * Input-gate directive injected on utterance conflict hits (issue #53 /
+   * ADD §Gates)：refuse-and-cite for prescriptive asks, advise for
+   * descriptive mentions. Rides the dynamic region alongside the user
+   * input — the pinned region stays byte-stable.
+   */
+  readonly inputDirective?: string;
 }
 
 export type TurnResult = TerminalResult;
@@ -277,9 +284,13 @@ export async function* run(
     interactionStore,
     queryCatalog,
     clock,
+    inputDirective,
   } = input;
 
   const nowMs = clock ? () => clock().getTime() : () => Date.now();
+  const modelUserInput = inputDirective
+    ? `${userInput}\n\n${inputDirective}`
+    : userInput;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
@@ -329,7 +340,7 @@ export async function* run(
     const messages = assembleContext({
       pinned,
       history: working,
-      userInput,
+      userInput: modelUserInput,
     });
     tracer.record({
       step,

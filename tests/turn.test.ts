@@ -3803,36 +3803,58 @@ describe("consolidated output gate (issue #47)", () => {
 describe("input gate utterance scan (issue #49)", () => {
   const emptyInteractionStore: InteractionStore = { all: async () => [] };
 
-  it("blocks prescriptive utterance mentioning allergen-conflicting food", async () => {
+  it("steers prescriptive utterance with a refuse-and-cite directive instead of blocking", async () => {
     const catalog = createCatalog(SEED_FOODS);
     const input: TurnInput = {
       tag: "utterance",
       content: "Should I eat shrimp for dinner?",
     };
-    const ports = createPorts(() => ({ content: "ok", stop: true }), {
-      catalog,
-      userContext: { allergies: ["shellfish"], medications: [] },
-      interactionStore: emptyInteractionStore,
-    });
+    const seenRequests: ModelRequest[] = [];
+    const ports = createPorts(
+      (req) => {
+        seenRequests.push(req);
+        return {
+          content:
+            "I can't recommend shrimp — it conflicts with your shellfish allergy. Please consult a registered dietitian.",
+          stop: true,
+        };
+      },
+      {
+        catalog,
+        userContext: { allergies: ["shellfish"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Input gate should block
+    // Input gate steers, never blocks alone (ADD §Gates)
     const inputVerdict = expectGateVerdict(events, "input");
-    expect(inputVerdict.verdict).toBe("block");
+    expect(inputVerdict.verdict).toBe("pass");
     expect(inputVerdict.checkName).toBe("pre_gate_input_check");
+    expect(inputVerdict.evidence).toContain("prescriptive");
     expect(inputVerdict.evidence).toContain("shellfish");
     expect(inputVerdict.evidence).toContain("shrimp");
+    expect(inputVerdict.evidence).toContain("Refuse-and-cite directive injected");
 
-    // Turn should end with a refuse-and-cite reply
+    // The model IS called; the directive rides along with the utterance
+    expect(seenRequests.length).toBeGreaterThanOrEqual(1);
+    const userMessages = seenRequests[0].messages.filter(
+      (m) => m.role === "user",
+    );
+    const lastUser = userMessages[userMessages.length - 1];
+    expect(lastUser.content).toContain("Should I eat shrimp for dinner?");
+    expect(lastUser.content).toContain(
+      "[INPUT GATE DIRECTIVE — REFUSE AND CITE]",
+    );
+
+    // The refusal reply names the conflicting food/allergy — the merged
+    // conflicts exempt it from the lexical backstop
     expect(result.stopReason).toBe("end_turn");
-    expect(result.reply).toContain("cannot");
-    expect(result.steps).toBe(0);
+    expect(result.reply).toContain("shellfish");
 
-    // No model call was made
     const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("input gate");
+    expect(commitVerdict.verdict).toBe("pass");
   });
 
   it("passes descriptive utterance mentioning allergen-conflicting food but populates conflicts", async () => {
@@ -3897,25 +3919,69 @@ describe("input gate utterance scan (issue #49)", () => {
     expect(result.reply).toBe("Try oatmeal with fruit.");
   });
 
-  it("blocks with refuse-and-cite evidence listing conflicting foods", async () => {
+  it("injects a refuse-and-cite directive listing all conflicting foods", async () => {
     const catalog = createCatalog(SEED_FOODS);
     const input: TurnInput = {
       tag: "utterance",
       content: "Should I add shrimp and salmon to my meal plan?",
     };
-    const ports = createPorts(() => ({ content: "ok", stop: true }), {
-      catalog,
-      userContext: { allergies: ["shellfish", "fish"], medications: [] },
-      interactionStore: emptyInteractionStore,
-    });
+    const seenRequests: ModelRequest[] = [];
+    const ports = createPorts(
+      (req) => {
+        seenRequests.push(req);
+        return {
+          content:
+            "I can't recommend those — they conflict with your shellfish and fish allergies. Please consult a registered dietitian.",
+          stop: true,
+        };
+      },
+      {
+        catalog,
+        userContext: { allergies: ["shellfish", "fish"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
 
     const { events, result } = await collect(turn(input, ports));
 
     const inputVerdict = expectGateVerdict(events, "input");
-    expect(inputVerdict.verdict).toBe("block");
+    expect(inputVerdict.verdict).toBe("pass");
     expect(inputVerdict.evidence).toContain("shellfish");
     expect(inputVerdict.evidence).toContain("fish");
-    expect(result.reply).toContain("cannot");
+
+    // Both conflicting foods appear in the injected directive
+    const userMessages = seenRequests[0].messages.filter(
+      (m) => m.role === "user",
+    );
+    const lastUser = userMessages[userMessages.length - 1];
+    expect(lastUser.content).toContain("[INPUT GATE DIRECTIVE — REFUSE AND CITE]");
+    expect(lastUser.content).toContain("shrimp");
+    expect(lastUser.content).toContain("salmon");
+
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("does not hit \"egg\" allergy on \"eggplant\" — word-boundary matching", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "Should I eat eggplant for dinner?",
+    };
+    const ports = createPorts(
+      () => ({ content: "Eggplant is a fine choice.", stop: true }),
+      {
+        catalog,
+        userContext: { allergies: ["egg"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const inputVerdict = expectGateVerdict(events, "input");
+    expect(inputVerdict.verdict).toBe("pass");
+    expect(inputVerdict.evidence).toBe("Input accepted for processing");
+    expect(result.stopReason).toBe("end_turn");
   });
 
   it("input gate scan works without catalog — falls back to pass", async () => {

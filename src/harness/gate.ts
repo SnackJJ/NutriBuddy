@@ -386,11 +386,12 @@ function foodNameAppearsInUtterance(
   food: Catalog["allFoods"][number],
   lowerUtterance: string,
 ): boolean {
-  const canonicalLower = food.canonicalName.toLowerCase();
-  return (
-    lowerUtterance.includes(canonicalLower) ||
-    food.aliases.some((alias) => lowerUtterance.includes(alias.toLowerCase()))
-  );
+  // 与 containsAnyTerm 相同的 \b 词边界匹配：防 "eggplant" 命中 "egg"（issue #53）。
+  const terms = [
+    food.canonicalName.toLowerCase(),
+    ...food.aliases.map((alias) => alias.toLowerCase()),
+  ];
+  return containsAnyTerm(lowerUtterance, terms) !== null;
 }
 
 function matchingAllergenTags(
@@ -410,7 +411,7 @@ function matchingAllergenTags(
  * allergen tags intersect with the user's allergies, a Conflict is
  * recorded.
  *
- * Detection is deterministic substring matching — no LLM dependency.
+ * Detection is deterministic word-boundary matching — no LLM dependency.
  * Framing (refuse-and-cite vs. advise) is determined by the caller
  * using {@link classifyUtteranceIntent}.
  */
