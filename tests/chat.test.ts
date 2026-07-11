@@ -8,6 +8,10 @@ import {
 } from "../src/lib/chatApi";
 import { Tracer } from "../src/harness/tracer";
 import type { ChatMessage, ModelAdapter } from "../src/harness/types";
+import {
+  createQueryCatalog,
+  ALL_QUERY_TEMPLATES,
+} from "../src/catalog/queryCatalog";
 
 const TEST_ADAPTER: ModelAdapter = {
   generate: async () => ({ content: "OK", stop: true }),
@@ -353,6 +357,22 @@ describe("buildChatTurnPorts", () => {
     });
 
     expect(ports.history).toEqual(history);
+  });
+
+  it("passes queryCatalog and catalogVersion through ports (issue #55)", () => {
+    const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+
+    const ports = buildChatTurnPorts({
+      adapter: TEST_ADAPTER,
+      tracer: new Tracer(),
+      sessionUserId: "user-1",
+      history: [],
+      queryCatalog,
+      catalogVersion: "usda-test-v1",
+    });
+
+    expect(ports.queryCatalog).toBe(queryCatalog);
+    expect(ports.catalogVersion).toBe("usda-test-v1");
   });
 });
 

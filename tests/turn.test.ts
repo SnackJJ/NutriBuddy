@@ -29,6 +29,10 @@ import {
 import type { InteractionStore } from "../src/lib/drugInteractions";
 import { TIER_PRICING_USD } from "../src/harness/modelAdapter";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
+import {
+  createQueryCatalog,
+  ALL_QUERY_TEMPLATES,
+} from "../src/catalog/queryCatalog";
 import type { Conflict } from "../src/harness/advisoryGate";
 import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
 import {
@@ -4012,6 +4016,55 @@ describe("input gate utterance scan (issue #49)", () => {
 
     const inputVerdict = expectGateVerdict(events, "input");
     expect(inputVerdict.verdict).toBe("pass");
+  });
+});
+
+describe("queryCatalog port pass-through (issue #55)", () => {
+  it("injects the template catalog into the pinned region when the port and a template-aware tool are wired", async () => {
+    const seenRequests: ModelRequest[] = [];
+    const adapter = stubAdapter((req) => {
+      seenRequests.push(req);
+      return { content: "ok", stop: true };
+    });
+    const tools = new Map<string, ToolHandler>([
+      ["query_catalog", async () => "{}"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "protein today?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      tools,
+      queryCatalog: createQueryCatalog(ALL_QUERY_TEMPLATES),
+    });
+
+    await collect(turn(input, ports));
+
+    const systemMessage = seenRequests[0].messages.find(
+      (m) => m.role === "system",
+    );
+    expect(systemMessage?.content).toContain("[QUERY TEMPLATE CATALOG]");
+    expect(systemMessage?.content).toContain("daily_totals");
+  });
+
+  it("omits the template catalog when the queryCatalog port is missing", async () => {
+    const seenRequests: ModelRequest[] = [];
+    const adapter = stubAdapter((req) => {
+      seenRequests.push(req);
+      return { content: "ok", stop: true };
+    });
+    const tools = new Map<string, ToolHandler>([
+      ["query_catalog", async () => "{}"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "protein today?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    await collect(turn(input, ports));
+
+    const systemMessage = seenRequests[0].messages.find(
+      (m) => m.role === "system",
+    );
+    expect(systemMessage?.content ?? "").not.toContain(
+      "[QUERY TEMPLATE CATALOG]",
+    );
   });
 });
 

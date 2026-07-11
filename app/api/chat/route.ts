@@ -33,7 +33,11 @@ import {
   ALL_QUERY_TEMPLATES,
 } from "@/catalog/queryCatalog";
 import { createSupabaseProposalStore } from "@/lib/proposalStore";
-import { createSupabaseMealLogStore } from "@/lib/mealLogStore";
+import {
+  createSupabaseMealLogStore,
+  listUserMealRecords,
+} from "@/lib/mealLogStore";
+import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
 import { getUserIdFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
@@ -43,7 +47,6 @@ export const dynamic = "force-dynamic";
 // Module-level catalog (built once at cold start from seed data)
 const catalog = createCatalog(SEED_FOODS);
 const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
-const queryRunner = createInMemoryQueryRunner(catalog);
 const toolSchemas = [
   LOG_MEAL_SCHEMA,
   QUERY_CATALOG_SCHEMA,
@@ -55,6 +58,7 @@ const toolSchemas = [
 function buildToolMap(
   sessionUserId: string,
   proposalStore: ProposalStore,
+  queryRunner: QueryRunner,
 ): ReadonlyMap<string, ToolHandler> {
   const logMealHandler = createLogMealHandler({
     catalog,
@@ -115,6 +119,19 @@ async function loadUserContext(
   }
 }
 
+/** Fail-soft meal loading: a ledger read failure degrades queries to empty
+ *  observations instead of failing the turn. */
+async function loadUserMeals(
+  client: Parameters<typeof listUserMealRecords>[0],
+  userId: string,
+): Promise<readonly MealRecord[]> {
+  try {
+    return await listUserMealRecords(client, userId);
+  } catch {
+    return [];
+  }
+}
+
 // ─── Route handler ─────────────────────────────────────────────────────
 
 /**
@@ -172,6 +189,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     sessionUserId,
     history: getRequestHistory(body, turnInput),
     catalog,
+    queryCatalog,
+    catalogVersion: catalog.snapshot.version,
   });
 
   // ── Wire Supabase-backed stores and tools for authenticated users ─
@@ -189,9 +208,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     };
 
     if (turnInput.tag === "utterance") {
+      // Interim until the SQL executor (#64): feed the user's ledger rows
+      // to the in-memory runner so templates 2-7 see real data (issue #55).
+      const meals = await loadUserMeals(serverClient, sessionUserId);
+
       ports = {
         ...ports,
-        tools: buildToolMap(sessionUserId, proposalStore),
+        tools: buildToolMap(
+          sessionUserId,
+          proposalStore,
+          createInMemoryQueryRunner(catalog, meals),
+        ),
         toolSchemas,
       };
     }
