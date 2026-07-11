@@ -428,6 +428,7 @@ function createToolGateVerdict(
  *  All checks — lexical backstop, numeric provenance, advisory structure —
  *  share one regenerate budget. */
 const MAX_OUTPUT_GATE_RETRIES = 2;
+const OUTPUT_ENTITY_CHECK = "output_entity_check";
 const OUTPUT_LEXICAL_BACKSTOP_CHECK = "output_lexical_backstop";
 const OUTPUT_NUMERIC_PROVENANCE_CHECK = "output_numeric_provenance";
 const OUTPUT_ADVISORY_STRUCTURE_CHECK = "output_advisory_structure";
@@ -560,6 +561,93 @@ function createNumericProvenanceCheck(
   );
 }
 
+function findCatalogFoodById(
+  catalog: Catalog,
+  foodId: string,
+): Catalog["allFoods"][number] | undefined {
+  return catalog.allFoods.find((food) => food.id === foodId);
+}
+
+/**
+ * Overwrite model-supplied FoodRef allergens with the catalog's reviewed
+ * tags (ADD §Safety Thesis: the model cannot self-report allergen tags).
+ * Unknown foodIds pass through unchanged — the entity check blocks them.
+ */
+function normalizeFoodRefAllergens(
+  output: TypedOutput,
+  catalog: Catalog,
+): TypedOutput {
+  return {
+    ...output,
+    foodRefs: output.foodRefs.map((ref) => {
+      const food = findCatalogFoodById(catalog, ref.foodId);
+      return food ? { ...ref, allergens: food.allergenTags } : ref;
+    }),
+  };
+}
+
+/**
+ * Entity check — output gate check (a) per ADD §Gates: every FoodRef's
+ * foodId must exist in the catalog (the model cannot mint ids); catalog
+ * allergen tags intersecting profile allergies block; a food without a
+ * reviewed tag row is not recommendable (missing tags fail closed).
+ * Conflicts the input gate already detected are exempt so descriptive/log
+ * and refuse-and-cite flows stay releasable (issue #49/#53 framing).
+ */
+function createEntityCheck(
+  output: TypedOutput,
+  catalog: Catalog,
+  userContext: UserContext | undefined,
+  knownConflicts: readonly Conflict[],
+): OutputGateCheck {
+  const reasons: string[] = [];
+  const allergySet = new Set(
+    (userContext?.allergies ?? []).map((allergy) => allergy.toLowerCase()),
+  );
+  const exemptAllergens = new Set(
+    knownConflicts.map((conflict) => conflict.id.toLowerCase()),
+  );
+
+  for (const ref of output.foodRefs) {
+    const food = findCatalogFoodById(catalog, ref.foodId);
+    if (!food) {
+      reasons.push(
+        `Unknown foodId "${ref.foodId}" — not minted by the catalog resolver`,
+      );
+      continue;
+    }
+
+    // Runtime guard: snapshot-loaded foods may lack a reviewed tag row.
+    const tags: readonly string[] | undefined = food.allergenTags;
+    if (!tags) {
+      reasons.push(
+        `Food "${food.canonicalName}" (${food.id}) has no reviewed allergen ` +
+          `tags — not recommendable (fail closed)`,
+      );
+      continue;
+    }
+
+    for (const tag of tags) {
+      const lowerTag = tag.toLowerCase();
+      if (allergySet.has(lowerTag) && !exemptAllergens.has(lowerTag)) {
+        reasons.push(
+          `FoodRef "${food.canonicalName}" (${food.id}) carries allergen ` +
+            `"${tag}" matching a profile allergy`,
+        );
+      }
+    }
+  }
+
+  return createOutputGateCheck(
+    OUTPUT_ENTITY_CHECK,
+    reasons.length === 0,
+    reasons,
+    output.foodRefs.length === 0
+      ? "No foodRefs to check"
+      : "All foodRefs resolve to catalog entries with reviewed tags",
+  );
+}
+
 function createAdvisoryStructureCheck(
   output: TypedOutput,
   conflicts: readonly Conflict[],
@@ -582,6 +670,7 @@ function collectOutputGateChecks(
   userContext: UserContext | undefined,
   observations: readonly Observation[],
   conflicts: readonly Conflict[],
+  catalog: Catalog | undefined,
 ): OutputGateCheck[] {
   const checks: OutputGateCheck[] = [];
   const lexicalCheck = createLexicalBackstopCheck(
@@ -597,6 +686,12 @@ function collectOutputGateChecks(
 
   if (!result.output) {
     return checks;
+  }
+
+  if (catalog) {
+    checks.push(
+      createEntityCheck(result.output, catalog, userContext, conflicts),
+    );
   }
 
   checks.push(
@@ -792,16 +887,27 @@ async function* runUtteranceTurn(
 
     result = next.value;
 
+    // ── Issue #54: Catalog-sourced allergen tags ─────────────────────
+    // FoodRef allergens in the released output come from the catalog,
+    // never from model args.
+    if (result.output && ports.catalog) {
+      result = {
+        ...result,
+        output: normalizeFoodRefAllergens(result.output, ports.catalog),
+      };
+    }
+
     // ── Issue #47: Consolidated output gate ──────────────────────────
-    // All checks (lexical backstop, numeric provenance, advisory structure)
-    // run together at the turn boundary with one retry budget and one
-    // combined feedback message. The inner loop no longer re-gates.
+    // All checks (entity, lexical backstop, numeric provenance, advisory
+    // structure) run together at the turn boundary with one retry budget
+    // and one combined feedback message. The inner loop no longer re-gates.
 
     const outputGateChecks = collectOutputGateChecks(
       result,
       ports.userContext,
       observations,
       conflicts,
+      ports.catalog,
     );
 
     for (const check of outputGateChecks) {

@@ -57,7 +57,14 @@ describe("SUBMIT_ANSWER_SCHEMA", () => {
     expect(items.properties).toHaveProperty("foodId");
     expect(items.properties).toHaveProperty("foodName");
     expect(items.properties).toHaveProperty("matchType");
-    expect(items.properties).toHaveProperty("allergens");
+    // Allergen tags come from the catalog, never from model args (issue #54)
+    expect(items.properties).not.toHaveProperty("allergens");
+  });
+
+  it("does not advertise a prose-only safety-check bypass (issue #54)", () => {
+    expect(SUBMIT_ANSWER_SCHEMA.function.description).not.toContain(
+      "skip safety checks",
+    );
   });
 
   it("describes ruleRefs items with ruleId and summary", () => {

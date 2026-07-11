@@ -428,7 +428,10 @@ export function scanUtteranceForConflicts(
   const hitFoods: string[] = [];
 
   for (const food of catalog.allFoods) {
-    if (food.allergenTags.length === 0) continue;
+    // Runtime guard: snapshot-loaded foods may lack a reviewed tag row —
+    // nothing to intersect here; the output entity check fails them closed
+    // on the recommendation surface (issue #54).
+    if (!food.allergenTags || food.allergenTags.length === 0) continue;
 
     if (!foodNameAppearsInUtterance(food, lowerUtterance)) continue;
 

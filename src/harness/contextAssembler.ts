@@ -26,7 +26,7 @@ export const DEFAULT_SYSTEM_PROMPT =
   "structured food references in 'foodRefs' (with foodId, foodName, and matchType " +
   "for every food you recommend), and applicable safety advisory rules in " +
   "'ruleRefs' (with ruleId and summary). Do NOT end the turn with plain prose — " +
-  "prose-only completions skip safety checks.";
+  "always deliver the final answer through submit_answer.";
 
 // ─── Tool Definitions ─────────────────────────────────────────────────
 

@@ -4015,6 +4015,178 @@ describe("input gate utterance scan (issue #49)", () => {
   });
 });
 
+describe("output entity check (issue #54)", () => {
+  const emptyInteractionStore: InteractionStore = { all: async () => [] };
+
+  function submitAnswerAdapter(args: Record<string, unknown>): ModelAdapter {
+    return stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-entity",
+          name: "submit_answer",
+          args,
+        } satisfies ToolCall,
+      ],
+    }));
+  }
+
+  function entityVerdicts(events: readonly AnyTurnEvent[]) {
+    return gateVerdicts(events).filter(
+      (gv) => gv.checkName === "output_entity_check",
+    );
+  }
+
+  it("blocks an invented foodId, naming the unknown id", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Try this great food.",
+      foodRefs: [
+        { foodId: "food-fake-999", foodName: "unicorn stew", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "snack idea?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts.length).toBeGreaterThanOrEqual(1);
+    expect(verdicts[0].verdict).toBe("block");
+    expect(verdicts[0].evidence).toContain("food-fake-999");
+
+    // Same output every retry → the consolidated gate blocks the turn
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("food-fake-999");
+  });
+
+  it("overwrites model-supplied allergens with the catalog's reviewed tags", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Shrimp is a lean protein option.",
+      foodRefs: [
+        {
+          foodId: "food-shrimp-001",
+          foodName: "shrimp",
+          matchType: "exact",
+          allergens: ["made-up-tag"],
+        },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "lean protein?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(entityVerdicts(events)[0]?.verdict).toBe("pass");
+    // Released output carries catalog tags, not the model's claim
+    expect(result.output?.foodRefs[0]?.allergens).toEqual(["shellfish"]);
+  });
+
+  it("blocks a recommendation whose catalog tags intersect a profile allergy", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    // Prose deliberately avoids food names so only the entity check can catch it
+    const adapter = submitAnswerAdapter({
+      prose: "Try this high-protein option.",
+      foodRefs: [
+        { foodId: "food-shrimp-001", foodName: "shrimp", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    // Utterance never mentions shrimp → no input-gate conflict, no exemption
+    const input: TurnInput = { tag: "utterance", content: "high protein ideas?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: ["shellfish"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts[0]?.verdict).toBe("block");
+    expect(verdicts[0]?.evidence).toContain("shellfish");
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("fails closed on a catalog food without a reviewed allergen tag row", async () => {
+    const unreviewed = {
+      ...SEED_FOODS[0],
+      id: "food-mystery-001",
+      canonicalName: "mystery stew",
+      aliases: [],
+      allergenTags: undefined,
+    } as unknown as (typeof SEED_FOODS)[number];
+    const catalog = createCatalog([...SEED_FOODS, unreviewed]);
+    const adapter = submitAnswerAdapter({
+      prose: "Try this hearty option.",
+      foodRefs: [
+        { foodId: "food-mystery-001", foodName: "mystery stew", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "dinner idea?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts[0]?.verdict).toBe("block");
+    expect(verdicts[0]?.evidence).toContain("fail closed");
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("exempts known input-gate conflicts so descriptive log flows stay releasable", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Logged your shrimp for lunch. Note it conflicts with your shellfish allergy.",
+      foodRefs: [
+        { foodId: "food-shrimp-001", foodName: "shrimp", matchType: "exact" },
+      ],
+      ruleRefs: [
+        { ruleId: "allergy-shellfish", summary: "User is allergic to shellfish" },
+      ],
+    });
+    // Descriptive utterance names the food → input gate records the conflict
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "Log the shrimp I ate for lunch",
+    };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: ["shellfish"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(entityVerdicts(events)[0]?.verdict).toBe("pass");
+    expect(result.stopReason).toBe("end_turn");
+  });
+});
+
 describe("descriptive-mention lexical backstop (issue #49)", () => {
   const emptyInteractionStore: InteractionStore = { all: async () => [] };
 
