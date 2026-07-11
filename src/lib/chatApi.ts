@@ -14,8 +14,6 @@ import type { QueryCatalog } from "../catalog/queryCatalog";
 
 // ─── Request body types ───────────────────────────────────────────────
 
-export const SESSION_USER_ID_HEADER = "X-User-Id";
-
 export interface UtteranceChatBody {
   readonly tag?: "utterance";
   readonly message: string;

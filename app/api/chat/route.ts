@@ -3,7 +3,8 @@ import { turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
-import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
+import { createUserSupabase } from "@/lib/supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createMemoryStore,
   createSupabaseProfileGateway,
@@ -38,7 +39,7 @@ import {
   listUserMealRecords,
 } from "@/lib/mealLogStore";
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
-import { getUserIdFromHeader } from "@/lib/auth";
+import { getSessionFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
 export const runtime = "nodejs";
@@ -93,12 +94,12 @@ function getRequestHistory(
 // ─── User context loading ──────────────────────────────────────────────
 
 async function loadUserContext(
+  client: SupabaseClient,
   userId: string,
 ): Promise<
   { userContext: UserContext; interactionStore: InteractionStore } | undefined
 > {
   try {
-    const client = createServerSupabase();
     const gateway = createSupabaseProfileGateway(client);
     const store = createMemoryStore({ gateway });
     const profile = await store.getProfile(userId);
@@ -175,7 +176,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // ── Extract session user identity from Supabase auth session ─────
-  const sessionUserId = await getUserIdFromHeader(createUserSupabase, request);
+  const session = await getSessionFromHeader(createUserSupabase, request);
+  const sessionUserId = session?.userId;
 
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();
@@ -195,12 +197,15 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 
   // ── Wire Supabase-backed stores and tools for authenticated users ─
-  if (sessionUserId) {
-    const serverClient = createServerSupabase();
+  if (session) {
+    // Session-scoped client: the turn path runs under the user's JWT so
+    // RLS binds beneath the executor's userId scoping (issue #62 /
+    // ADD §Multi-User — the unrestricted role exists in migrations only).
+    const userClient = createUserSupabase(session.accessToken);
     const proposalStore = createSupabaseProposalStore({
-      client: serverClient,
+      client: userClient,
     });
-    const mealLogStore = createSupabaseMealLogStore(serverClient);
+    const mealLogStore = createSupabaseMealLogStore(userClient);
 
     ports = {
       ...ports,
@@ -211,23 +216,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (turnInput.tag === "utterance") {
       // Interim until the SQL executor (#64): feed the user's ledger rows
       // to the in-memory runner so templates 2-7 see real data (issue #55).
-      const meals = await loadUserMeals(serverClient, sessionUserId);
+      const meals = await loadUserMeals(userClient, session.userId);
 
       ports = {
         ...ports,
         tools: buildToolMap(
-          sessionUserId,
+          session.userId,
           proposalStore,
           createInMemoryQueryRunner(catalog, meals),
         ),
         toolSchemas,
       };
     }
-  }
 
-  // ── Load user safety context (fail-soft) ──────────────────────────
-  if (sessionUserId) {
-    const ctx = await loadUserContext(sessionUserId);
+    // ── Load user safety context (fail-soft) ────────────────────────
+    const ctx = await loadUserContext(userClient, session.userId);
     if (ctx) {
       ports = {
         ...ports,

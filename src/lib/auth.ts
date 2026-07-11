@@ -25,21 +25,29 @@ function extractBearerToken(headers: Headers): string | undefined {
   return match[1];
 }
 
+/** A verified session: the authenticated user plus the token that proved it. */
+export interface VerifiedSession {
+  readonly userId: string;
+  /** The verified access token — build session-scoped clients from this
+   *  (ADD §Multi-User: the turn path runs under least-privilege roles). */
+  readonly accessToken: string;
+}
+
 /**
- * Extract and verify user identity from the request's Authorization header.
+ * Extract and verify the session from the request's Authorization header.
  *
  * Creates a short-lived Supabase client scoped to the user's access token,
  * calls getUser() to verify the token, and returns the authenticated user ID
- * on success. Returns undefined when no token is present or the token is
- * invalid/expired.
+ * together with the verified token on success. Returns undefined when no
+ * token is present or the token is invalid/expired.
  *
  * This is the primary auth path for API routes called from the browser
  * Supabase client (which sends the access token in the Authorization header).
  */
-export async function getUserIdFromHeader(
+export async function getSessionFromHeader(
   createClient: SupabaseAuthClientFactory,
   request: { headers: Headers },
-): Promise<string | undefined> {
+): Promise<VerifiedSession | undefined> {
   const token = extractBearerToken(request.headers);
   if (!token) {
     return undefined;
@@ -51,8 +59,17 @@ export async function getUserIdFromHeader(
     if (error || !data.user) {
       return undefined;
     }
-    return data.user.id;
+    return { userId: data.user.id, accessToken: token };
   } catch {
     return undefined;
   }
+}
+
+/** Verify the Authorization header and return just the user id. */
+export async function getUserIdFromHeader(
+  createClient: SupabaseAuthClientFactory,
+  request: { headers: Headers },
+): Promise<string | undefined> {
+  const session = await getSessionFromHeader(createClient, request);
+  return session?.userId;
 }

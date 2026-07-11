@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChatMessage, WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
-import { SESSION_USER_ID_HEADER } from "@/lib/chatApi";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -100,16 +99,10 @@ function createAssistantStreamState(): AssistantStreamState {
   };
 }
 
-function chatHeaders(userId: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (userId) {
-    headers[SESSION_USER_ID_HEADER] = userId;
-  }
-
-  return headers;
+/** Identity travels in the Authorization header verified server-side
+ *  (issue #48/#62) — the request body and custom headers carry none. */
+function chatHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json" };
 }
 
 async function responseErrorMessage(
@@ -613,25 +606,7 @@ function ProposalCard({
 
 // ─── Page ──────────────────────────────────────────────────────────────
 
-/** Generate a stable client-side userId (M1 — no auth yet).
- *  Returns empty string during SSR; the component hydrates via useEffect. */
-function readUserId(): string {
-  if (typeof window === "undefined") return "";
-  const key = "nutribuddy_user_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
-
 export default function ChatPage() {
-  const [userId, setUserId] = useState("");
-  // Hydrate userId on the client only (SSR-safe)
-  useEffect(() => {
-    setUserId(readUserId());
-  }, []);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -692,7 +667,7 @@ export default function ChatPage() {
       const history = buildHistory(messages);
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: chatHeaders(userId),
+        headers: chatHeaders(),
         body: JSON.stringify({ message: trimmed, history }),
       });
 
@@ -760,7 +735,7 @@ export default function ChatPage() {
     } finally {
       setStreaming(false);
     }
-  }, [input, streaming, messages, userId, buildHistory]);
+  }, [input, streaming, messages, buildHistory]);
 
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
@@ -773,7 +748,7 @@ export default function ChatPage() {
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: chatHeaders(userId),
+          headers: chatHeaders(),
           body: JSON.stringify({
             tag: "proposal_confirm",
             proposalId: pendingProposal.proposalId,
@@ -821,7 +796,7 @@ export default function ChatPage() {
         setConfirming(false);
       }
     },
-    [pendingProposal, confirming, userId],
+    [pendingProposal, confirming],
   );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */

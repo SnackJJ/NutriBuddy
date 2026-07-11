@@ -103,9 +103,10 @@ export interface SupabaseProposalStoreOptions {
  * Stores immutable proposals in the `proposals` table. Status transitions
  * update only the status column; all nutrition data is frozen at creation.
  *
- * Uses the service-role client (bypasses RLS) because application-level
- * scoping via userId already enforces tenant isolation. RLS on the table
- * is defense-in-depth (see migration 0005).
+ * Runs on whatever client the caller injects. The turn path injects a
+ * session-scoped client (issue #62 / ADD §Multi-User), so the RLS policies
+ * from migration 0005 bind beneath the application-level userId scoping
+ * as real defense in depth.
  */
 export function createSupabaseProposalStore(
   options: SupabaseProposalStoreOptions,
