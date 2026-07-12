@@ -303,3 +303,17 @@ describe("cross-tenant profile constraint isolation", () => {
     expect(body.profile.userId).toBe("authenticated-user");
   });
 });
+
+// ── Route-level identity (issue #65) ─────────────────────────────────────
+
+describe("profile route derives identity from the verified session", () => {
+  it("never reads a client-asserted userId; requires the Authorization header", async () => {
+    const fs = await import("node:fs");
+    const routeSource = fs.readFileSync("app/api/profile/route.ts", "utf-8");
+
+    expect(routeSource).toContain("getSessionFromHeader");
+    expect(routeSource).not.toContain('searchParams.get("userId")');
+    // The only userId mention strips it from the patch body
+    expect(routeSource).not.toMatch(/userId.*required/i);
+  });
+});

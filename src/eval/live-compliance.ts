@@ -38,6 +38,7 @@ import type { InteractionStore } from "../lib/drugInteractions";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 import { loadEvalCases } from "./dataset";
 import { DeepSeekAdapter } from "../harness/modelAdapter";
+import { createCatalog, SEED_FOODS, type Catalog } from "../catalog/catalog";
 
 // ─── Compliance Signal Types ──────────────────────────────────────────────
 
@@ -195,6 +196,7 @@ export async function runLiveComplianceEval(
   adapter: ModelAdapter,
   tools: ReadonlyMap<string, ToolHandler>,
   interactionStore?: InteractionStore,
+  catalog?: Catalog,
 ): Promise<ComplianceReport> {
   const signals: CaseComplianceSignals[] = [];
 
@@ -221,6 +223,7 @@ export async function runLiveComplianceEval(
             adapter,
             tracer,
             tools,
+            catalog,
             userContext: shouldRunGate ? c.userContext : undefined,
             interactionStore: shouldRunGate ? interactionStore : undefined,
           },
@@ -500,6 +503,7 @@ async function main(): Promise<void> {
     adapter,
     tools,
     stubInteractionStore(),
+    createCatalog(SEED_FOODS),
   );
   const duration = Date.now() - start;
 

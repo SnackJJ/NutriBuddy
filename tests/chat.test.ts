@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
 import { extractSources, friendlyToolName } from "../src/lib/chatHelpers";
 import {
-  SESSION_USER_ID_HEADER,
   parseChatBody,
   buildChatTurnPorts,
   type ChatRequestBody,
 } from "../src/lib/chatApi";
 import { Tracer } from "../src/harness/tracer";
 import type { ChatMessage, ModelAdapter } from "../src/harness/types";
+import {
+  createQueryCatalog,
+  ALL_QUERY_TEMPLATES,
+} from "../src/catalog/queryCatalog";
 
 const TEST_ADAPTER: ModelAdapter = {
   generate: async () => ({ content: "OK", stop: true }),
@@ -169,8 +173,23 @@ describe("chat route request shape", () => {
     expect(history[1]).toEqual({ role: "assistant", content: "Hi there!" });
   });
 
-  it("uses a caller-bound header for user identity", () => {
-    expect(SESSION_USER_ID_HEADER).toBe("X-User-Id");
+  it("identity enters only via the verified Authorization header (issue #62)", () => {
+    // The legacy client-asserted X-User-Id header is gone: the chat API
+    // module exports no custom identity header at all.
+    const chatApiSource = fs.readFileSync("src/lib/chatApi.ts", "utf-8");
+    expect(chatApiSource).not.toContain("SESSION_USER_ID_HEADER");
+    expect(chatApiSource).not.toContain("X-User-Id");
+  });
+});
+
+// ── Turn path least privilege (issue #62 / ADD §Multi-User) ─────────────
+
+describe("chat route uses the session-scoped client", () => {
+  it("never constructs the service-role client on the turn path", () => {
+    const routeSource = fs.readFileSync("app/api/chat/route.ts", "utf-8");
+    expect(routeSource).not.toContain("createServerSupabase");
+    expect(routeSource).toContain("createUserSupabase");
+    expect(routeSource).toContain("getSessionFromHeader");
   });
 });
 
@@ -353,6 +372,22 @@ describe("buildChatTurnPorts", () => {
     });
 
     expect(ports.history).toEqual(history);
+  });
+
+  it("passes queryCatalog and catalogVersion through ports (issue #55)", () => {
+    const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
+
+    const ports = buildChatTurnPorts({
+      adapter: TEST_ADAPTER,
+      tracer: new Tracer(),
+      sessionUserId: "user-1",
+      history: [],
+      queryCatalog,
+      catalogVersion: "usda-test-v1",
+    });
+
+    expect(ports.queryCatalog).toBe(queryCatalog);
+    expect(ports.catalogVersion).toBe("usda-test-v1");
   });
 });
 

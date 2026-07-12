@@ -189,12 +189,13 @@ describe("ingestFoods", () => {
     expect(results).toHaveLength(0);
   });
 
-  it("emits CatalogFood entries with empty allergen tags (fail-closed)", async () => {
+  it("omits allergen tags — unreviewed foods fail closed at the entity check (issue #66)", async () => {
     const client = makeClient(async () => salmonNutrition());
 
     const results = await ingestFoods(client, ["salmon"]);
 
-    expect(results[0].allergenTags).toEqual([]);
+    // An empty array would falsely mean "reviewed, no allergens"
+    expect(results[0].allergenTags).toBeUndefined();
   });
 
   it("derives aliases from USDA food descriptions", async () => {

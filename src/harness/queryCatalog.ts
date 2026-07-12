@@ -137,6 +137,29 @@ function recordObservationTrace(
   });
 }
 
+/**
+ * Cap the observation that enters model context (issue #57 / ADD §Context).
+ *
+ * The rendering caps (top-k rows, byte ceiling) must bound what the model
+ * sees, so the tool-result observation carries only the rendered rows with
+ * the truncation flag set. Full fidelity flows to the session trace via
+ * recordObservationTrace; rowCount keeps the pre-cap total.
+ */
+function capObservationForModel(
+  observation: Observation,
+  rendered: RenderedObservation,
+): Observation {
+  if (!rendered.truncated) {
+    return observation;
+  }
+
+  return {
+    ...observation,
+    rows: observation.rows.slice(0, rendered.renderedRows),
+    truncated: true,
+  };
+}
+
 function observationResponse(
   observation: Observation,
   rendered: RenderedObservation,
@@ -148,7 +171,7 @@ function observationResponse(
   return {
     type: "observation",
     text: rendered.text,
-    observation,
+    observation: capObservationForModel(observation, rendered),
   };
 }
 
@@ -371,7 +394,9 @@ function runFoodLookup(
         protein_g: round(food.per100g.proteinG),
         fat_g: round(food.per100g.fatG),
         carbs_g: round(food.per100g.carbsG),
-        allergen_tags: food.allergenTags.join(", "),
+        allergen_tags: food.allergenTags
+          ? food.allergenTags.join(", ")
+          : "unreviewed",
       },
     ],
   );

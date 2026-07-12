@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getUserIdFromHeader } from "../src/lib/auth";
+import { getSessionFromHeader, getUserIdFromHeader } from "../src/lib/auth";
 
 interface FakeAuthOptions {
   readonly userId?: string;
@@ -43,6 +43,39 @@ function makeRequest(authHeader?: string): { headers: Headers } {
 
   return { headers };
 }
+
+describe("getSessionFromHeader (issue #62)", () => {
+  it("returns the user id together with the verified access token", async () => {
+    const createClient = fakeCreateClient({
+      userId: "b4e0a1c2-3d4e-5f6a-7b8c-9d0e1f2a3b4c",
+    });
+    const request = makeRequest("Bearer verified-token-123");
+
+    const session = await getSessionFromHeader(createClient, request);
+
+    expect(session).toEqual({
+      userId: "b4e0a1c2-3d4e-5f6a-7b8c-9d0e1f2a3b4c",
+      accessToken: "verified-token-123",
+    });
+  });
+
+  it("returns undefined for an invalid token", async () => {
+    const createClient = fakeCreateClient({ error: new Error("bad token") });
+    const request = makeRequest("Bearer forged-token");
+
+    const session = await getSessionFromHeader(createClient, request);
+
+    expect(session).toBeUndefined();
+  });
+
+  it("returns undefined when no Authorization header is present", async () => {
+    const createClient = fakeCreateClient({ userId: "some-user" });
+
+    const session = await getSessionFromHeader(createClient, makeRequest());
+
+    expect(session).toBeUndefined();
+  });
+});
 
 describe("getUserIdFromHeader", () => {
   it("returns the user ID from a valid Bearer token", async () => {

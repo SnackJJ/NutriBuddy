@@ -29,7 +29,7 @@ import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.4.0";
+export const SCHEMA_VERSION = "1.5.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
@@ -127,6 +127,8 @@ export interface TurnModelCallEvent extends TurnEvent {
   readonly usage?: ModelUsage;
   /** Round-trip latency in milliseconds (issue #51). */
   readonly latencyMs?: number;
+  /** Call cost in USD from usage and the tier pricing table (issue #58). */
+  readonly costUsd?: number;
 }
 
 export interface TurnEndEvent extends TurnEvent {
@@ -292,6 +294,7 @@ function parseModelCallPayload(
       thinking: obj.thinking,
       latencyMs: obj.latencyMs,
       usage: parseModelUsage(obj.usage) ?? null,
+      costUsd: typeof obj.costUsd === "number" ? obj.costUsd : null,
     };
   } catch {
     return null;
@@ -337,7 +340,48 @@ function createTurnModelCallEvent(
     thinking: payload.thinking,
     usage: payload.usage ?? undefined,
     latencyMs: payload.latencyMs,
+    costUsd: payload.costUsd ?? undefined,
   };
+}
+
+/**
+ * Typed handler results the tool gate distinguishes (issue #56):
+ * - typed_error: the handler returned a structured error (query_catalog
+ *   `{type:"error"}`, log_meal `{error:...}`) — verdict "error".
+ * - typed_miss: a resolver miss carrying `match_type: miss_*` — the designed
+ *   clarification flow (#44), verdict "pass" with distinguishing evidence.
+ */
+interface ParsedHandlerResult {
+  readonly kind: "typed_error" | "typed_miss";
+  readonly message: string;
+}
+
+function parseHandlerResult(result: string): ParsedHandlerResult | null {
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    if (parsed.type === "error") {
+      const message = readString(parsed, "message");
+      return { kind: "typed_error", message: message ?? "typed error result" };
+    }
+
+    const error = readString(parsed, "error");
+    if (error === undefined) {
+      return null;
+    }
+
+    const matchType = readString(parsed, "match_type");
+    if (matchType?.startsWith("miss_")) {
+      return { kind: "typed_miss", message: error };
+    }
+
+    return { kind: "typed_error", message: error };
+  } catch {
+    return null;
+  }
 }
 
 function createToolGateVerdict(
@@ -349,6 +393,26 @@ function createToolGateVerdict(
       verdict: "error",
       checkName: TOOL_GATE_CHECK,
       evidence: `Tool ${toolResult.name} dispatch error: ${toolResult.result}`,
+    };
+  }
+
+  const handlerResult = parseHandlerResult(toolResult.result);
+
+  if (handlerResult?.kind === "typed_error") {
+    return {
+      checkpoint: "tool",
+      verdict: "error",
+      checkName: TOOL_GATE_CHECK,
+      evidence: `Tool ${toolResult.name} returned a typed error: ${handlerResult.message}`,
+    };
+  }
+
+  if (handlerResult?.kind === "typed_miss") {
+    return {
+      checkpoint: "tool",
+      verdict: "pass",
+      checkName: TOOL_GATE_CHECK,
+      evidence: `Tool ${toolResult.name} returned a typed miss (clarification): ${handlerResult.message}`,
     };
   }
 
@@ -364,6 +428,7 @@ function createToolGateVerdict(
  *  All checks — lexical backstop, numeric provenance, advisory structure —
  *  share one regenerate budget. */
 const MAX_OUTPUT_GATE_RETRIES = 2;
+const OUTPUT_ENTITY_CHECK = "output_entity_check";
 const OUTPUT_LEXICAL_BACKSTOP_CHECK = "output_lexical_backstop";
 const OUTPUT_NUMERIC_PROVENANCE_CHECK = "output_numeric_provenance";
 const OUTPUT_ADVISORY_STRUCTURE_CHECK = "output_advisory_structure";
@@ -496,6 +561,93 @@ function createNumericProvenanceCheck(
   );
 }
 
+function findCatalogFoodById(
+  catalog: Catalog,
+  foodId: string,
+): Catalog["allFoods"][number] | undefined {
+  return catalog.allFoods.find((food) => food.id === foodId);
+}
+
+/**
+ * Overwrite model-supplied FoodRef allergens with the catalog's reviewed
+ * tags (ADD §Safety Thesis: the model cannot self-report allergen tags).
+ * Unknown foodIds pass through unchanged — the entity check blocks them.
+ */
+function normalizeFoodRefAllergens(
+  output: TypedOutput,
+  catalog: Catalog,
+): TypedOutput {
+  return {
+    ...output,
+    foodRefs: output.foodRefs.map((ref) => {
+      const food = findCatalogFoodById(catalog, ref.foodId);
+      return food ? { ...ref, allergens: food.allergenTags } : ref;
+    }),
+  };
+}
+
+/**
+ * Entity check — output gate check (a) per ADD §Gates: every FoodRef's
+ * foodId must exist in the catalog (the model cannot mint ids); catalog
+ * allergen tags intersecting profile allergies block; a food without a
+ * reviewed tag row is not recommendable (missing tags fail closed).
+ * Conflicts the input gate already detected are exempt so descriptive/log
+ * and refuse-and-cite flows stay releasable (issue #49/#53 framing).
+ */
+function createEntityCheck(
+  output: TypedOutput,
+  catalog: Catalog,
+  userContext: UserContext | undefined,
+  knownConflicts: readonly Conflict[],
+): OutputGateCheck {
+  const reasons: string[] = [];
+  const allergySet = new Set(
+    (userContext?.allergies ?? []).map((allergy) => allergy.toLowerCase()),
+  );
+  const exemptAllergens = new Set(
+    knownConflicts.map((conflict) => conflict.id.toLowerCase()),
+  );
+
+  for (const ref of output.foodRefs) {
+    const food = findCatalogFoodById(catalog, ref.foodId);
+    if (!food) {
+      reasons.push(
+        `Unknown foodId "${ref.foodId}" — not minted by the catalog resolver`,
+      );
+      continue;
+    }
+
+    // Runtime guard: snapshot-loaded foods may lack a reviewed tag row.
+    const tags: readonly string[] | undefined = food.allergenTags;
+    if (!tags) {
+      reasons.push(
+        `Food "${food.canonicalName}" (${food.id}) has no reviewed allergen ` +
+          `tags — not recommendable (fail closed)`,
+      );
+      continue;
+    }
+
+    for (const tag of tags) {
+      const lowerTag = tag.toLowerCase();
+      if (allergySet.has(lowerTag) && !exemptAllergens.has(lowerTag)) {
+        reasons.push(
+          `FoodRef "${food.canonicalName}" (${food.id}) carries allergen ` +
+            `"${tag}" matching a profile allergy`,
+        );
+      }
+    }
+  }
+
+  return createOutputGateCheck(
+    OUTPUT_ENTITY_CHECK,
+    reasons.length === 0,
+    reasons,
+    output.foodRefs.length === 0
+      ? "No foodRefs to check"
+      : "All foodRefs resolve to catalog entries with reviewed tags",
+  );
+}
+
 function createAdvisoryStructureCheck(
   output: TypedOutput,
   conflicts: readonly Conflict[],
@@ -518,6 +670,7 @@ function collectOutputGateChecks(
   userContext: UserContext | undefined,
   observations: readonly Observation[],
   conflicts: readonly Conflict[],
+  catalog: Catalog | undefined,
 ): OutputGateCheck[] {
   const checks: OutputGateCheck[] = [];
   const lexicalCheck = createLexicalBackstopCheck(
@@ -533,6 +686,12 @@ function collectOutputGateChecks(
 
   if (!result.output) {
     return checks;
+  }
+
+  if (catalog) {
+    checks.push(
+      createEntityCheck(result.output, catalog, userContext, conflicts),
+    );
   }
 
   checks.push(
@@ -652,6 +811,7 @@ async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
   nextMetadata: NextEventMetadata,
+  inputDirective?: string,
 ): AsyncGenerator<AnyTurnEvent, UtteranceTurnOutput, undefined> {
   const observations = [...(ports.observations ?? [])];
   const conflicts = ports.conflicts ?? [];
@@ -674,7 +834,7 @@ async function* runUtteranceTurn(
     }
 
     const gen = run({
-      ...createRunTurnInput(input, ports),
+      ...createRunTurnInput(input, ports, inputDirective),
       history,
     });
 
@@ -727,16 +887,27 @@ async function* runUtteranceTurn(
 
     result = next.value;
 
+    // ── Issue #54: Catalog-sourced allergen tags ─────────────────────
+    // FoodRef allergens in the released output come from the catalog,
+    // never from model args.
+    if (result.output && ports.catalog) {
+      result = {
+        ...result,
+        output: normalizeFoodRefAllergens(result.output, ports.catalog),
+      };
+    }
+
     // ── Issue #47: Consolidated output gate ──────────────────────────
-    // All checks (lexical backstop, numeric provenance, advisory structure)
-    // run together at the turn boundary with one retry budget and one
-    // combined feedback message. The inner loop no longer re-gates.
+    // All checks (entity, lexical backstop, numeric provenance, advisory
+    // structure) run together at the turn boundary with one retry budget
+    // and one combined feedback message. The inner loop no longer re-gates.
 
     const outputGateChecks = collectOutputGateChecks(
       result,
       ports.userContext,
       observations,
       conflicts,
+      ports.catalog,
     );
 
     for (const check of outputGateChecks) {
@@ -766,9 +937,11 @@ async function* runUtteranceTurn(
 function createRunTurnInput(
   input: UtteranceInput,
   ports: TurnPorts,
+  inputDirective?: string,
 ): RunTurnInput {
   return {
     userInput: input.content,
+    inputDirective,
     userId: ports.userId,
     adapter: ports.adapter,
     tracer: ports.tracer,
@@ -784,6 +957,7 @@ function createRunTurnInput(
     userContext: ports.userContext,
     interactionStore: ports.interactionStore,
     queryCatalog: ports.queryCatalog,
+    clock: ports.clock,
   };
 }
 
@@ -855,6 +1029,9 @@ async function insertMealLogFromProposal(
     fatG: proposal.fatG,
     carbsG: proposal.carbsG,
     proposalId: proposal.id,
+    foodId: proposal.foodId,
+    matchType: proposal.matchType,
+    allergenTags: proposal.allergenTags,
   });
 }
 
@@ -886,7 +1063,25 @@ async function handleProposalConfirm(
   }
 
   if (!confirmed) {
-    await declineProposalBestEffort(proposalStore, proposalId);
+    // Ownership check mirrors the confirm path (issue #63 / ADD §Multi-User):
+    // with shared multi-tenant storage an unchecked decline is a
+    // cross-tenant void channel.
+    const declined = await proposalStore.get(proposalId);
+
+    if (declined && declined.userId !== sessionUserId) {
+      return createProposalConfirmOutcome(
+        createEndTurnResult(
+          `Cannot decline proposal ${proposalId}: it belongs to a different user.`,
+        ),
+        "block",
+        `Proposal ${proposalId} belongs to user ${declined.userId}, not ${sessionUserId}`,
+      );
+    }
+
+    if (declined) {
+      await declineProposalBestEffort(proposalStore, proposalId);
+    }
+
     return createProposalConfirmOutcome(
       createProposalConfirmResult(input),
       "pass",
@@ -989,17 +1184,22 @@ function createCommitGateDetails(
   };
 }
 
+/**
+ * Input gate outcome (issue #53 / ADD §Gates): the gate steers and never
+ * blocks alone. On a hit it carries a directive for the model context —
+ * refuse-and-cite for prescriptive asks, advise for descriptive mentions —
+ * and the conflicts that activate the advisory gate and the lexical
+ * backstop's known-conflict exemption. Detection is deterministic;
+ * framing and explanation belong to the model.
+ */
 interface InputGateDecision {
-  readonly blocked: boolean;
-  readonly blockEvidence: string;
+  readonly directive?: string;
   readonly conflicts: readonly Conflict[];
   readonly verdict: GateVerdictEventDetails;
 }
 
 function createAcceptedInputGateDecision(): InputGateDecision {
   return {
-    blocked: false,
-    blockEvidence: "",
     conflicts: [],
     verdict: {
       checkpoint: "input",
@@ -1010,24 +1210,42 @@ function createAcceptedInputGateDecision(): InputGateDecision {
   };
 }
 
-function createInputConflictBlockEvidence(
+function conflictSummary(
   conflicts: readonly Conflict[],
   hitFoods: readonly string[],
 ): string {
   return (
-    `Blocked: prescriptive request mentions foods conflicting with user allergies — ` +
-    conflicts.map((conflict) => conflict.id).join(", ") +
-    `. Foods: ${hitFoods.join(", ")}.`
+    `${conflicts.map((conflict) => conflict.id).join(", ")} ` +
+    `(foods: ${hitFoods.join(", ")})`
   );
 }
 
-function createInputConflictPassEvidence(
+function refuseAndCiteDirective(
   conflicts: readonly Conflict[],
+  hitFoods: readonly string[],
 ): string {
   return (
-    `Pass (descriptive): detected ${conflicts.length} conflict(s) — ` +
-    conflicts.map((conflict) => conflict.id).join(", ") +
-    `. Advisory gate will enforce ruleRefs.`
+    `[INPUT GATE DIRECTIVE — REFUSE AND CITE]\n` +
+    `The user is asking for a recommendation involving foods that conflict ` +
+    `with their allergies: ${conflictSummary(conflicts, hitFoods)}. ` +
+    `Do NOT recommend these foods. Refuse this part of the request, cite the ` +
+    `specific allergy conflict as the reason, and suggest consulting a doctor ` +
+    `or registered dietitian. You may name the conflicting food and allergy ` +
+    `when explaining the refusal.`
+  );
+}
+
+function adviseDirective(
+  conflicts: readonly Conflict[],
+  hitFoods: readonly string[],
+): string {
+  return (
+    `[INPUT GATE DIRECTIVE — ADVISE]\n` +
+    `The user is describing or logging foods that conflict with their ` +
+    `allergies: ${conflictSummary(conflicts, hitFoods)}. ` +
+    `Proceed with the request — the meal ledger records what the user ` +
+    `actually ate — but include a clear advisory noting the allergy ` +
+    `conflict and cite the applicable safety rule.`
   );
 }
 
@@ -1050,77 +1268,45 @@ function createInputGateDecision(
   }
 
   if (scan.intent === "prescriptive") {
-    const evidence = createInputConflictBlockEvidence(
-      scan.conflicts,
-      scan.hitFoods,
-    );
-
     return {
-      blocked: true,
-      blockEvidence: evidence,
-      conflicts: [],
+      directive: refuseAndCiteDirective(scan.conflicts, scan.hitFoods),
+      conflicts: scan.conflicts,
       verdict: {
         checkpoint: "input",
-        verdict: "block",
+        verdict: "pass",
         checkName: PRE_GATE_INPUT_CHECK,
-        evidence,
+        evidence:
+          `Hit (prescriptive): request conflicts with user allergies — ` +
+          `${conflictSummary(scan.conflicts, scan.hitFoods)}. ` +
+          `Refuse-and-cite directive injected.`,
       },
     };
   }
 
   return {
-    blocked: false,
-    blockEvidence: "",
+    directive: adviseDirective(scan.conflicts, scan.hitFoods),
     conflicts: scan.conflicts,
     verdict: {
       checkpoint: "input",
       verdict: "pass",
       checkName: PRE_GATE_INPUT_CHECK,
-      evidence: createInputConflictPassEvidence(scan.conflicts),
+      evidence:
+        `Hit (descriptive): detected ${scan.conflicts.length} conflict(s) — ` +
+        `${conflictSummary(scan.conflicts, scan.hitFoods)}. ` +
+        `Advise directive injected; advisory gate will enforce ruleRefs.`,
     },
   };
 }
 
-function createInputBlockedResult(): TurnResult {
-  return {
-    reply:
-      `I cannot help with that request. Your allergies conflict with ` +
-      `foods mentioned in your question. Please consult a doctor or ` +
-      `registered dietitian for personalized dietary advice.`,
-    steps: 0,
-    stopReason: "end_turn",
-  };
-}
-
-function isTurnGateBlocked(result: TurnResult, inputBlocked: boolean): boolean {
-  return result.stopReason === "gate_blocked" || inputBlocked;
-}
-
 function createOutputGateSummaryDetails(
   result: TurnResult,
-  inputBlocked: boolean,
   outputEvidence: string,
 ): GateVerdictEventDetails {
-  const evidence = inputBlocked
-    ? "Input gate blocked — no model output to check"
-    : outputEvidence;
-
   return {
     checkpoint: "output",
-    verdict: isTurnGateBlocked(result, inputBlocked) ? "block" : "pass",
+    verdict: result.stopReason === "gate_blocked" ? "block" : "pass",
     checkName: OUTPUT_GATE_SUMMARY_CHECK,
-    evidence,
-  };
-}
-
-function createInputBlockedCommitGateDetails(
-  inputBlockEvidence: string,
-): GateVerdictEventDetails {
-  return {
-    checkpoint: "commit",
-    verdict: "block",
-    checkName: COMMIT_GATE_CHECK,
-    evidence: `Blocked: input gate refused prescriptive request — ${inputBlockEvidence}`,
+    evidence: outputEvidence,
   };
 }
 
@@ -1154,31 +1340,28 @@ export async function* turn(
   let writeProposal: WriteProposalData | undefined;
   let confirmCommitVerdict: CommitGateVerdict | undefined;
 
-  if (inputGate.blocked) {
-    result = createInputBlockedResult();
-  } else {
-    const mergedPorts: TurnPorts = {
-      ...ports,
-      conflicts: [...inputGate.conflicts, ...(ports.conflicts ?? [])],
-    };
+  const mergedPorts: TurnPorts = {
+    ...ports,
+    conflicts: [...inputGate.conflicts, ...(ports.conflicts ?? [])],
+  };
 
-    switch (input.tag) {
-      case "utterance": {
-        const utteranceOutput = yield* runUtteranceTurn(
-          input,
-          mergedPorts,
-          nextMetadata,
-        );
-        result = utteranceOutput.result;
-        writeProposal = utteranceOutput.writeProposal;
-        break;
-      }
-      case "proposal_confirm": {
-        const outcome = await handleProposalConfirm(input, ports);
-        result = outcome.result;
-        confirmCommitVerdict = outcome.commitVerdict;
-        break;
-      }
+  switch (input.tag) {
+    case "utterance": {
+      const utteranceOutput = yield* runUtteranceTurn(
+        input,
+        mergedPorts,
+        nextMetadata,
+        inputGate.directive,
+      );
+      result = utteranceOutput.result;
+      writeProposal = utteranceOutput.writeProposal;
+      break;
+    }
+    case "proposal_confirm": {
+      const outcome = await handleProposalConfirm(input, ports);
+      result = outcome.result;
+      confirmCommitVerdict = outcome.commitVerdict;
+      break;
     }
   }
 
@@ -1195,19 +1378,17 @@ export async function* turn(
 
   if (input.tag === "utterance") {
     yield createGateVerdictEvent(
-      createOutputGateSummaryDetails(result, inputGate.blocked, outputEvidence),
+      createOutputGateSummaryDetails(result, outputEvidence),
       nextMetadata,
     );
   }
 
-  const commitGateDetails = inputGate.blocked
-    ? createInputBlockedCommitGateDetails(inputGate.blockEvidence)
-    : createCommitGateDetails(
-        result,
-        writeProposal,
-        outputEvidence,
-        confirmCommitVerdict,
-      );
+  const commitGateDetails = createCommitGateDetails(
+    result,
+    writeProposal,
+    outputEvidence,
+    confirmCommitVerdict,
+  );
 
   yield createGateVerdictEvent(commitGateDetails, nextMetadata);
 

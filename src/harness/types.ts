@@ -83,6 +83,8 @@ export interface ModelCallUsageTracePayload {
   readonly thinking: boolean;
   readonly latencyMs: number;
   readonly usage: ModelUsage | null;
+  /** Call cost in USD computed from usage and the tier pricing table (issue #58). */
+  readonly costUsd: number | null;
 }
 
 export interface ModelResponse {

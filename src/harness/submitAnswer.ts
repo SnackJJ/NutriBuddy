@@ -20,10 +20,9 @@ export const SUBMIT_ANSWER_SCHEMA: ToolSchema = {
     name: SUBMIT_ANSWER_TOOL,
     description:
       "Submit the final answer with structured food references and advisory rule citations. " +
-      "Always use this tool to deliver your final response — prose-only completions are a " +
-      "fallback and will skip safety checks. Provide your full prose response in the 'prose' " +
-      "field, cite every food you recommend in 'foodRefs' with its catalog foodId, and cite " +
-      "every applicable safety rule in 'ruleRefs'.",
+      "Always use this tool to deliver your final response. Provide your full prose response " +
+      "in the 'prose' field, cite every food you recommend in 'foodRefs' with its catalog " +
+      "foodId, and cite every applicable safety rule in 'ruleRefs'.",
     parameters: {
       type: "object",
       properties: {
@@ -53,12 +52,6 @@ export const SUBMIT_ANSWER_SCHEMA: ToolSchema = {
                 type: "string",
                 enum: ["exact", "alias", "fuzzy"],
                 description: "How the food was matched in the catalog.",
-              },
-              allergens: {
-                type: "array",
-                items: { type: "string" },
-                description:
-                  "FDA big-9 allergen tags for this food, if reviewed.",
               },
             },
             required: ["foodId", "foodName", "matchType"],

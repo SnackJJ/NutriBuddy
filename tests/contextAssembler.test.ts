@@ -235,6 +235,8 @@ describe("assembleContext", () => {
     );
     // Issue #43: the prompt now includes submit_answer instructions
     expect(DEFAULT_SYSTEM_PROMPT).toContain("submit_answer");
+    // Issue #54: the prompt must not advertise a prose-only bypass
+    expect(DEFAULT_SYSTEM_PROMPT).not.toContain("skip safety checks");
   });
 });
 

@@ -27,7 +27,12 @@ import {
   type ToolHandler,
 } from "../src/harness/types";
 import type { InteractionStore } from "../src/lib/drugInteractions";
+import { TIER_PRICING_USD } from "../src/harness/modelAdapter";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
+import {
+  createQueryCatalog,
+  ALL_QUERY_TEMPLATES,
+} from "../src/catalog/queryCatalog";
 import type { Conflict } from "../src/harness/advisoryGate";
 import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
 import {
@@ -231,12 +236,12 @@ function memProposalStore(state?: MemProposalState): {
         if (s.proposals[idx].status !== "proposed") {
           throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
         }
-        const rejected: Proposal = {
+        const voided: Proposal = {
           ...s.proposals[idx],
-          status: "rejected",
+          status: "voided",
         };
-        s.proposals[idx] = rejected;
-        return rejected;
+        s.proposals[idx] = voided;
+        return voided;
       },
     },
   };
@@ -267,6 +272,9 @@ function memMealLogStore(state?: MemMealLedgerState): {
           fatG: params.fatG,
           carbsG: params.carbsG,
           proposalId: params.proposalId,
+          foodId: params.foodId,
+          matchType: params.matchType,
+          allergenTags: params.allergenTags,
         };
         s.entries.push(entry);
         return entry;
@@ -293,6 +301,7 @@ describe("turn (utterance)", () => {
       "gate_verdict",
       "step",
       "step",
+      "model_call",
       "gate_verdict",
       "gate_verdict",
       "turn_end",
@@ -894,6 +903,7 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
       "gate_verdict",
       "step",
       "step",
+      "model_call",
       "gate_verdict",
       "gate_verdict",
       "turn_end",
@@ -1201,6 +1211,100 @@ describe("gate verdict events", () => {
       );
       expect(errorVerdicts.length).toBeGreaterThanOrEqual(1);
       expect(passVerdicts.length).toBe(0);
+    });
+
+    describe("typed handler results (issue #56)", () => {
+      function toolCallAdapter(toolName: string) {
+        let callCount = 0;
+        return stubAdapter(() => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              content: "Calling tool...",
+              stop: false,
+              toolCalls: [{ id: "call-1", name: toolName, args: {} }],
+            };
+          }
+          return { content: "Recovered.", stop: true };
+        });
+      }
+
+      it("emits error verdict for query_catalog typed error results", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "query_catalog",
+            async () =>
+              JSON.stringify({
+                type: "error",
+                templateId: "invented_template",
+                message: "Unknown template: invented_template",
+                availableTemplates: ["food_lookup"],
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "kcal?" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("query_catalog"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("error");
+        expect(toolVerdict.evidence).toContain("typed error");
+        expect(toolVerdict.evidence).toContain("Unknown template");
+      });
+
+      it("emits error verdict for log_meal typed argument errors", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "log_meal",
+            async () =>
+              JSON.stringify({
+                error:
+                  "missing or invalid portion_g: must be a positive number (grams)",
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "log it" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("log_meal"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("error");
+        expect(toolVerdict.evidence).toContain("typed error");
+      });
+
+      it("emits pass verdict with miss evidence for resolver misses", async () => {
+        const tools = new Map<string, ToolHandler>([
+          [
+            "log_meal",
+            async () =>
+              JSON.stringify({
+                error: 'food not found in catalog: "dragonfruit"',
+                match_type: "miss_unknown",
+                catalog_snapshot: "test-snapshot",
+                message: "Try a different name or check the spelling.",
+              }),
+          ],
+        ]);
+        const input: TurnInput = { tag: "utterance", content: "log df" };
+        const ports = createPorts(undefined, {
+          adapter: toolCallAdapter("log_meal"),
+          tools,
+        });
+
+        const { events } = await collect(turn(input, ports));
+
+        const toolVerdict = expectGateVerdict(events, "tool");
+        expect(toolVerdict.verdict).toBe("pass");
+        expect(toolVerdict.evidence).toContain("typed miss");
+      });
     });
 
     it("tracer records tool_call events for dispatched tools", async () => {
@@ -2559,6 +2663,10 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(entry.carbsG).toBe(0);
     // The meal ledger row references the committed proposal id
     expect(entry.proposalId).toBe(proposal.id);
+    // Entity lineage copied from the committed proposal (issue #59)
+    expect(entry.foodId).toBe("food-test-001");
+    expect(entry.matchType).toBe("exact");
+    expect(entry.allergenTags).toEqual([]);
 
     // Commit gate verdict passes
     const commitVerdict = expectGateVerdict(events, "commit");
@@ -2662,6 +2770,50 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(commitVerdict.evidence).toContain(SESSION_USER_B);
   });
 
+  it("blocks decline when the proposal belongs to a different user (issue #63)", async () => {
+    const { store: proposalStore, state: proposalState } = memProposalStore();
+    const { store: mealLogStore } = memMealLogStore();
+
+    // User A creates the proposal
+    const proposal = await proposalStore.store({
+      userId: SESSION_USER_A,
+      foodName: "salmon",
+      portionG: 150,
+      mealType: "dinner",
+      kcal: 312,
+      proteinG: 30,
+      fatG: 20,
+      carbsG: 0,
+      nutritionSource: "USDA FoodData Central",
+      foodId: "food-test-001",
+      canonicalName: "test food",
+      matchType: "exact",
+      allergenTags: [],
+    });
+
+    // User B tries to decline it
+    const input: TurnInput = {
+      tag: "proposal_confirm",
+      proposalId: proposal.id,
+      confirmed: false,
+    };
+    const ports = createPorts(undefined, {
+      proposalStore,
+      mealLogStore,
+      sessionUserId: SESSION_USER_B,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    // Blocked: wrong user; the proposal stays proposed
+    expect(result.reply).toContain("different user");
+    expect(proposalState.proposals[0].status).toBe("proposed");
+
+    const commitVerdict = expectGateVerdict(events, "commit");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.evidence).toContain("belongs to user");
+  });
+
   it("rejects repeated confirmation of an already committed proposal", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
@@ -2754,7 +2906,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(commitVerdict.evidence).toContain("not found");
   });
 
-  it("explicitly rejects a proposal when confirmed is false and updates status to rejected", async () => {
+  it("explicitly rejects a proposal when confirmed is false and updates status to voided", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
 
@@ -2794,8 +2946,8 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(result.steps).toBe(0);
     expect(result.stopReason).toBe("end_turn");
 
-    // Proposal status updated to "rejected"
-    expect(proposalState.proposals[0].status).toBe("rejected");
+    // Proposal status updated to "voided"
+    expect(proposalState.proposals[0].status).toBe("voided");
 
     // No meal ledger mutation
     expect(mealLedgerState.entries.length).toBe(0);
@@ -2971,7 +3123,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(countBlockedGateVerdicts(events)).toBe(0);
   });
 
-  it("rejects confirmation of an already rejected proposal", async () => {
+  it("rejects confirmation of an already voided proposal", async () => {
     const { store: proposalStore, state: proposalState } = memProposalStore();
     const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
 
@@ -2993,7 +3145,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
 
     // First, reject it
     await proposalStore.decline(proposal.id);
-    expect(proposalState.proposals[0].status).toBe("rejected");
+    expect(proposalState.proposals[0].status).toBe("voided");
 
     // Now try to confirm the rejected proposal
     const input: TurnInput = {
@@ -3009,8 +3161,8 @@ describe("proposal commit short-circuit (issue #37)", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Blocked: already rejected
-    expect(result.reply).toContain("already rejected");
+    // Blocked: already voided
+    expect(result.reply).toContain("already voided");
     expect(result.reply).toContain("cannot be confirmed");
 
     // No meal ledger mutation
@@ -3019,7 +3171,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     // Commit gate blocks
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("rejected");
+    expect(commitVerdict.evidence).toContain("voided");
   });
 
   it("rejects confirmation of a voided proposal", async () => {
@@ -3655,36 +3807,58 @@ describe("consolidated output gate (issue #47)", () => {
 describe("input gate utterance scan (issue #49)", () => {
   const emptyInteractionStore: InteractionStore = { all: async () => [] };
 
-  it("blocks prescriptive utterance mentioning allergen-conflicting food", async () => {
+  it("steers prescriptive utterance with a refuse-and-cite directive instead of blocking", async () => {
     const catalog = createCatalog(SEED_FOODS);
     const input: TurnInput = {
       tag: "utterance",
       content: "Should I eat shrimp for dinner?",
     };
-    const ports = createPorts(() => ({ content: "ok", stop: true }), {
-      catalog,
-      userContext: { allergies: ["shellfish"], medications: [] },
-      interactionStore: emptyInteractionStore,
-    });
+    const seenRequests: ModelRequest[] = [];
+    const ports = createPorts(
+      (req) => {
+        seenRequests.push(req);
+        return {
+          content:
+            "I can't recommend shrimp — it conflicts with your shellfish allergy. Please consult a registered dietitian.",
+          stop: true,
+        };
+      },
+      {
+        catalog,
+        userContext: { allergies: ["shellfish"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Input gate should block
+    // Input gate steers, never blocks alone (ADD §Gates)
     const inputVerdict = expectGateVerdict(events, "input");
-    expect(inputVerdict.verdict).toBe("block");
+    expect(inputVerdict.verdict).toBe("pass");
     expect(inputVerdict.checkName).toBe("pre_gate_input_check");
+    expect(inputVerdict.evidence).toContain("prescriptive");
     expect(inputVerdict.evidence).toContain("shellfish");
     expect(inputVerdict.evidence).toContain("shrimp");
+    expect(inputVerdict.evidence).toContain("Refuse-and-cite directive injected");
 
-    // Turn should end with a refuse-and-cite reply
+    // The model IS called; the directive rides along with the utterance
+    expect(seenRequests.length).toBeGreaterThanOrEqual(1);
+    const userMessages = seenRequests[0].messages.filter(
+      (m) => m.role === "user",
+    );
+    const lastUser = userMessages[userMessages.length - 1];
+    expect(lastUser.content).toContain("Should I eat shrimp for dinner?");
+    expect(lastUser.content).toContain(
+      "[INPUT GATE DIRECTIVE — REFUSE AND CITE]",
+    );
+
+    // The refusal reply names the conflicting food/allergy — the merged
+    // conflicts exempt it from the lexical backstop
     expect(result.stopReason).toBe("end_turn");
-    expect(result.reply).toContain("cannot");
-    expect(result.steps).toBe(0);
+    expect(result.reply).toContain("shellfish");
 
-    // No model call was made
     const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("input gate");
+    expect(commitVerdict.verdict).toBe("pass");
   });
 
   it("passes descriptive utterance mentioning allergen-conflicting food but populates conflicts", async () => {
@@ -3749,25 +3923,69 @@ describe("input gate utterance scan (issue #49)", () => {
     expect(result.reply).toBe("Try oatmeal with fruit.");
   });
 
-  it("blocks with refuse-and-cite evidence listing conflicting foods", async () => {
+  it("injects a refuse-and-cite directive listing all conflicting foods", async () => {
     const catalog = createCatalog(SEED_FOODS);
     const input: TurnInput = {
       tag: "utterance",
       content: "Should I add shrimp and salmon to my meal plan?",
     };
-    const ports = createPorts(() => ({ content: "ok", stop: true }), {
-      catalog,
-      userContext: { allergies: ["shellfish", "fish"], medications: [] },
-      interactionStore: emptyInteractionStore,
-    });
+    const seenRequests: ModelRequest[] = [];
+    const ports = createPorts(
+      (req) => {
+        seenRequests.push(req);
+        return {
+          content:
+            "I can't recommend those — they conflict with your shellfish and fish allergies. Please consult a registered dietitian.",
+          stop: true,
+        };
+      },
+      {
+        catalog,
+        userContext: { allergies: ["shellfish", "fish"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
 
     const { events, result } = await collect(turn(input, ports));
 
     const inputVerdict = expectGateVerdict(events, "input");
-    expect(inputVerdict.verdict).toBe("block");
+    expect(inputVerdict.verdict).toBe("pass");
     expect(inputVerdict.evidence).toContain("shellfish");
     expect(inputVerdict.evidence).toContain("fish");
-    expect(result.reply).toContain("cannot");
+
+    // Both conflicting foods appear in the injected directive
+    const userMessages = seenRequests[0].messages.filter(
+      (m) => m.role === "user",
+    );
+    const lastUser = userMessages[userMessages.length - 1];
+    expect(lastUser.content).toContain("[INPUT GATE DIRECTIVE — REFUSE AND CITE]");
+    expect(lastUser.content).toContain("shrimp");
+    expect(lastUser.content).toContain("salmon");
+
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("does not hit \"egg\" allergy on \"eggplant\" — word-boundary matching", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "Should I eat eggplant for dinner?",
+    };
+    const ports = createPorts(
+      () => ({ content: "Eggplant is a fine choice.", stop: true }),
+      {
+        catalog,
+        userContext: { allergies: ["egg"], medications: [] },
+        interactionStore: emptyInteractionStore,
+      },
+    );
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const inputVerdict = expectGateVerdict(events, "input");
+    expect(inputVerdict.verdict).toBe("pass");
+    expect(inputVerdict.evidence).toBe("Input accepted for processing");
+    expect(result.stopReason).toBe("end_turn");
   });
 
   it("input gate scan works without catalog — falls back to pass", async () => {
@@ -3798,6 +4016,228 @@ describe("input gate utterance scan (issue #49)", () => {
 
     const inputVerdict = expectGateVerdict(events, "input");
     expect(inputVerdict.verdict).toBe("pass");
+  });
+});
+
+describe("queryCatalog port pass-through (issue #55)", () => {
+  it("injects the template catalog into the pinned region when the port and a template-aware tool are wired", async () => {
+    const seenRequests: ModelRequest[] = [];
+    const adapter = stubAdapter((req) => {
+      seenRequests.push(req);
+      return { content: "ok", stop: true };
+    });
+    const tools = new Map<string, ToolHandler>([
+      ["query_catalog", async () => "{}"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "protein today?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      tools,
+      queryCatalog: createQueryCatalog(ALL_QUERY_TEMPLATES),
+    });
+
+    await collect(turn(input, ports));
+
+    const systemMessage = seenRequests[0].messages.find(
+      (m) => m.role === "system",
+    );
+    expect(systemMessage?.content).toContain("[QUERY TEMPLATE CATALOG]");
+    expect(systemMessage?.content).toContain("daily_totals");
+  });
+
+  it("omits the template catalog when the queryCatalog port is missing", async () => {
+    const seenRequests: ModelRequest[] = [];
+    const adapter = stubAdapter((req) => {
+      seenRequests.push(req);
+      return { content: "ok", stop: true };
+    });
+    const tools = new Map<string, ToolHandler>([
+      ["query_catalog", async () => "{}"],
+    ]);
+    const input: TurnInput = { tag: "utterance", content: "protein today?" };
+    const ports = createPorts(undefined, { adapter, tools });
+
+    await collect(turn(input, ports));
+
+    const systemMessage = seenRequests[0].messages.find(
+      (m) => m.role === "system",
+    );
+    expect(systemMessage?.content ?? "").not.toContain(
+      "[QUERY TEMPLATE CATALOG]",
+    );
+  });
+});
+
+describe("output entity check (issue #54)", () => {
+  const emptyInteractionStore: InteractionStore = { all: async () => [] };
+
+  function submitAnswerAdapter(args: Record<string, unknown>): ModelAdapter {
+    return stubAdapter(() => ({
+      content: "",
+      stop: false,
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call-sa-entity",
+          name: "submit_answer",
+          args,
+        } satisfies ToolCall,
+      ],
+    }));
+  }
+
+  function entityVerdicts(events: readonly AnyTurnEvent[]) {
+    return gateVerdicts(events).filter(
+      (gv) => gv.checkName === "output_entity_check",
+    );
+  }
+
+  it("blocks an invented foodId, naming the unknown id", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Try this great food.",
+      foodRefs: [
+        { foodId: "food-fake-999", foodName: "unicorn stew", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "snack idea?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts.length).toBeGreaterThanOrEqual(1);
+    expect(verdicts[0].verdict).toBe("block");
+    expect(verdicts[0].evidence).toContain("food-fake-999");
+
+    // Same output every retry → the consolidated gate blocks the turn
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain("food-fake-999");
+  });
+
+  it("overwrites model-supplied allergens with the catalog's reviewed tags", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Shrimp is a lean protein option.",
+      foodRefs: [
+        {
+          foodId: "food-shrimp-001",
+          foodName: "shrimp",
+          matchType: "exact",
+          allergens: ["made-up-tag"],
+        },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "lean protein?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(entityVerdicts(events)[0]?.verdict).toBe("pass");
+    // Released output carries catalog tags, not the model's claim
+    expect(result.output?.foodRefs[0]?.allergens).toEqual(["shellfish"]);
+  });
+
+  it("blocks a recommendation whose catalog tags intersect a profile allergy", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    // Prose deliberately avoids food names so only the entity check can catch it
+    const adapter = submitAnswerAdapter({
+      prose: "Try this high-protein option.",
+      foodRefs: [
+        { foodId: "food-shrimp-001", foodName: "shrimp", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    // Utterance never mentions shrimp → no input-gate conflict, no exemption
+    const input: TurnInput = { tag: "utterance", content: "high protein ideas?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: ["shellfish"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts[0]?.verdict).toBe("block");
+    expect(verdicts[0]?.evidence).toContain("shellfish");
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("fails closed on a catalog food without a reviewed allergen tag row", async () => {
+    // allergenTags omitted = unreviewed (a first-class state since issue #66)
+    const unreviewed: (typeof SEED_FOODS)[number] = {
+      ...SEED_FOODS[0],
+      id: "food-mystery-001",
+      canonicalName: "mystery stew",
+      aliases: [],
+      allergenTags: undefined,
+    };
+    const catalog = createCatalog([...SEED_FOODS, unreviewed]);
+    const adapter = submitAnswerAdapter({
+      prose: "Try this hearty option.",
+      foodRefs: [
+        { foodId: "food-mystery-001", foodName: "mystery stew", matchType: "exact" },
+      ],
+      ruleRefs: [],
+    });
+    const input: TurnInput = { tag: "utterance", content: "dinner idea?" };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: [], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    const verdicts = entityVerdicts(events);
+    expect(verdicts[0]?.verdict).toBe("block");
+    expect(verdicts[0]?.evidence).toContain("fail closed");
+    expect(result.stopReason).toBe("gate_blocked");
+  });
+
+  it("exempts known input-gate conflicts so descriptive log flows stay releasable", async () => {
+    const catalog = createCatalog(SEED_FOODS);
+    const adapter = submitAnswerAdapter({
+      prose: "Logged your shrimp for lunch. Note it conflicts with your shellfish allergy.",
+      foodRefs: [
+        { foodId: "food-shrimp-001", foodName: "shrimp", matchType: "exact" },
+      ],
+      ruleRefs: [
+        { ruleId: "allergy-shellfish", summary: "User is allergic to shellfish" },
+      ],
+    });
+    // Descriptive utterance names the food → input gate records the conflict
+    const input: TurnInput = {
+      tag: "utterance",
+      content: "Log the shrimp I ate for lunch",
+    };
+    const ports = createPorts(undefined, {
+      adapter,
+      catalog,
+      userContext: { allergies: ["shellfish"], medications: [] },
+      interactionStore: emptyInteractionStore,
+    });
+
+    const { events, result } = await collect(turn(input, ports));
+
+    expect(entityVerdicts(events)[0]?.verdict).toBe("pass");
+    expect(result.stopReason).toBe("end_turn");
   });
 });
 
@@ -4089,7 +4529,7 @@ describe("turn event enrichment (issue #51)", () => {
     expect(startEvent.profileVersion).toBeUndefined();
   });
 
-  it("turn_start event schema is bumped to 1.4.0 for enriched fields", async () => {
+  it("turn_start event schema is bumped to 1.5.0 for enriched fields", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
     const ports = createPorts(() => ({ content: "ok", stop: true }));
 
@@ -4097,7 +4537,7 @@ describe("turn event enrichment (issue #51)", () => {
     const startEvent = expectStartEvent(events);
 
     expect(startEvent.schema).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe("1.4.0");
+    expect(SCHEMA_VERSION).toBe("1.5.0");
   });
 
   it("emits model_call events between thought and subsequent steps", async () => {
@@ -4270,6 +4710,58 @@ describe("turn event enrichment (issue #51)", () => {
       cacheHitTokens: 80,
       cacheMissTokens: 20,
     });
+  });
+
+  it("model_call events carry costUsd from the tier pricing table (issue #58)", async () => {
+    const usage = {
+      promptTokens: 100_000,
+      completionTokens: 50_000,
+      totalTokens: 150_000,
+      cacheHitTokens: 80_000,
+      cacheMissTokens: 20_000,
+    };
+    const adapter: ModelAdapter = {
+      generate: async () => ({ content: "ok", stop: true, usage }),
+    };
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(undefined, { adapter });
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    const pricing = TIER_PRICING_USD.flash;
+    const expected =
+      (usage.cacheHitTokens * pricing.cacheHitPerMTok +
+        usage.cacheMissTokens * pricing.cacheMissPerMTok +
+        usage.completionTokens * pricing.outputPerMTok) /
+      1_000_000;
+    expect(modelCallEvents[0]?.costUsd).toBeCloseTo(expected, 10);
+  });
+
+  it("model_call omits costUsd when the adapter reports no usage", async () => {
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }));
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    expect(modelCallEvents[0]?.costUsd).toBeUndefined();
+  });
+
+  it("loop latency derives from the injected clock port (issue #58)", async () => {
+    const fixed = new Date("2026-07-10T12:00:00Z");
+    const input: TurnInput = { tag: "utterance", content: "test" };
+    const ports = createPorts(() => ({ content: "ok", stop: true }), {
+      clock: () => fixed,
+    });
+
+    const { events } = await collect(turn(input, ports));
+    const modelCallEvents = eventsOfType(events, "model_call");
+
+    expect(modelCallEvents[0]?.latencyMs).toBe(0);
+    for (const event of events) {
+      expect(event.timestamp).toBe(fixed.toISOString());
+    }
   });
 });
 

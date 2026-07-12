@@ -3,7 +3,8 @@ import { turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { EventLog } from "@/harness/eventLog";
-import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
+import { createUserSupabase } from "@/lib/supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createMemoryStore,
   createSupabaseProfileGateway,
@@ -27,23 +28,28 @@ import {
   createInMemoryQueryRunner,
   QUERY_CATALOG_SCHEMA,
 } from "@/harness/queryCatalog";
-import { createCatalog, SEED_FOODS } from "@/catalog/catalog";
+import { loadConfiguredCatalog } from "@/catalog/snapshotLoader";
 import {
   createQueryCatalog,
   ALL_QUERY_TEMPLATES,
 } from "@/catalog/queryCatalog";
 import { createSupabaseProposalStore } from "@/lib/proposalStore";
-import { createSupabaseMealLogStore } from "@/lib/mealLogStore";
-import { getUserIdFromHeader } from "@/lib/auth";
+import {
+  createSupabaseMealLogStore,
+  listUserMealRecords,
+} from "@/lib/mealLogStore";
+import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
+import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
+import { getSessionFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Module-level catalog (built once at cold start from seed data)
-const catalog = createCatalog(SEED_FOODS);
+// Module-level catalog (built once at cold start: CATALOG_SNAPSHOT_PATH
+// snapshot when configured, else seed data — issue #60)
+const catalog = loadConfiguredCatalog();
 const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
-const queryRunner = createInMemoryQueryRunner(catalog);
 const toolSchemas = [
   LOG_MEAL_SCHEMA,
   QUERY_CATALOG_SCHEMA,
@@ -55,6 +61,7 @@ const toolSchemas = [
 function buildToolMap(
   sessionUserId: string,
   proposalStore: ProposalStore,
+  queryRunner: QueryRunner,
 ): ReadonlyMap<string, ToolHandler> {
   const logMealHandler = createLogMealHandler({
     catalog,
@@ -88,12 +95,12 @@ function getRequestHistory(
 // ─── User context loading ──────────────────────────────────────────────
 
 async function loadUserContext(
+  client: SupabaseClient,
   userId: string,
 ): Promise<
   { userContext: UserContext; interactionStore: InteractionStore } | undefined
 > {
   try {
-    const client = createServerSupabase();
     const gateway = createSupabaseProfileGateway(client);
     const store = createMemoryStore({ gateway });
     const profile = await store.getProfile(userId);
@@ -112,6 +119,19 @@ async function loadUserContext(
     };
   } catch {
     return undefined;
+  }
+}
+
+/** Fail-soft meal loading: a ledger read failure degrades queries to empty
+ *  observations instead of failing the turn. */
+async function loadUserMeals(
+  client: Parameters<typeof listUserMealRecords>[0],
+  userId: string,
+): Promise<readonly MealRecord[]> {
+  try {
+    return await listUserMealRecords(client, userId);
+  } catch {
+    return [];
   }
 }
 
@@ -157,7 +177,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // ── Extract session user identity from Supabase auth session ─────
-  const sessionUserId = await getUserIdFromHeader(createUserSupabase, request);
+  const session = await getSessionFromHeader(createUserSupabase, request);
+  const sessionUserId = session?.userId;
 
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();
@@ -171,15 +192,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     eventLog,
     sessionUserId,
     history: getRequestHistory(body, turnInput),
+    catalog,
+    queryCatalog,
+    catalogVersion: catalog.snapshot.version,
   });
 
   // ── Wire Supabase-backed stores and tools for authenticated users ─
-  if (sessionUserId) {
-    const serverClient = createServerSupabase();
+  if (session) {
+    // Session-scoped client: the turn path runs under the user's JWT so
+    // RLS binds beneath the executor's userId scoping (issue #62 /
+    // ADD §Multi-User — the unrestricted role exists in migrations only).
+    const userClient = createUserSupabase(session.accessToken);
     const proposalStore = createSupabaseProposalStore({
-      client: serverClient,
+      client: userClient,
     });
-    const mealLogStore = createSupabaseMealLogStore(serverClient);
+    const mealLogStore = createSupabaseMealLogStore(userClient);
 
     ports = {
       ...ports,
@@ -188,17 +215,27 @@ export async function POST(request: NextRequest): Promise<Response> {
     };
 
     if (turnInput.tag === "utterance") {
+      // SQL runner when configured (issue #64): reviewed SQL under the
+      // SELECT-only role, identity bound via the session JWT. Otherwise
+      // the in-memory runner fed with the user's ledger rows (issue #55) —
+      // scripted CI stays here with zero network.
+      const queryRunner =
+        process.env.NUTRIBUDDY_QUERY_RUNNER === "sql"
+          ? createSupabaseQueryRunner(userClient, catalog)
+          : createInMemoryQueryRunner(
+              catalog,
+              await loadUserMeals(userClient, session.userId),
+            );
+
       ports = {
         ...ports,
-        tools: buildToolMap(sessionUserId, proposalStore),
+        tools: buildToolMap(session.userId, proposalStore, queryRunner),
         toolSchemas,
       };
     }
-  }
 
-  // ── Load user safety context (fail-soft) ──────────────────────────
-  if (sessionUserId) {
-    const ctx = await loadUserContext(sessionUserId);
+    // ── Load user safety context (fail-soft) ────────────────────────
+    const ctx = await loadUserContext(userClient, session.userId);
     if (ctx) {
       ports = {
         ...ports,

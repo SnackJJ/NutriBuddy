@@ -17,6 +17,7 @@ import { DeepSeekAdapter } from "../harness/modelAdapter";
 import type { ModelAdapter, ModelRequest, ModelResponse, ToolHandler } from "../harness/types";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { EvalCase } from "./types";
+import { createCatalog, SEED_FOODS } from "../catalog/catalog";
 
 // ─── Stub adapter（CI / 离线验证）─────────────────────────────────────────
 //
@@ -138,7 +139,13 @@ async function main(): Promise<void> {
   // ── Harness run ────────────────────────────────────────────────────
   console.log("Running harness eval...");
   const harnessStart = Date.now();
-  const harnessResults = await runHarnessEval(cases, adapter, tools, interactionStore);
+  const harnessResults = await runHarnessEval(
+    cases,
+    adapter,
+    tools,
+    interactionStore,
+    createCatalog(SEED_FOODS),
+  );
   const harnessDuration = Date.now() - harnessStart;
   console.log(`  Done in ${harnessDuration}ms. ${harnessResults.filter((r) => r.passed).length}/${harnessResults.length} passed.\n`);
 

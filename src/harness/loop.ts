@@ -41,6 +41,7 @@ import { buildPreGateContext, type UserContext } from "./gate";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { QueryCatalog } from "../catalog/queryCatalog";
 import { SUBMIT_ANSWER_TOOL, parseSubmitAnswerArgs } from "./submitAnswer";
+import { computeCostUsd } from "./modelAdapter";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -192,6 +193,15 @@ export interface RunTurnInput {
   readonly interactionStore?: InteractionStore;
   /** Typed query catalog：reviewed template signatures for prompt injection. */
   readonly queryCatalog?: QueryCatalog;
+  /** Injected clock port（ADD §Testing Seam）；latency 从这里读，缺省为系统时钟。 */
+  readonly clock?: () => Date;
+  /**
+   * Input-gate directive injected on utterance conflict hits (issue #53 /
+   * ADD §Gates)：refuse-and-cite for prescriptive asks, advise for
+   * descriptive mentions. Rides the dynamic region alongside the user
+   * input — the pinned region stays byte-stable.
+   */
+  readonly inputDirective?: string;
 }
 
 export type TurnResult = TerminalResult;
@@ -273,7 +283,14 @@ export async function* run(
     userContext,
     interactionStore,
     queryCatalog,
+    clock,
+    inputDirective,
   } = input;
+
+  const nowMs = clock ? () => clock().getTime() : () => Date.now();
+  const modelUserInput = inputDirective
+    ? `${userInput}\n\n${inputDirective}`
+    : userInput;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });
@@ -323,7 +340,7 @@ export async function* run(
     const messages = assembleContext({
       pinned,
       history: working,
-      userInput,
+      userInput: modelUserInput,
     });
     tracer.record({
       step,
@@ -343,14 +360,14 @@ export async function* run(
     yield { type: "thought", step };
 
     // ── Act ──────────────────────────────────────────────────────────
-    const callStart = Date.now();
+    const callStart = nowMs();
     const response = await adapter.generate({
       model: tier,
       thinking,
       messages,
       tools: toolSchemas,
     });
-    const latencyMs = Date.now() - callStart;
+    const latencyMs = nowMs() - callStart;
 
     tracer.record({ step, type: "model_return", payload: response.content });
 
@@ -359,6 +376,7 @@ export async function* run(
       thinking,
       latencyMs,
       usage: response.usage ?? null,
+      costUsd: response.usage ? computeCostUsd(tier, response.usage) : null,
     };
 
     tracer.record({

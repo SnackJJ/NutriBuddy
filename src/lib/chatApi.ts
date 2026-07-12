@@ -9,10 +9,10 @@ import type { TurnInput, TurnPorts } from "../harness/turn";
 import type { Tracer } from "../harness/tracer";
 import type { ModelAdapter } from "../harness/types";
 import type { EventLog } from "../harness/eventLog";
+import type { Catalog } from "../catalog/catalog";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 
 // ─── Request body types ───────────────────────────────────────────────
-
-export const SESSION_USER_ID_HEADER = "X-User-Id";
 
 export interface UtteranceChatBody {
   readonly tag?: "utterance";
@@ -101,6 +101,12 @@ export interface BuildChatTurnPortsInput {
   readonly sessionUserId?: string;
   readonly history?: readonly ChatMessage[];
   readonly eventLog?: EventLog;
+  /** Food catalog for the input-gate conflict scan (issue #53). */
+  readonly catalog?: Catalog;
+  /** Query template catalog for pinned-region template signatures (issue #55). */
+  readonly queryCatalog?: QueryCatalog;
+  /** Catalog snapshot version stamped on turn_start events (issue #55). */
+  readonly catalogVersion?: string;
 }
 
 /**
@@ -121,5 +127,8 @@ export function buildChatTurnPorts(input: BuildChatTurnPortsInput): TurnPorts {
     userId: input.sessionUserId,
     sessionUserId: input.sessionUserId,
     history: input.history,
+    catalog: input.catalog,
+    queryCatalog: input.queryCatalog,
+    catalogVersion: input.catalogVersion,
   };
 }

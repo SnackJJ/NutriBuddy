@@ -65,6 +65,39 @@ describe("run", () => {
     expect(obs?.content).toBe("约 6 克蛋白质");
   });
 
+  it("appends inputDirective to the model-facing user input but traces the raw input (issue #53)", async () => {
+    const tracer = new Tracer();
+    const seenRequests: ModelRequest[] = [];
+    const adapter = stubAdapter((req) => {
+      seenRequests.push(req);
+      return { content: "ok", stop: true };
+    });
+
+    await collect(
+      run({
+        userInput: "Should I eat shrimp?",
+        adapter,
+        tracer,
+        inputDirective: "[INPUT GATE DIRECTIVE — REFUSE AND CITE]\ntest",
+      }),
+    );
+
+    // Model sees utterance + directive in one user message
+    const userMessages = seenRequests[0].messages.filter(
+      (m) => m.role === "user",
+    );
+    const lastUser = userMessages[userMessages.length - 1];
+    expect(lastUser.content).toBe(
+      "Should I eat shrimp?\n\n[INPUT GATE DIRECTIVE — REFUSE AND CITE]\ntest",
+    );
+
+    // Trace records the raw user input, not the directive-augmented one
+    const userInputTrace = tracer
+      .events()
+      .find((entry) => entry.type === "user_input");
+    expect(userInputTrace?.payload).toBe("Should I eat shrimp?");
+  });
+
   it("enforces MAX_STEPS=8 and returns stopReason=max_steps", async () => {
     const tracer = new Tracer();
     let calls = 0;

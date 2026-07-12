@@ -9,6 +9,7 @@ import type {
   MealLogEntry,
   MealLogInsert,
 } from "../harness/logMeal";
+import type { MealRecord } from "../catalog/queryCatalog";
 
 /** Postgres 表行形状（snake_case，与 supabase/migrations/0002_meal_logs.sql 对应）。 */
 interface MealLogDbRow {
@@ -23,6 +24,9 @@ interface MealLogDbRow {
   readonly fat_g: number;
   readonly carbs_g: number;
   readonly proposal_id: string;
+  readonly food_id: string | null;
+  readonly match_type: string | null;
+  readonly allergen_tags: string[] | null;
   readonly created_at: string;
 }
 
@@ -39,6 +43,9 @@ function rowToEntry(row: MealLogDbRow): MealLogEntry {
     fatG: row.fat_g,
     carbsG: row.carbs_g,
     proposalId: row.proposal_id,
+    foodId: row.food_id ?? undefined,
+    matchType: row.match_type ?? undefined,
+    allergenTags: row.allergen_tags ?? undefined,
   };
 }
 
@@ -62,6 +69,9 @@ export function createSupabaseMealLogStore(
           fat_g: params.fatG,
           carbs_g: params.carbsG,
           proposal_id: params.proposalId,
+          food_id: params.foodId,
+          match_type: params.matchType,
+          allergen_tags: [...params.allergenTags],
         })
         .select()
         .single();
@@ -73,4 +83,36 @@ export function createSupabaseMealLogStore(
       return rowToEntry(data as MealLogDbRow);
     },
   };
+}
+
+/**
+ * Load a user's meal ledger rows as query-runner MealRecords (issue #55).
+ *
+ * Interim path: feeds the in-memory query runner per request until the
+ * SQL executor (#64) runs templates directly against Postgres.
+ */
+export async function listUserMealRecords(
+  client: SupabaseClient,
+  userId: string,
+): Promise<MealRecord[]> {
+  const { data, error } = await client
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`Failed to list meal logs: ${error.message}`);
+  }
+
+  return ((data ?? []) as MealLogDbRow[]).map((row) => ({
+    userId: row.user_id,
+    foodName: row.food_name,
+    portionG: row.portion_g,
+    mealType: row.meal_type,
+    loggedAt: row.logged_at,
+    kcal: row.kcal,
+    proteinG: row.protein_g,
+    fatG: row.fat_g,
+    carbsG: row.carbs_g,
+  }));
 }

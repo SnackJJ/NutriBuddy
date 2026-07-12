@@ -3,6 +3,7 @@
 // 将 ProposalStore 端口接上 Supabase `proposals` 表。
 // 沿用 harness/Supabase 既有约定：窄端口可注入，单测不触网。
 
+import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ProposalStore,
@@ -83,12 +84,11 @@ function inputToRow(
 const TABLE = "proposals";
 const PROPOSED_STATUS = "proposed";
 const ID_PREFIX = "proposal";
-let nextId = Date.now();
 
 function generateProposalId(): string {
-  // Preserve the proposal-* id shape while letting the DB reject rare
-  // cross-process collisions.
-  return `${ID_PREFIX}-${(nextId++).toString(36)}`;
+  // proposal-* id shape, collision-free across processes and clock-independent
+  // (ADD §Testing Seam: nothing below the seam reads the clock outside its port).
+  return `${ID_PREFIX}-${randomUUID()}`;
 }
 
 export interface SupabaseProposalStoreOptions {
@@ -103,9 +103,10 @@ export interface SupabaseProposalStoreOptions {
  * Stores immutable proposals in the `proposals` table. Status transitions
  * update only the status column; all nutrition data is frozen at creation.
  *
- * Uses the service-role client (bypasses RLS) because application-level
- * scoping via userId already enforces tenant isolation. RLS on the table
- * is defense-in-depth (see migration 0005).
+ * Runs on whatever client the caller injects. The turn path injects a
+ * session-scoped client (issue #62 / ADD §Multi-User), so the RLS policies
+ * from migration 0005 bind beneath the application-level userId scoping
+ * as real defense in depth.
  */
 export function createSupabaseProposalStore(
   options: SupabaseProposalStoreOptions,
@@ -115,7 +116,7 @@ export function createSupabaseProposalStore(
 
   async function transitionStatus(
     id: string,
-    status: Extract<ProposalStatus, "committed" | "rejected">,
+    status: Extract<ProposalStatus, "committed" | "voided">,
     action: "commit" | "decline",
   ): Promise<Proposal> {
     const { data, error } = await client
@@ -175,7 +176,7 @@ export function createSupabaseProposalStore(
     },
 
     async decline(id: string): Promise<Proposal> {
-      return transitionStatus(id, "rejected", "decline");
+      return transitionStatus(id, "voided", "decline");
     },
   };
 }

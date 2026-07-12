@@ -4,17 +4,109 @@ import { useState, useEffect, useCallback } from "react";
 import { profileFormSchema, GOAL_TYPES } from "@/lib/profileValidation";
 import type { GoalType } from "@/lib/profileValidation";
 import type { UserProfile } from "@/lib/memoryStore";
+import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 
-/** Generate a stable client-side userId (M1 — no auth yet). */
-function readUserId(): string {
-  if (typeof window === "undefined") return "";
-  const key = "nutribuddy_user_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
-  }
-  return id;
+/** Minimal email+password sign-in / sign-up form (issue #65). */
+function SignInForm({
+  signIn,
+  signUp,
+}: {
+  signIn: (email: string, password: string) => Promise<string | null>;
+  signUp: (email: string, password: string) => Promise<string | null>;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = useCallback(
+    async (action: "signIn" | "signUp") => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      const result =
+        action === "signIn"
+          ? await signIn(email, password)
+          : await signUp(email, password);
+      if (result) {
+        setError(result);
+      } else if (action === "signUp") {
+        setNotice(
+          "Account created. Check your inbox if email confirmation is enabled, then sign in.",
+        );
+      }
+      setBusy(false);
+    },
+    [email, password, signIn, signUp],
+  );
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h1 className="mb-1 text-xl font-bold text-gray-900">Sign in</h1>
+        <p className="mb-6 text-sm text-gray-500">
+          Your dietary profile is tied to your account.
+        </p>
+
+        {error && (
+          <div className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div className="mb-4 rounded-md bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            {notice}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              autoComplete="email"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              autoComplete="current-password"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy || !email || !password}
+              onClick={() => submit("signIn")}
+              className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              disabled={busy || !email || !password}
+              onClick={() => submit("signUp")}
+              className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Create account
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
 }
 
 /** TagInput: text field that adds tags on Enter / comma and shows them as chips. */
@@ -94,7 +186,14 @@ const GOAL_LABELS: Record<GoalType, string> = {
 };
 
 export default function ProfilePage() {
-  const [userId, setUserId] = useState("");
+  const {
+    session,
+    loading: sessionLoading,
+    configured,
+    signIn,
+    signUp,
+    signOut,
+  } = useSupabaseSession();
 
   // Profile data loaded from server
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -118,10 +217,6 @@ export default function ProfilePage() {
     text: string;
   } | null>(null);
 
-  useEffect(() => {
-    setUserId(readUserId());
-  }, []);
-
   /** Sync a UserProfile from the server into the local form state fields. */
   function applyProfileToForm(p: UserProfile) {
     setAllergies([...p.allergies]);
@@ -135,16 +230,16 @@ export default function ProfilePage() {
     setWeightKg(p.weightKg?.toString() ?? "");
   }
 
-  // Load profile on mount
+  // Load profile once signed in
   useEffect(() => {
-    if (!userId) return;
+    if (!session) return;
 
     let cancelled = false;
     async function load() {
       try {
-        const res = await fetch(
-          `/api/profile?userId=${encodeURIComponent(userId)}`,
-        );
+        const res = await fetch("/api/profile", {
+          headers: authHeader(session),
+        });
         if (!res.ok) throw new Error("Failed to load profile");
         const data = await res.json();
         if (cancelled) return;
@@ -163,14 +258,16 @@ export default function ProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+    // applyProfileToForm is stable in practice (plain setters)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
 
-    if (!userId) {
-      setMessage({ type: "error", text: "Profile is still loading." });
+    if (!session) {
+      setMessage({ type: "error", text: "Please sign in first." });
       return;
     }
 
@@ -201,8 +298,11 @@ export default function ProfilePage() {
     try {
       const res = await fetch("/api/profile", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, ...patch }),
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader(session),
+        },
+        body: JSON.stringify(patch),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -225,6 +325,28 @@ export default function ProfilePage() {
     }
   };
 
+  if (sessionLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+        <p className="text-gray-500">Loading…</p>
+      </main>
+    );
+  }
+
+  if (!configured) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+        <p className="text-gray-500">
+          Supabase is not configured — profile settings are unavailable.
+        </p>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return <SignInForm signIn={signIn} signUp={signUp} />;
+  }
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -236,9 +358,18 @@ export default function ProfilePage() {
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-10">
       <div className="mx-auto max-w-2xl">
-        <h1 className="mb-2 text-2xl font-bold text-gray-900">
-          Profile Settings
-        </h1>
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">
+            Profile Settings
+          </h1>
+          <button
+            type="button"
+            onClick={() => signOut()}
+            className="text-sm text-gray-500 underline hover:text-gray-700"
+          >
+            Sign out ({session.user.email})
+          </button>
+        </div>
         <p className="mb-8 text-sm text-gray-500">
           Your dietary profile helps NutriBuddy give you personalised advice.
         </p>

@@ -342,9 +342,9 @@ describe("createSupabaseProposalStore", () => {
   });
 
   describe("decline", () => {
-    it("declines a proposal by updating status to 'rejected'", async () => {
+    it("declines a proposal by updating status to 'voided'", async () => {
       const { client, state } = fakeSupabaseClient();
-      state.transitionRow = proposalRow({ status: "rejected" });
+      state.transitionRow = proposalRow({ status: "voided" });
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
@@ -352,9 +352,9 @@ describe("createSupabaseProposalStore", () => {
 
       const proposal = await store.decline("proposal-abc");
 
-      expect(proposal.status).toBe("rejected");
+      expect(proposal.status).toBe("voided");
       expect(state.updated).toEqual([
-        { table: "proposals", row: { status: "rejected" } },
+        { table: "proposals", row: { status: "voided" } },
       ]);
       expect(state.filters).toEqual([
         { column: "id", value: "proposal-abc" },
