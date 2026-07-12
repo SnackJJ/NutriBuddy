@@ -1,31 +1,45 @@
 import { type NextRequest } from "next/server";
-import { createServerSupabase } from "@/lib/supabase";
+import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
 import { createMemoryStore, createSupabaseProfileGateway } from "@/lib/memoryStore";
 import { handleGetProfile, handleUpdateProfile } from "@/lib/profileApi";
+import { getSessionFromHeader } from "@/lib/auth";
 
+// The store runs on the service-role client on purpose: migration 0007
+// removed the authenticated write policies on user_profile, so this
+// validated API is the sole write door (ADD §Memory). Identity, however,
+// comes exclusively from the verified session below (issue #65) — the
+// client can no longer assert a userId.
 function createStore() {
   const client = createServerSupabase();
   const gateway = createSupabaseProfileGateway(client);
   return createMemoryStore({ gateway });
 }
 
-/** GET /api/profile?userId=… — fetch current profile. */
+function unauthorized(): Response {
+  return new Response(
+    JSON.stringify({ error: "Authentication required" }),
+    { status: 401, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/** GET /api/profile — fetch the authenticated user's profile. */
 export async function GET(request: NextRequest): Promise<Response> {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get("userId");
-  if (!userId) {
-    return new Response(
-      JSON.stringify({ error: "userId query parameter is required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
+  const session = await getSessionFromHeader(createUserSupabase, request);
+  if (!session) {
+    return unauthorized();
   }
 
   const store = createStore();
-  return handleGetProfile(userId, store);
+  return handleGetProfile(session.userId, store);
 }
 
-/** PUT /api/profile — update profile (body includes userId + patch fields). */
+/** PUT /api/profile — update the authenticated user's profile. */
 export async function PUT(request: NextRequest): Promise<Response> {
+  const session = await getSessionFromHeader(createUserSupabase, request);
+  if (!session) {
+    return unauthorized();
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -36,14 +50,10 @@ export async function PUT(request: NextRequest): Promise<Response> {
     );
   }
 
-  const { userId, ...patchBody } = body as Record<string, unknown>;
-  if (!userId || typeof userId !== "string") {
-    return new Response(
-      JSON.stringify({ error: "userId is required in request body" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+  // Strip any client-sent userId so it can neither select the target row
+  // nor leak into the patch.
+  const { userId: _ignored, ...patchBody } = body as Record<string, unknown>;
 
   const store = createStore();
-  return handleUpdateProfile(userId, patchBody, store);
+  return handleUpdateProfile(session.userId, patchBody, store);
 }

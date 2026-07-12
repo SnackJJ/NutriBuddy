@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChatMessage, WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
+import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
+import type { Session } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -99,10 +101,10 @@ function createAssistantStreamState(): AssistantStreamState {
   };
 }
 
-/** Identity travels in the Authorization header verified server-side
- *  (issue #48/#62) — the request body and custom headers carry none. */
-function chatHeaders(): Record<string, string> {
-  return { "Content-Type": "application/json" };
+/** Identity travels in the verified Authorization header (issue #48/#62/#65)
+ *  — signed-out users chat anonymously with no identity header at all. */
+function chatHeaders(session: Session | null): Record<string, string> {
+  return { "Content-Type": "application/json", ...authHeader(session) };
 }
 
 async function responseErrorMessage(
@@ -607,6 +609,7 @@ function ProposalCard({
 // ─── Page ──────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
+  const { session } = useSupabaseSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -667,7 +670,7 @@ export default function ChatPage() {
       const history = buildHistory(messages);
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: chatHeaders(),
+        headers: chatHeaders(session),
         body: JSON.stringify({ message: trimmed, history }),
       });
 
@@ -735,7 +738,7 @@ export default function ChatPage() {
     } finally {
       setStreaming(false);
     }
-  }, [input, streaming, messages, buildHistory]);
+  }, [input, streaming, messages, session, buildHistory]);
 
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
@@ -748,7 +751,7 @@ export default function ChatPage() {
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: chatHeaders(),
+          headers: chatHeaders(session),
           body: JSON.stringify({
             tag: "proposal_confirm",
             proposalId: pendingProposal.proposalId,
@@ -796,7 +799,7 @@ export default function ChatPage() {
         setConfirming(false);
       }
     },
-    [pendingProposal, confirming],
+    [pendingProposal, confirming, session],
   );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */
