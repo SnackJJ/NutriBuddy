@@ -219,4 +219,22 @@ describe("assertSessionSubject (RFC 0001)", () => {
       }),
     ).not.toThrow();
   });
+
+  it("throws when a JWT-shaped token has no usable sub claim (issue #75)", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: makeJwt({ aud: "test" }),
+      }),
+    ).toThrow(/no usable sub/);
+  });
+
+  it("throws when a JWT-shaped token has a non-string sub", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: makeJwt({ sub: 123 }),
+      }),
+    ).toThrow(/no usable sub/);
+  });
 });

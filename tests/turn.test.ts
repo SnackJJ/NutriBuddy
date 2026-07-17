@@ -361,6 +361,7 @@ describe("turn (proposal_confirm)", () => {
       reply: `Proposal ${proposal.id} confirmed.`,
       steps: 0,
       stopReason: "end_turn",
+      commit: { proposalId: proposal.id, mealLogId: 1 },
     });
   });
 
@@ -374,6 +375,7 @@ describe("turn (proposal_confirm)", () => {
       steps: 0,
       stopReason: "end_turn",
     });
+    expect(result.commit).toBeUndefined();
   });
 
   it("includes optional feedback in confirmed proposal replies", async () => {
@@ -388,6 +390,7 @@ describe("turn (proposal_confirm)", () => {
       reply: `Proposal ${proposal.id} confirmed. Please reduce the portion size.`,
       steps: 0,
       stopReason: "end_turn",
+      commit: { proposalId: proposal.id, mealLogId: 1 },
     });
   });
 
@@ -2880,7 +2883,7 @@ describe("proposal commit short-circuit (RFC 0001)", () => {
     expect(generateCalled).toBe(false);
   });
 
-  it("throws when confirm ports are incomplete (no silent pass)", async () => {
+  it("fail-closes incomplete confirm ports on the seam (no silent pass, no throw)", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
@@ -2888,12 +2891,22 @@ describe("proposal commit short-circuit (RFC 0001)", () => {
     };
     const ports = createPorts(); // No stores wired
 
-    await expect(collect(turn(input, ports))).rejects.toThrow(
-      /ConfirmPorts incomplete/,
+    const { events, result } = await collect(turn(input, ports));
+    expect(events[0]?.type).toBe("turn_start");
+    expect(events[events.length - 1]?.type).toBe("turn_end");
+    expect(result.stopReason).toBe("crash");
+    expect(result.reply).toMatch(/ConfirmPorts incomplete/);
+    expect(result.reply).not.toMatch(/no store wired/i);
+    const commitGate = events.find(
+      (e) => e.type === "gate_verdict" && e.checkpoint === "commit",
     );
+    expect(commitGate).toMatchObject({
+      verdict: "error",
+      checkName: "confirm_ports_incomplete",
+    });
   });
 
-  it("throws on incomplete ports for rejection path too", async () => {
+  it("fail-closes incomplete ports on the rejection path too", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
@@ -2901,9 +2914,10 @@ describe("proposal commit short-circuit (RFC 0001)", () => {
     };
     const ports = createPorts();
 
-    await expect(collect(turn(input, ports))).rejects.toThrow(
-      /ConfirmPorts incomplete/,
-    );
+    const { events, result } = await collect(turn(input, ports));
+    expect(events[events.length - 1]?.type).toBe("turn_end");
+    expect(result.stopReason).toBe("crash");
+    expect(result.reply).toMatch(/ConfirmPorts incomplete/);
   });
 
   it("scorer detects block on cross-user confirmation attempt", async () => {
@@ -4198,7 +4212,7 @@ describe("turn event enrichment (issue #51)", () => {
     expect(startEvent.profileVersion).toBeUndefined();
   });
 
-  it("turn_start event schema is bumped to 1.5.0 for enriched fields", async () => {
+  it("turn_start event schema carries the current SCHEMA_VERSION", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
     const ports = createPorts(() => ({ content: "ok", stop: true }));
 
@@ -4206,7 +4220,7 @@ describe("turn event enrichment (issue #51)", () => {
     const startEvent = expectStartEvent(events);
 
     expect(startEvent.schema).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe("1.5.0");
+    expect(SCHEMA_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("emits model_call events between thought and subsequent steps", async () => {

@@ -162,6 +162,15 @@ export interface WriteProposalData {
   readonly createdAt: string;
 }
 
+/**
+ * Structured commit lineage when a proposal was committed this turn
+ * (RFC 0001 K3 / issue #76). Present only on successful confirm.
+ */
+export interface CommitLineage {
+  readonly proposalId: string;
+  readonly mealLogId: number;
+}
+
 /** Async generator 的最终返回。 */
 export interface TerminalResult {
   readonly reply: string;
@@ -174,6 +183,11 @@ export interface TerminalResult {
    * Contains the resolved entities and confirmation payload (issue #36).
    */
   readonly proposal?: WriteProposalData;
+  /**
+   * Structured commit lineage after a successful confirm short-circuit
+   * (issue #76). Omitted on decline / not_committable / error.
+   */
+  readonly commit?: CommitLineage;
   /**
    * Pre-gate drug-nutrient interactions computed during the loop.
    * Carried so the turn-layer consolidated output gate can run the

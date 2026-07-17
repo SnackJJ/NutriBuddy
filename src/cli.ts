@@ -140,7 +140,7 @@ export async function main(
     deps.stateFilePath ??
     process.env.NUTRIBUDDY_STATE_FILE ??
     DEFAULT_STATE_FILE;
-  const stores = createFileStores(stateFilePath);
+  const stores = createFileStores(stateFilePath, { userId: CLI_USER_ID });
   const catalog = loadConfiguredCatalog();
   const queryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
 

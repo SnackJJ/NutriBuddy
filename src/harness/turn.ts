@@ -25,13 +25,17 @@ import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import type { Observation } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
 import type { MealLogStore, ProposalStore } from "./logMeal";
-import { handleProposalConfirm } from "./proposalConfirm";
+import {
+  handleProposalConfirm,
+  type ProposalConfirmOutcome,
+} from "./proposalConfirm";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.5.0";
+export const SCHEMA_VERSION = "1.6.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
+const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
 export type TurnInput = UtteranceInput | ProposalConfirmInput;
 
@@ -50,11 +54,12 @@ export interface ProposalConfirmInput {
 type Clock = () => Date;
 
 /**
- * Confirm/reject short-circuit ports (RFC 0001 Phase 1).
+ * Confirm/reject short-circuit ports (RFC 0001 §3 / issue #73).
  * Required: proposalStore + sessionUserId only.
  * mealLogStore is NOT on this port — writes go only through proposalStore RPCs.
  */
 export interface ConfirmPorts {
+  readonly kind: "confirm";
   readonly proposalStore: ProposalStore;
   readonly sessionUserId: string;
   readonly clock?: Clock;
@@ -64,8 +69,10 @@ export interface ConfirmPorts {
  * All external dependencies enter through injected ports.
  * Every field is injectable for deterministic scripted testing.
  *
- * Confirm path requires proposalStore + sessionUserId (see ConfirmPorts).
- * Incomplete confirm assemblies throw — no "no store wired" silent pass.
+ * Confirm short-circuit requires a resolved {@link ConfirmPorts}
+ * (`kind: "confirm"` + required fields). Incomplete confirm assemblies
+ * fail closed on the seam with a terminal event — never silent pass,
+ * never mid-stream throw (issue #73 / F1).
  */
 export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly clock?: Clock;
@@ -88,6 +95,43 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly catalogVersion?: string;
   /** Version of the user profile constraints used in this turn (issue #51). */
   readonly profileVersion?: string;
+}
+
+/**
+ * Build a typed ConfirmPorts from a TurnPorts bag when both required
+ * confirm fields are present. Returns undefined when incomplete (issue #73).
+ */
+export function resolveConfirmPorts(
+  ports: TurnPorts,
+): ConfirmPorts | undefined {
+  if (!ports.proposalStore || !ports.sessionUserId) {
+    return undefined;
+  }
+  return {
+    kind: "confirm",
+    proposalStore: ports.proposalStore,
+    sessionUserId: ports.sessionUserId,
+    clock: ports.clock,
+  };
+}
+
+/** Fail-closed terminal for incomplete confirm assembly (issue #73 / F1). */
+function incompleteConfirmOutcome(
+  input: ProposalConfirmInput,
+): ProposalConfirmOutcome {
+  return {
+    result: {
+      reply: `Proposal ${input.proposalId} cannot be processed: ConfirmPorts incomplete.`,
+      steps: 0,
+      stopReason: "crash",
+    },
+    commitVerdict: {
+      verdict: "error",
+      checkName: CONFIRM_PORTS_INCOMPLETE,
+      evidence:
+        "ConfirmPorts incomplete: proposalStore and sessionUserId are required",
+    },
+  };
 }
 
 /**
@@ -1202,7 +1246,12 @@ export async function* turn(
       break;
     }
     case "proposal_confirm": {
-      const outcome = await handleProposalConfirm(input, ports);
+      // Issue #73: resolve typed ConfirmPorts; incomplete → fail-closed
+      // terminal on the seam (never mid-stream throw / silent pass).
+      const confirmPorts = resolveConfirmPorts(ports);
+      const outcome = confirmPorts
+        ? await handleProposalConfirm(input, confirmPorts)
+        : incompleteConfirmOutcome(input);
       result = outcome.result;
       confirmCommitVerdict = outcome.commitVerdict;
       break;

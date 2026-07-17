@@ -1,18 +1,19 @@
-// Proposal confirm short-circuit (RFC 0001 Phase 1 / issue #71).
+// Proposal confirm short-circuit (RFC 0001 Phase 1 / issues #71, #73, #76).
 //
-// Extracted from turn.ts as a move-only: ownership and status are decided
-// solely by the store discriminant (kind). No pre-RPC get-then-branch.
-// mealLogStore is not used; writes go only through
+// Ownership and status are decided solely by the store discriminant (kind).
+// No pre-RPC get-then-branch. mealLogStore is not used; writes go only through
 // commitProposalAndInsertMeal / voidProposal.
+//
+// Callers must pass a fully-typed ConfirmPorts (kind: "confirm"). Incomplete
+// assembly is resolved at the turn seam (issue #73) — this module does not
+// accept the optional TurnPorts bag.
 
 import type {
   ConfirmPorts,
   GateVerdict,
   ProposalConfirmInput,
-  TurnPorts,
   TurnResult,
 } from "./turn";
-// type-only import from turn avoids runtime cycle with turn → proposalConfirm.
 
 const COMMIT_GATE_CHECK = "commit_gate_check";
 const NOT_COMMITTABLE = "not_committable";
@@ -29,11 +30,15 @@ export interface ProposalConfirmOutcome {
   readonly commitVerdict: CommitGateVerdict;
 }
 
-function createEndTurnResult(reply: string): TurnResult {
+function createEndTurnResult(
+  reply: string,
+  extra: Partial<TurnResult> = {},
+): TurnResult {
   return {
     reply,
     steps: 0,
     stopReason: "end_turn",
+    ...extra,
   };
 }
 
@@ -44,10 +49,6 @@ function createProposalConfirmReply(input: ProposalConfirmInput): string {
 
   const feedback = input.feedback ? ` ${input.feedback}` : "";
   return `Proposal ${input.proposalId} confirmed.${feedback}`;
-}
-
-function createProposalConfirmResult(input: ProposalConfirmInput): TurnResult {
-  return createEndTurnResult(createProposalConfirmReply(input));
 }
 
 function createProposalConfirmOutcome(
@@ -67,42 +68,30 @@ function createProposalConfirmOutcome(
 }
 
 /**
- * Require ConfirmPorts fields. Incomplete assembly is unrepresentable —
- * throw rather than silent "no store wired" pass (RFC 0001 F1 / C1).
- */
-function requireConfirmPorts(ports: TurnPorts): ConfirmPorts {
-  if (!ports.proposalStore || !ports.sessionUserId) {
-    throw new Error(
-      "ConfirmPorts incomplete: proposalStore and sessionUserId are required",
-    );
-  }
-  return {
-    proposalStore: ports.proposalStore,
-    sessionUserId: ports.sessionUserId,
-    clock: ports.clock,
-  };
-}
-
-/**
  * Handle a proposal confirmation turn input (RFC 0001 Phase 1).
  *
- * Short-circuits the model. Ownership and status are decided solely by the
- * store discriminant (kind) — no pre-RPC get-then-branch. mealLogStore is
- * not used; writes go only through commitProposalAndInsertMeal / voidProposal.
+ * Short-circuits the model. Ports must already be a complete ConfirmPorts —
+ * incomplete assembly is fail-closed at the turn boundary (issue #73).
  */
 export async function handleProposalConfirm(
   input: ProposalConfirmInput,
-  ports: TurnPorts,
+  ports: ConfirmPorts,
 ): Promise<ProposalConfirmOutcome> {
   const { proposalId, confirmed } = input;
-  const { proposalStore } = requireConfirmPorts(ports);
+  const { proposalStore } = ports;
 
   if (confirmed) {
     const outcome = await proposalStore.commitProposalAndInsertMeal(proposalId);
     switch (outcome.kind) {
       case "committed":
         return createProposalConfirmOutcome(
-          createProposalConfirmResult(input),
+          createEndTurnResult(createProposalConfirmReply(input), {
+            // K3 / issue #76: structured id lineage on the terminal.
+            commit: {
+              proposalId: outcome.proposalId,
+              mealLogId: outcome.mealLogId,
+            },
+          }),
           "pass",
           `Proposal ${proposalId} committed — meal ledger row ${outcome.mealLogId}`,
         );
@@ -126,7 +115,7 @@ export async function handleProposalConfirm(
   switch (outcome.kind) {
     case "voided":
       return createProposalConfirmOutcome(
-        createProposalConfirmResult(input),
+        createEndTurnResult(createProposalConfirmReply(input)),
         "pass",
         `Proposal ${proposalId} explicitly rejected by user`,
       );

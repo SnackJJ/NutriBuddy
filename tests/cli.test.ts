@@ -45,7 +45,7 @@ function logMealAdapter(): ModelAdapter {
 }
 
 async function seedProposal(stateFile: string): Promise<string> {
-  const stores = createFileStores(stateFile);
+  const stores = createFileStores(stateFile, { userId: "cli-local-user" });
   const proposal = await stores.proposalStore.store({
     userId: "cli-local-user",
     foodId: "food-chicken-breast-001",

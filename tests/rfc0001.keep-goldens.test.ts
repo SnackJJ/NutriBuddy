@@ -275,6 +275,11 @@ describe("RFC 0001 keep goldens", () => {
     expect(proposalStore.proposals[0].status).toBe("committed");
     expect(proposalStore.mealLedger).toHaveLength(1);
     expect(proposalStore.mealLedger[0].proposalId).toBe(proposal.id);
+    // K3 / issue #76: id lineage on structured terminal fields.
+    expect(result.commit).toEqual({
+      proposalId: proposal.id,
+      mealLogId: proposalStore.mealLedger[0].id,
+    });
 
     expect(commitGateShape(events)).toEqual([
       {
@@ -317,6 +322,7 @@ describe("RFC 0001 keep goldens", () => {
     );
 
     expect(result.reply).toContain("rejected");
+    expect(result.commit).toBeUndefined();
     expect(proposalStore.proposals[0].status).toBe("voided");
     expect(proposalStore.mealLedger).toHaveLength(0);
     expect(commitGateShape(events)).toEqual([

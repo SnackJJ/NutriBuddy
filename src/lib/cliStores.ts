@@ -58,18 +58,30 @@ export interface CliStores {
   listMealRecords(): MealRecord[];
 }
 
+export interface CreateFileStoresOptions {
+  /**
+   * Bound session subject — only this user's proposed rows are
+   * commit/void-able (issue #74 / RFC §1.1 ownership collapse).
+   */
+  readonly userId: string;
+  readonly now?: () => string;
+}
+
 /**
  * File-backed ProposalStore + MealLogStore sharing one JSON state file.
  *
  * Every mutation re-reads the file so successive CLI invocations see each
  * other's writes; the CLI is single-process so there is no concurrency.
  * commitProposalAndInsertMeal and voidProposal each do one atomic
- * read-modify-write (no half-commit).
+ * read-modify-write (no half-commit), gated by bound userId (issue #74).
  */
 export function createFileStores(
   filePath: string,
-  now: () => string = () => new Date().toISOString(),
+  options: CreateFileStoresOptions,
 ): CliStores {
+  const boundUserId = options.userId;
+  const now = options.now ?? (() => new Date().toISOString());
+
   const proposalStore: ProposalStore = {
     async store(params: ProposalInput): Promise<Proposal> {
       const state = readState(filePath);
@@ -92,10 +104,14 @@ export function createFileStores(
       proposalId: string,
     ): Promise<CommitResult> {
       // Single critical section: read → mutate proposal + meal → write once.
+      // Ownership collapses into not_committable (same as in-memory / RPC).
       try {
         const state = readState(filePath);
         const index = state.proposals.findIndex(
-          (p) => p.id === proposalId && p.status === "proposed",
+          (p) =>
+            p.id === proposalId &&
+            p.userId === boundUserId &&
+            p.status === "proposed",
         );
 
         if (index < 0) {
@@ -142,7 +158,10 @@ export function createFileStores(
       try {
         const state = readState(filePath);
         const index = state.proposals.findIndex(
-          (p) => p.id === proposalId && p.status === "proposed",
+          (p) =>
+            p.id === proposalId &&
+            p.userId === boundUserId &&
+            p.status === "proposed",
         );
 
         if (index < 0) {

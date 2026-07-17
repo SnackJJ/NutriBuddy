@@ -96,7 +96,9 @@ function commitGate(
 describe("RFC 0001 fix invariants (F1–F4)", () => {
   // ── F1 ──────────────────────────────────────────────────────────────────
 
-  it("F1 ConfirmPorts requires proposalStore + sessionUserId at type level", () => {
+  it("F1 ConfirmPorts requires kind + proposalStore + sessionUserId at type level", () => {
+    expectTypeOf<ConfirmPorts>().toHaveProperty("kind");
+    expectTypeOf<ConfirmPorts["kind"]>().toEqualTypeOf<"confirm">();
     expectTypeOf<ConfirmPorts>().toHaveProperty("proposalStore");
     expectTypeOf<ConfirmPorts>().toHaveProperty("sessionUserId");
     expectTypeOf<ConfirmPorts["proposalStore"]>().toEqualTypeOf<ProposalStore>();
@@ -105,29 +107,38 @@ describe("RFC 0001 fix invariants (F1–F4)", () => {
     expectTypeOf<ConfirmPorts>().not.toHaveProperty("mealLogStore");
   });
 
-  it("F1 incomplete confirm ports throw (no no-store-wired pass)", async () => {
+  it("F1 incomplete confirm ports fail closed on the seam (no throw, no silent pass)", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "p-any",
       confirmed: true,
     };
 
-    await expect(collect(turn(input, ports()))).rejects.toThrow(
-      /ConfirmPorts incomplete/,
-    );
+    async function expectIncompleteFailClosed(
+      incompletePorts: TurnPorts,
+    ): Promise<void> {
+      const { events, result } = await collect(turn(input, incompletePorts));
+      // Stream ends with a terminal — never mid-stream throw (issue #73).
+      expect(events[0]?.type).toBe("turn_start");
+      expect(events[events.length - 1]?.type).toBe("turn_end");
+      expect(result.stopReason).toBe("crash");
+      expect(result.reply).toMatch(/ConfirmPorts incomplete/i);
+      expect(result.commit).toBeUndefined();
+      // No silent "no store wired" pass.
+      expect(result.reply).not.toMatch(/no store wired/i);
+      const gate = commitGate(events);
+      expect(gate.verdict).toBe("error");
+      expect(gate.checkName).toBe("confirm_ports_incomplete");
+    }
+
+    await expectIncompleteFailClosed(ports());
 
     // Missing only sessionUserId
     const store = createInMemoryProposalStore({ userId: USER_A });
-    await expect(
-      collect(
-        turn(input, ports({ proposalStore: store })),
-      ),
-    ).rejects.toThrow(/ConfirmPorts incomplete/);
+    await expectIncompleteFailClosed(ports({ proposalStore: store }));
 
     // Missing only proposalStore
-    await expect(
-      collect(turn(input, ports({ sessionUserId: USER_A }))),
-    ).rejects.toThrow(/ConfirmPorts incomplete/);
+    await expectIncompleteFailClosed(ports({ sessionUserId: USER_A }));
   });
 
   // ── F2 ──────────────────────────────────────────────────────────────────
