@@ -48,15 +48,23 @@ interface TableQuery {
 
 interface FakeSupabaseClient {
   from(table: string): TableQuery;
+  rpc(
+    fn: string,
+    args?: Record<string, unknown>,
+  ): Promise<{ data: unknown; error: Error | null }>;
 }
 
 interface FakeQueryState {
   readonly inserted: Array<{ table: string; row: DbRow }>;
   readonly updated: Array<{ table: string; row: DbRow }>;
   readonly filters: Array<{ column: string; value: unknown }>;
+  readonly rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>;
   lookupRow: DbRow | null;
   transitionRow: DbRow | null;
   error: Error | null;
+  rpcData: unknown;
+  rpcError: Error | null;
+  rpcThrow: Error | null;
 }
 
 function fakeSupabaseClient(): {
@@ -67,9 +75,13 @@ function fakeSupabaseClient(): {
     inserted: [],
     updated: [],
     filters: [],
+    rpcCalls: [],
     lookupRow: null,
     transitionRow: null,
     error: null,
+    rpcData: null,
+    rpcError: null,
+    rpcThrow: null,
   };
 
   function dbResult<T extends DbRow>(data: T | null): QueryResult<T> {
@@ -115,6 +127,16 @@ function fakeSupabaseClient(): {
         return filterQuery(() => state.transitionRow);
       },
     }),
+    async rpc(fn, args = {}) {
+      state.rpcCalls.push({ fn, args });
+      if (state.rpcThrow) {
+        throw state.rpcThrow;
+      }
+      if (state.rpcError) {
+        return { data: null, error: state.rpcError };
+      }
+      return { data: state.rpcData, error: null };
+    },
   };
 
   return { client: client as unknown as SupabaseClient, state };
@@ -294,97 +316,133 @@ describe("createSupabaseProposalStore", () => {
     });
   });
 
-  describe("commit", () => {
-    it("commits a proposal by updating status to 'committed'", async () => {
+  describe("commitProposalAndInsertMeal", () => {
+    it("maps committed RPC jsonb to CommitResult", async () => {
       const { client, state } = fakeSupabaseClient();
-      state.transitionRow = proposalRow({ status: "committed" });
+      state.rpcData = {
+        status: "committed",
+        proposal_id: "proposal-abc",
+        meal_log_id: 42,
+      };
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      const proposal = await store.commit("proposal-abc");
+      const result = await store.commitProposalAndInsertMeal("proposal-abc");
 
-      expect(proposal.status).toBe("committed");
-      expect(state.updated).toEqual([
-        { table: "proposals", row: { status: "committed" } },
-      ]);
-      expect(state.filters).toEqual([
-        { column: "id", value: "proposal-abc" },
-        { column: "status", value: "proposed" },
+      expect(result).toEqual({
+        kind: "committed",
+        proposalId: "proposal-abc",
+        mealLogId: 42,
+      });
+      expect(state.rpcCalls).toEqual([
+        {
+          fn: "commit_proposal_and_insert_meal",
+          args: { p_proposal_id: "proposal-abc" },
+        },
       ]);
     });
 
-    it("throws when the proposal is not in 'proposed' status", async () => {
-      const { client } = fakeSupabaseClient();
+    it("maps not_committable business rejection", async () => {
+      const { client, state } = fakeSupabaseClient();
+      state.rpcData = { status: "not_committable" };
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      await expect(store.commit("proposal-abc")).rejects.toThrow(
-        'Proposal proposal-abc not found or not in "proposed" status',
-      );
+      const result = await store.commitProposalAndInsertMeal("proposal-abc");
+
+      expect(result).toEqual({ kind: "not_committable" });
     });
 
-    it("throws on Supabase error", async () => {
+    it("maps RPC error to kind error", async () => {
       const { client, state } = fakeSupabaseClient();
-      state.error = new Error("Connection refused");
+      state.rpcError = new Error("Connection refused");
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      await expect(store.commit("proposal-123")).rejects.toThrow(
-        "Failed to commit proposal proposal-123: Connection refused",
-      );
+      const result = await store.commitProposalAndInsertMeal("proposal-123");
+
+      expect(result).toEqual({
+        kind: "error",
+        cause: "Connection refused",
+      });
+    });
+
+    it("maps thrown exception to kind error", async () => {
+      const { client, state } = fakeSupabaseClient();
+      state.rpcThrow = new Error("unauthenticated");
+      const store = createSupabaseProposalStore({
+        client,
+        now: () => FIXED_NOW,
+      });
+
+      const result = await store.commitProposalAndInsertMeal("proposal-123");
+
+      expect(result).toEqual({
+        kind: "error",
+        cause: "unauthenticated",
+      });
     });
   });
 
-  describe("decline", () => {
-    it("declines a proposal by updating status to 'voided'", async () => {
+  describe("voidProposal", () => {
+    it("maps voided RPC jsonb to VoidResult", async () => {
       const { client, state } = fakeSupabaseClient();
-      state.transitionRow = proposalRow({ status: "voided" });
+      state.rpcData = {
+        status: "voided",
+        proposal_id: "proposal-abc",
+      };
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      const proposal = await store.decline("proposal-abc");
+      const result = await store.voidProposal("proposal-abc");
 
-      expect(proposal.status).toBe("voided");
-      expect(state.updated).toEqual([
-        { table: "proposals", row: { status: "voided" } },
-      ]);
-      expect(state.filters).toEqual([
-        { column: "id", value: "proposal-abc" },
-        { column: "status", value: "proposed" },
+      expect(result).toEqual({
+        kind: "voided",
+        proposalId: "proposal-abc",
+      });
+      expect(state.rpcCalls).toEqual([
+        {
+          fn: "void_proposal",
+          args: { p_proposal_id: "proposal-abc" },
+        },
       ]);
     });
 
-    it("throws when the proposal is not in 'proposed' status", async () => {
-      const { client } = fakeSupabaseClient();
+    it("maps not_committable business rejection", async () => {
+      const { client, state } = fakeSupabaseClient();
+      state.rpcData = { status: "not_committable" };
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      await expect(store.decline("proposal-abc")).rejects.toThrow(
-        'Proposal proposal-abc not found or not in "proposed" status',
-      );
+      const result = await store.voidProposal("proposal-abc");
+
+      expect(result).toEqual({ kind: "not_committable" });
     });
 
-    it("throws on Supabase error", async () => {
+    it("maps RPC error to kind error", async () => {
       const { client, state } = fakeSupabaseClient();
-      state.error = new Error("Connection refused");
+      state.rpcError = new Error("Connection refused");
       const store = createSupabaseProposalStore({
         client,
         now: () => FIXED_NOW,
       });
 
-      await expect(store.decline("proposal-123")).rejects.toThrow(
-        "Failed to decline proposal proposal-123: Connection refused",
-      );
+      const result = await store.voidProposal("proposal-123");
+
+      expect(result).toEqual({
+        kind: "error",
+        cause: "Connection refused",
+      });
     });
   });
 });

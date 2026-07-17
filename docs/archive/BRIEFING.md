@@ -1,6 +1,8 @@
 # NutriBuddy — Project Briefing
 
-> Review briefing for the current codebase. `docs/ADD.md` is the architectural source of truth; if this briefing or older PRDs conflict with the ADD, follow the ADD.
+> **Archived.** Snapshot prepared for an early codebase review (2026-07). Implementation status and module lists are outdated. Architecture source of truth is `docs/ADD.md`; product context lives in `docs/PRD-v2.md`. Kept only as historical reference.
+
+> Original note: Review briefing for the then-current codebase. If this briefing or older PRDs conflict with the ADD, follow the ADD.
 
 ## 1. What This Is
 

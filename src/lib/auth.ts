@@ -34,6 +34,71 @@ export interface VerifiedSession {
 }
 
 /**
+ * True when the token has the three-segment JWT shape (header.payload.sig).
+ * Opaque test stubs are not JWT-shaped and skip the assembly assert (#75).
+ */
+export function isJwtShaped(token: string): boolean {
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+}
+
+/**
+ * Decode JWT payload.sub without verifying signature (verification already
+ * happened via getUser). Returns undefined when the token is not a
+ * three-part JWT or the payload lacks a string sub.
+ */
+export function decodeJwtSubject(token: string): string | undefined {
+  if (!isJwtShaped(token)) {
+    return undefined;
+  }
+
+  try {
+    const parts = token.split(".");
+    const payloadJson = Buffer.from(parts[1], "base64url").toString("utf8");
+    const payload: unknown = JSON.parse(payloadJson);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "sub" in payload &&
+      typeof (payload as { sub: unknown }).sub === "string"
+    ) {
+      return (payload as { sub: string }).sub;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Assert that session.userId matches the JWT access-token `sub` claim
+ * (RFC 0001 Phase 1 assembly assert / issue #75). Call at turn assembly
+ * before turn().
+ *
+ * - JWT-shaped tokens: require a string `sub` that equals `session.userId`.
+ *   Missing/unusable sub fails closed (no silent skip).
+ * - Opaque non-JWT stubs (unit tests): no-op; Supabase getUser already
+ *   established the subject for real sessions.
+ */
+export function assertSessionSubject(session: VerifiedSession): void {
+  if (!isJwtShaped(session.accessToken)) {
+    return;
+  }
+
+  const sub = decodeJwtSubject(session.accessToken);
+  if (sub === undefined) {
+    throw new Error(
+      "session subject missing: JWT-shaped token has no usable sub claim",
+    );
+  }
+  if (sub !== session.userId) {
+    throw new Error(
+      `session subject mismatch: JWT sub "${sub}" !== session.userId "${session.userId}"`,
+    );
+  }
+}
+
+/**
  * Extract and verify the session from the request's Authorization header.
  *
  * Creates a short-lived Supabase client scoped to the user's access token,

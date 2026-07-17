@@ -519,6 +519,27 @@ describe("turn event stream compatibility", () => {
 
   it("proposal_confirm short-circuits: no step events, no adapter call", async () => {
     const { turn } = await import("../src/harness/turn");
+    const { createInMemoryProposalStore } = await import(
+      "./helpers/inMemoryProposalStore"
+    );
+
+    const sessionUserId = "chat-confirm-user";
+    const proposalStore = createInMemoryProposalStore({ userId: sessionUserId });
+    const proposal = await proposalStore.store({
+      userId: sessionUserId,
+      foodId: "food-chicken-breast-001",
+      foodName: "chicken breast",
+      canonicalName: "chicken breast",
+      portionG: 200,
+      mealType: "lunch",
+      kcal: 330,
+      proteinG: 62,
+      fatG: 7.2,
+      carbsG: 0,
+      nutritionSource: "test",
+      matchType: "exact",
+      allergenTags: [],
+    });
 
     let adapterCalled = false;
     const adapter = {
@@ -529,8 +550,17 @@ describe("turn event stream compatibility", () => {
     };
 
     const gen = turn(
-      { tag: "proposal_confirm", proposalId: "p1", confirmed: true },
-      { adapter, tracer: new Tracer() },
+      {
+        tag: "proposal_confirm",
+        proposalId: proposal.id,
+        confirmed: true,
+      },
+      {
+        adapter,
+        tracer: new Tracer(),
+        proposalStore,
+        sessionUserId,
+      },
     );
 
     const events: Array<{ type: string }> = [];

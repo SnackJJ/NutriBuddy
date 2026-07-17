@@ -65,31 +65,25 @@ function memProposalStore(state?: MemProposalState): {
       async get(id: string): Promise<Proposal | undefined> {
         return s.proposals.find((p) => p.id === id);
       },
-      async commit(id: string): Promise<Proposal> {
-        const idx = s.proposals.findIndex((p) => p.id === id);
-        if (idx === -1) throw new Error(`Proposal ${id} not found`);
-        if (s.proposals[idx].status !== "proposed") {
-          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
-        }
-        const committed: Proposal = {
-          ...s.proposals[idx],
-          status: "committed",
+      async commitProposalAndInsertMeal(proposalId: string) {
+        const idx = s.proposals.findIndex(
+          (p) => p.id === proposalId && p.status === "proposed",
+        );
+        if (idx < 0) return { kind: "not_committable" as const };
+        s.proposals[idx] = { ...s.proposals[idx], status: "committed" };
+        return {
+          kind: "committed" as const,
+          proposalId,
+          mealLogId: 1,
         };
-        s.proposals[idx] = committed;
-        return committed;
       },
-      async decline(id: string): Promise<Proposal> {
-        const idx = s.proposals.findIndex((p) => p.id === id);
-        if (idx === -1) throw new Error(`Proposal ${id} not found`);
-        if (s.proposals[idx].status !== "proposed") {
-          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
-        }
-        const voided: Proposal = {
-          ...s.proposals[idx],
-          status: "voided",
-        };
-        s.proposals[idx] = voided;
-        return voided;
+      async voidProposal(proposalId: string) {
+        const idx = s.proposals.findIndex(
+          (p) => p.id === proposalId && p.status === "proposed",
+        );
+        if (idx < 0) return { kind: "not_committable" as const };
+        s.proposals[idx] = { ...s.proposals[idx], status: "voided" };
+        return { kind: "voided" as const, proposalId };
       },
     },
   };
@@ -103,11 +97,11 @@ function throwingProposalStore(message: string): ProposalStore {
     async get() {
       throw new Error(message);
     },
-    async commit() {
-      throw new Error(message);
+    async commitProposalAndInsertMeal() {
+      return { kind: "error", cause: message };
     },
-    async decline() {
-      throw new Error(message);
+    async voidProposal() {
+      return { kind: "error", cause: message };
     },
   };
 }

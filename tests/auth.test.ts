@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getSessionFromHeader, getUserIdFromHeader } from "../src/lib/auth";
+import {
+  assertSessionSubject,
+  decodeJwtSubject,
+  getSessionFromHeader,
+  getUserIdFromHeader,
+} from "../src/lib/auth";
 
 interface FakeAuthOptions {
   readonly userId?: string;
@@ -170,5 +175,66 @@ describe("getUserIdFromHeader", () => {
     const userId = await getUserIdFromHeader(createClient, request);
 
     expect(userId).toBeUndefined();
+  });
+});
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "none", typ: "JWT" }),
+  ).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.sig`;
+}
+
+describe("assertSessionSubject (RFC 0001)", () => {
+  it("decodes sub from a JWT payload", () => {
+    const token = makeJwt({ sub: "user-abc" });
+    expect(decodeJwtSubject(token)).toBe("user-abc");
+  });
+
+  it("passes when JWT sub matches session.userId", () => {
+    const userId = "b4e0a1c2-3d4e-5f6a-7b8c-9d0e1f2a3b4c";
+    expect(() =>
+      assertSessionSubject({
+        userId,
+        accessToken: makeJwt({ sub: userId }),
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws when JWT sub mismatches session.userId", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: makeJwt({ sub: "user-b" }),
+      }),
+    ).toThrow(/session subject mismatch/);
+  });
+
+  it("is a no-op for non-JWT opaque tokens", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: "opaque-access-token",
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws when a JWT-shaped token has no usable sub claim (issue #75)", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: makeJwt({ aud: "test" }),
+      }),
+    ).toThrow(/no usable sub/);
+  });
+
+  it("throws when a JWT-shaped token has a non-string sub", () => {
+    expect(() =>
+      assertSessionSubject({
+        userId: "user-a",
+        accessToken: makeJwt({ sub: 123 }),
+      }),
+    ).toThrow(/no usable sub/);
   });
 });

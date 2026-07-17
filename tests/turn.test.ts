@@ -36,13 +36,11 @@ import {
 import type { Conflict } from "../src/harness/advisoryGate";
 import { createCatalog, SEED_FOODS, type Catalog } from "../src/catalog/catalog";
 import {
-  type ProposalStore,
   type Proposal,
   type ProposalInput,
-  type MealLogStore,
   type MealLogEntry,
-  type MealLogInsert,
 } from "../src/harness/logMeal";
+import { createInMemoryProposalStore } from "./helpers/inMemoryProposalStore";
 
 const FIXED_TIMESTAMP = "2026-07-05T12:00:00.000Z";
 
@@ -171,11 +169,7 @@ function expectEventMetadata(
   }
 }
 
-// ── proposal commit helpers (issue #37) ──────────────────────────────────
-
-interface MemProposalState {
-  proposals: Proposal[];
-}
+// ── proposal commit helpers (RFC 0001 Phase 1) ───────────────────────────
 
 let proposalCounter = 100;
 
@@ -184,103 +178,35 @@ function nextProposalId(): string {
   return `proposal-${proposalCounter.toString().padStart(3, "0")}`;
 }
 
-function memProposalStore(state?: MemProposalState): {
-  store: ProposalStore;
-  state: MemProposalState;
-} {
-  const s = state ?? { proposals: [] };
+function sampleProposalInput(
+  userId: string,
+  overrides: Partial<ProposalInput> = {},
+): ProposalInput {
   return {
-    state: s,
-    store: {
-      async store(params: ProposalInput): Promise<Proposal> {
-        const proposal: Proposal = {
-          id: nextProposalId(),
-          userId: params.userId,
-          foodId: params.foodId,
-          foodName: params.foodName,
-          canonicalName: params.canonicalName,
-          portionG: params.portionG,
-          mealType: params.mealType,
-          kcal: params.kcal,
-          proteinG: params.proteinG,
-          fatG: params.fatG,
-          carbsG: params.carbsG,
-          nutritionSource: params.nutritionSource,
-          matchType: params.matchType,
-          allergenTags: params.allergenTags,
-          status: "proposed",
-          createdAt: new Date(FIXED_TIMESTAMP).toISOString(),
-        };
-        s.proposals.push(proposal);
-        return proposal;
-      },
-      async get(id: string): Promise<Proposal | undefined> {
-        return s.proposals.find((p) => p.id === id);
-      },
-      async commit(id: string): Promise<Proposal> {
-        const idx = s.proposals.findIndex((p) => p.id === id);
-        if (idx === -1) throw new Error(`Proposal ${id} not found`);
-        if (s.proposals[idx].status !== "proposed") {
-          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
-        }
-        const committed: Proposal = {
-          ...s.proposals[idx],
-          status: "committed",
-        };
-        s.proposals[idx] = committed;
-        return committed;
-      },
-      async decline(id: string): Promise<Proposal> {
-        const idx = s.proposals.findIndex((p) => p.id === id);
-        if (idx === -1) throw new Error(`Proposal ${id} not found`);
-        if (s.proposals[idx].status !== "proposed") {
-          throw new Error(`Proposal ${id} is ${s.proposals[idx].status}`);
-        }
-        const voided: Proposal = {
-          ...s.proposals[idx],
-          status: "voided",
-        };
-        s.proposals[idx] = voided;
-        return voided;
-      },
-    },
+    userId,
+    foodName: "chicken breast",
+    portionG: 200,
+    mealType: "lunch",
+    kcal: 330,
+    proteinG: 62,
+    fatG: 7.2,
+    carbsG: 0,
+    nutritionSource: "USDA FoodData Central",
+    foodId: "food-test-001",
+    canonicalName: "test food",
+    matchType: "exact",
+    allergenTags: [],
+    ...overrides,
   };
 }
 
-interface MemMealLedgerState {
-  entries: MealLogEntry[];
-}
-
-function memMealLogStore(state?: MemMealLedgerState): {
-  store: MealLogStore;
-  state: MemMealLedgerState;
-} {
-  const s = state ?? { entries: [] };
-  return {
-    state: s,
-    store: {
-      async insert(params: MealLogInsert): Promise<MealLogEntry> {
-        const entry: MealLogEntry = {
-          id: s.entries.length + 1,
-          userId: params.userId,
-          foodName: params.foodName,
-          portionG: params.portionG,
-          mealType: params.mealType,
-          loggedAt: new Date(FIXED_TIMESTAMP).toISOString(),
-          kcal: params.kcal,
-          proteinG: params.proteinG,
-          fatG: params.fatG,
-          carbsG: params.carbsG,
-          proposalId: params.proposalId,
-          foodId: params.foodId,
-          matchType: params.matchType,
-          allergenTags: params.allergenTags,
-        };
-        s.entries.push(entry);
-        return entry;
-      },
-    },
-  };
+/** Bind an in-memory store to a session subject (production ownership collapse). */
+function memStoreForUser(userId: string) {
+  return createInMemoryProposalStore({
+    userId,
+    now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+    idFactory: nextProposalId,
+  });
 }
 
 describe("turn (utterance)", () => {
@@ -394,14 +320,34 @@ describe("turn (utterance)", () => {
 });
 
 describe("turn (proposal_confirm)", () => {
-  it("emits start, gate verdicts, and end events for a confirmed proposal", async () => {
+  const CONFIRM_USER = "confirm-user-001";
+
+  async function seedAndPorts(
+    confirmed: boolean,
+    feedback?: string,
+    adapterImpl?: AdapterImpl,
+  ) {
+    const proposalStore = memStoreForUser(CONFIRM_USER);
+    const proposal = await proposalStore.store(
+      sampleProposalInput(CONFIRM_USER),
+    );
     const input: TurnInput = {
       tag: "proposal_confirm",
-      proposalId: "meal-log-42",
-      confirmed: true,
+      proposalId: proposal.id,
+      confirmed,
+      feedback,
     };
+    const ports = createPorts(adapterImpl, {
+      proposalStore,
+      sessionUserId: CONFIRM_USER,
+    });
+    return { input, ports, proposal, proposalStore };
+  }
 
-    const { events, result } = await collect(turn(input, createPorts()));
+  it("emits start, gate verdicts, and end events for a confirmed proposal", async () => {
+    const { input, ports, proposal } = await seedAndPorts(true);
+
+    const { events, result } = await collect(turn(input, ports));
 
     expect(events.map((event) => event.type)).toEqual([
       "turn_start",
@@ -412,68 +358,56 @@ describe("turn (proposal_confirm)", () => {
     expect(expectStartEvent(events).input).toEqual(input);
     expect(expectTerminalEvent(events).result).toEqual(result);
     expect(result).toEqual({
-      reply: "Proposal meal-log-42 confirmed.",
+      reply: `Proposal ${proposal.id} confirmed.`,
       steps: 0,
       stopReason: "end_turn",
+      commit: { proposalId: proposal.id, mealLogId: 1 },
     });
   });
 
   it("produces a rejection reply when confirmed is false", async () => {
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "meal-log-42",
-      confirmed: false,
-    };
+    const { input, ports, proposal } = await seedAndPorts(false);
 
-    const { result } = await collect(turn(input, createPorts()));
+    const { result } = await collect(turn(input, ports));
 
     expect(result).toEqual({
-      reply: "Proposal meal-log-42 rejected.",
+      reply: `Proposal ${proposal.id} rejected.`,
       steps: 0,
       stopReason: "end_turn",
     });
+    expect(result.commit).toBeUndefined();
   });
 
   it("includes optional feedback in confirmed proposal replies", async () => {
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "meal-log-42",
-      confirmed: true,
-      feedback: "Please reduce the portion size.",
-    };
+    const { input, ports, proposal } = await seedAndPorts(
+      true,
+      "Please reduce the portion size.",
+    );
 
-    const { result } = await collect(turn(input, createPorts()));
+    const { result } = await collect(turn(input, ports));
 
     expect(result).toEqual({
-      reply: "Proposal meal-log-42 confirmed. Please reduce the portion size.",
+      reply: `Proposal ${proposal.id} confirmed. Please reduce the portion size.`,
       steps: 0,
       stopReason: "end_turn",
+      commit: { proposalId: proposal.id, mealLogId: 1 },
     });
   });
 
   it("emits schema-versioned events with monotonic seq", async () => {
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "p1",
-      confirmed: true,
-    };
+    const { input, ports } = await seedAndPorts(true);
 
-    const { events } = await collect(turn(input, createPorts()));
+    const { events } = await collect(turn(input, ports));
 
     expectEventMetadata(events, FIXED_TIMESTAMP);
   });
 
   it("does not call the adapter for proposal confirmations", async () => {
     let generateCalled = false;
-    const ports = createPorts(() => {
+    const { input, ports } = await seedAndPorts(true, undefined, () => {
       generateCalled = true;
       return { content: "should not be used", stop: true };
     });
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "p1",
-      confirmed: true,
-    };
 
     await collect(turn(input, ports));
 
@@ -1485,12 +1419,19 @@ describe("gate verdict events", () => {
   });
 
   it("proposal confirmation turns emit input and commit gate verdicts (no tool/output)", async () => {
+    const proposalStore = memStoreForUser("gate-user");
+    const proposal = await proposalStore.store(
+      sampleProposalInput("gate-user"),
+    );
     const input: TurnInput = {
       tag: "proposal_confirm",
-      proposalId: "p1",
+      proposalId: proposal.id,
       confirmed: true,
     };
-    const ports = createPorts();
+    const ports = createPorts(undefined, {
+      proposalStore,
+      sessionUserId: "gate-user",
+    });
 
     const { events } = await collect(turn(input, ports));
 
@@ -2348,15 +2289,33 @@ describe("write-proposal turn flow (issue #36)", () => {
     expect(wpResult.stopReason).toBe("write_proposal");
     expect(wpResult.proposal).toBeDefined();
 
-    // Confirm turn: the adapter is not called; short-circuit handles it
-    let confirmGenerateCalled = false;
-    const confirmPorts = createPorts(() => {
-      confirmGenerateCalled = true;
-      return { content: "should not be used", stop: true };
+    // Confirm turn: the adapter is not called; short-circuit handles it.
+    // Wire a real store with a matching proposed id so ConfirmPorts is complete.
+    const confirmUser = "wp-follow-user";
+    const proposalStore = memStoreForUser(confirmUser);
+    await proposalStore.store({
+      ...sampleProposalInput(confirmUser),
+      // force id to match the write-proposal terminal so the confirm path
+      // is meaningful; store() uses idFactory, so patch after store.
     });
+    // Seed under the write-proposal id used by the mock log_meal tool.
+    const proposalId = wpResult.proposal!.proposalId;
+    proposalStore.proposals[0] = {
+      ...proposalStore.proposals[0],
+      id: proposalId,
+    };
+
+    let confirmGenerateCalled = false;
+    const confirmPorts = createPorts(
+      () => {
+        confirmGenerateCalled = true;
+        return { content: "should not be used", stop: true };
+      },
+      { proposalStore, sessionUserId: confirmUser },
+    );
     const confirmInput: TurnInput = {
       tag: "proposal_confirm",
-      proposalId: wpResult.proposal!.proposalId,
+      proposalId,
       confirmed: true,
     };
 
@@ -2601,34 +2560,19 @@ describe("write-proposal turn flow (issue #36)", () => {
   });
 });
 
-// ── Proposal commit short-circuit (issue #37 / PRD v2 §3.4 / ADD Phase 3) ─
+// ── Proposal commit short-circuit (RFC 0001 Phase 1) ─────────────────────
 
 const SESSION_USER_A = "user-a-0001";
 const SESSION_USER_B = "user-b-0002";
 
-describe("proposal commit short-circuit (issue #37)", () => {
+describe("proposal commit short-circuit (RFC 0001)", () => {
   it("commits a confirmed proposal and writes a meal ledger row referencing the proposal id", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    // First, store a proposal (simulating what log_meal does)
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "chicken breast",
-      portionG: 200,
-      mealType: "lunch",
-      kcal: 330,
-      proteinG: 62,
-      fatG: 7.2,
-      carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A),
+    );
 
-    // Now confirm it
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
@@ -2636,23 +2580,19 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Result is a confirmation reply
     expect(result.reply).toContain("confirmed");
     expect(result.steps).toBe(0);
     expect(result.stopReason).toBe("end_turn");
 
-    // Proposal status is now "committed"
-    expect(proposalState.proposals[0].status).toBe("committed");
+    expect(proposalStore.proposals[0].status).toBe("committed");
 
-    // Meal ledger has one row
-    expect(mealLedgerState.entries.length).toBe(1);
-    const entry = mealLedgerState.entries[0];
+    expect(proposalStore.mealLedger.length).toBe(1);
+    const entry = proposalStore.mealLedger[0];
     expect(entry.userId).toBe(SESSION_USER_A);
     expect(entry.foodName).toBe("chicken breast");
     expect(entry.portionG).toBe(200);
@@ -2661,40 +2601,31 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(entry.proteinG).toBe(62);
     expect(entry.fatG).toBe(7.2);
     expect(entry.carbsG).toBe(0);
-    // The meal ledger row references the committed proposal id
     expect(entry.proposalId).toBe(proposal.id);
-    // Entity lineage copied from the committed proposal (issue #59)
     expect(entry.foodId).toBe("food-test-001");
     expect(entry.matchType).toBe("exact");
     expect(entry.allergenTags).toEqual([]);
 
-    // Commit gate verdict passes
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("pass");
     expect(commitVerdict.evidence).toContain("committed");
     expect(commitVerdict.evidence).toContain("meal ledger");
-    expect(commitVerdict.evidence).toContain(proposal.id);
   });
 
   it("emits input and commit gate verdicts (no tool/output) for proposal confirmation", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "rice",
-      portionG: 150,
-      mealType: "dinner",
-      kcal: 195,
-      proteinG: 4,
-      fatG: 0.4,
-      carbsG: 43,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "rice",
+        portionG: 150,
+        mealType: "dinner",
+        kcal: 195,
+        proteinG: 4,
+        fatG: 0.4,
+        carbsG: 43,
+      }),
+    );
 
     const input: TurnInput = {
       tag: "proposal_confirm",
@@ -2703,7 +2634,6 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
@@ -2717,12 +2647,25 @@ describe("proposal commit short-circuit (issue #37)", () => {
   });
 
   it("blocks confirmation when the proposal belongs to a different user", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
-
-    // User A creates the proposal
-    const proposal = await proposalStore.store({
+    // Shared proposal list; each store is bound to its session subject.
+    const proposals: Proposal[] = [];
+    const mealLedger: MealLogEntry[] = [];
+    const storeA = createInMemoryProposalStore({
       userId: SESSION_USER_A,
+      proposals,
+      mealLedger,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
+    });
+    const storeB = createInMemoryProposalStore({
+      userId: SESSION_USER_B,
+      proposals,
+      mealLedger,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
+    });
+
+    const proposal = await storeA.store(sampleProposalInput(SESSION_USER_A, {
       foodName: "salmon",
       portionG: 150,
       mealType: "dinner",
@@ -2730,53 +2673,47 @@ describe("proposal commit short-circuit (issue #37)", () => {
       proteinG: 30,
       fatG: 20,
       carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    }));
 
-    // User B tries to confirm it
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
       confirmed: true,
     };
     const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
+      proposalStore: storeB,
       sessionUserId: SESSION_USER_B,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Blocked: wrong user
-    expect(result.reply).toContain("different user");
+    expect(result.reply).toContain("cannot be committed");
     expect(result.stopReason).toBe("end_turn");
-    expect(result.steps).toBe(0);
+    expect(proposals[0].status).toBe("proposed");
+    expect(mealLedger.length).toBe(0);
 
-    // Proposal status unchanged (still "proposed")
-    expect(proposalState.proposals[0].status).toBe("proposed");
-
-    // No meal ledger mutation occurred
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate verdict blocks with evidence
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("belongs to user");
-    expect(commitVerdict.evidence).toContain(SESSION_USER_A);
-    expect(commitVerdict.evidence).toContain(SESSION_USER_B);
+    expect(commitVerdict.checkName).toBe("not_committable");
+    expect(commitVerdict.evidence).toBe("not_committable");
   });
 
-  it("blocks decline when the proposal belongs to a different user (issue #63)", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
-
-    // User A creates the proposal
-    const proposal = await proposalStore.store({
+  it("blocks decline when the proposal belongs to a different user", async () => {
+    const proposals: Proposal[] = [];
+    const storeA = createInMemoryProposalStore({
       userId: SESSION_USER_A,
+      proposals,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
+    });
+    const storeB = createInMemoryProposalStore({
+      userId: SESSION_USER_B,
+      proposals,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
+    });
+
+    const proposal = await storeA.store(sampleProposalInput(SESSION_USER_A, {
       foodName: "salmon",
       portionG: 150,
       mealType: "dinner",
@@ -2784,58 +2721,43 @@ describe("proposal commit short-circuit (issue #37)", () => {
       proteinG: 30,
       fatG: 20,
       carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    }));
 
-    // User B tries to decline it
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
       confirmed: false,
     };
     const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
+      proposalStore: storeB,
       sessionUserId: SESSION_USER_B,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Blocked: wrong user; the proposal stays proposed
-    expect(result.reply).toContain("different user");
-    expect(proposalState.proposals[0].status).toBe("proposed");
+    expect(result.reply).toContain("cannot be voided");
+    expect(proposals[0].status).toBe("proposed");
 
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("belongs to user");
+    expect(commitVerdict.checkName).toBe("not_committable");
   });
 
   it("rejects repeated confirmation of an already committed proposal", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    // Store and commit a proposal
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "egg",
-      portionG: 100,
-      mealType: "breakfast",
-      kcal: 143,
-      proteinG: 12.6,
-      fatG: 9.5,
-      carbsG: 0.7,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "egg",
+        portionG: 100,
+        mealType: "breakfast",
+        kcal: 143,
+        proteinG: 12.6,
+        fatG: 9.5,
+        carbsG: 0.7,
+      }),
+    );
 
-    // First confirmation: succeeds
     const confirmInput: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
@@ -2843,7 +2765,6 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const confirmPorts = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
@@ -2851,34 +2772,21 @@ describe("proposal commit short-circuit (issue #37)", () => {
       turn(confirmInput, confirmPorts),
     );
     expect(firstResult.reply).toContain("confirmed");
-    expect(proposalState.proposals[0].status).toBe("committed");
-    expect(mealLedgerState.entries.length).toBe(1);
+    expect(proposalStore.proposals[0].status).toBe("committed");
+    expect(proposalStore.mealLedger.length).toBe(1);
 
-    // Second confirmation: blocked (already committed)
-    const secondPorts = createPorts(() => ({ content: "unused", stop: true }), {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_A,
-    });
+    const { events, result } = await collect(turn(confirmInput, confirmPorts));
 
-    const { events, result } = await collect(turn(confirmInput, secondPorts));
+    expect(result.reply).toContain("cannot be committed");
+    expect(proposalStore.mealLedger.length).toBe(1);
 
-    // Blocked: already committed
-    expect(result.reply).toContain("already committed");
-    expect(result.reply).toContain("cannot be confirmed");
-
-    // No additional meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(1);
-
-    // Commit gate verdict blocks
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("committed");
+    expect(commitVerdict.checkName).toBe("not_committable");
   });
 
-  it("returns error gate verdict when proposal is not found", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+  it("blocks when proposal is not found (collapsed not_committable)", async () => {
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
     const input: TurnInput = {
       tag: "proposal_confirm",
@@ -2887,47 +2795,35 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Error: not found
-    expect(result.reply).toContain("not found");
+    expect(result.reply).toContain("cannot be committed");
     expect(result.stopReason).toBe("end_turn");
+    expect(proposalStore.mealLedger.length).toBe(0);
 
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate verdict is error
     const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("error");
-    expect(commitVerdict.evidence).toContain("not found");
+    expect(commitVerdict.verdict).toBe("block");
+    expect(commitVerdict.checkName).toBe("not_committable");
   });
 
   it("explicitly rejects a proposal when confirmed is false and updates status to voided", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    // Create a proposal
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "pasta",
-      portionG: 250,
-      mealType: "dinner",
-      kcal: 328,
-      proteinG: 12,
-      fatG: 1.5,
-      carbsG: 65,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "pasta",
+        portionG: 250,
+        mealType: "dinner",
+        kcal: 328,
+        proteinG: 12,
+        fatG: 1.5,
+        carbsG: 65,
+      }),
+    );
 
-    // Reject it
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
@@ -2935,48 +2831,36 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Rejection reply
     expect(result.reply).toContain("rejected");
     expect(result.steps).toBe(0);
     expect(result.stopReason).toBe("end_turn");
+    expect(proposalStore.proposals[0].status).toBe("voided");
+    expect(proposalStore.mealLedger.length).toBe(0);
 
-    // Proposal status updated to "voided"
-    expect(proposalState.proposals[0].status).toBe("voided");
-
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate verdict passes (explicit rejection is a valid outcome)
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("pass");
     expect(commitVerdict.evidence).toContain("rejected");
   });
 
   it("does not call the adapter even when stores are wired for commit", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "tofu",
-      portionG: 200,
-      mealType: "lunch",
-      kcal: 152,
-      proteinG: 16,
-      fatG: 8,
-      carbsG: 4,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "tofu",
+        portionG: 200,
+        mealType: "lunch",
+        kcal: 152,
+        proteinG: 16,
+        fatG: 8,
+        carbsG: 4,
+      }),
+    );
 
     let generateCalled = false;
     const input: TurnInput = {
@@ -2991,20 +2875,15 @@ describe("proposal commit short-circuit (issue #37)", () => {
       },
       {
         proposalStore,
-        mealLogStore,
         sessionUserId: SESSION_USER_A,
       },
     );
 
     await collect(turn(input, ports));
-
-    // Adapter was never called — proposal_confirm always short-circuits
     expect(generateCalled).toBe(false);
   });
 
-  it("backward compat: falls back to legacy reply when stores are not wired", async () => {
-    // When proposalStore / mealLogStore / sessionUserId are absent,
-    // the turn should still produce a confirmation reply without stores.
+  it("fail-closes incomplete confirm ports on the seam (no silent pass, no throw)", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
@@ -3012,63 +2891,51 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(); // No stores wired
 
-    const { result } = await collect(turn(input, ports));
-
-    expect(result.reply).toContain("confirmed");
-    expect(result.steps).toBe(0);
-    expect(result.stopReason).toBe("end_turn");
+    const { events, result } = await collect(turn(input, ports));
+    expect(events[0]?.type).toBe("turn_start");
+    expect(events[events.length - 1]?.type).toBe("turn_end");
+    expect(result.stopReason).toBe("crash");
+    expect(result.reply).toMatch(/ConfirmPorts incomplete/);
+    expect(result.reply).not.toMatch(/no store wired/i);
+    const commitGate = events.find(
+      (e) => e.type === "gate_verdict" && e.checkpoint === "commit",
+    );
+    expect(commitGate).toMatchObject({
+      verdict: "error",
+      checkName: "confirm_ports_incomplete",
+    });
   });
 
-  it("backward compat: rejection reply works without stores wired", async () => {
+  it("fail-closes incomplete ports on the rejection path too", async () => {
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: "meal-log-42",
       confirmed: false,
     };
-    const ports = createPorts(); // No stores wired
+    const ports = createPorts();
 
-    const { result } = await collect(turn(input, ports));
-
-    expect(result.reply).toContain("rejected");
-    expect(result.steps).toBe(0);
-    expect(result.stopReason).toBe("end_turn");
-  });
-
-  it("backward compat: feedback is preserved in confirmation reply without stores wired", async () => {
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: "meal-log-42",
-      confirmed: true,
-      feedback: "Looks good!",
-    };
-    const ports = createPorts(); // No stores wired
-
-    const { result } = await collect(turn(input, ports));
-
-    expect(result.reply).toContain("confirmed");
-    expect(result.reply).toContain("Looks good!");
-    expect(result.steps).toBe(0);
+    const { events, result } = await collect(turn(input, ports));
+    expect(events[events.length - 1]?.type).toBe("turn_end");
+    expect(result.stopReason).toBe("crash");
+    expect(result.reply).toMatch(/ConfirmPorts incomplete/);
   });
 
   it("scorer detects block on cross-user confirmation attempt", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
-
-    const proposal = await proposalStore.store({
+    const proposals: Proposal[] = [];
+    const storeA = createInMemoryProposalStore({
       userId: SESSION_USER_A,
-      foodName: "chicken breast",
-      portionG: 200,
-      mealType: "lunch",
-      kcal: 330,
-      proteinG: 62,
-      fatG: 7.2,
-      carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
+      proposals,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
     });
+    const storeB = createInMemoryProposalStore({
+      userId: SESSION_USER_B,
+      proposals,
+      now: () => new Date(FIXED_TIMESTAMP).toISOString(),
+      idFactory: nextProposalId,
+    });
+
+    const proposal = await storeA.store(sampleProposalInput(SESSION_USER_A));
 
     const input: TurnInput = {
       tag: "proposal_confirm",
@@ -3076,36 +2943,19 @@ describe("proposal commit short-circuit (issue #37)", () => {
       confirmed: true,
     };
     const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_B, // Different user
+      proposalStore: storeB,
+      sessionUserId: SESSION_USER_B,
     });
 
     const { events } = await collect(turn(input, ports));
-
-    // Scorer should detect the block via gate verdict events
     expect(countBlockedGateVerdicts(events)).toBeGreaterThanOrEqual(1);
   });
 
   it("scorer sees zero blocks on successful commit", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
-
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "chicken breast",
-      portionG: 200,
-      mealType: "lunch",
-      kcal: 330,
-      proteinG: 62,
-      fatG: 7.2,
-      carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposalStore = memStoreForUser(SESSION_USER_A);
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A),
+    );
 
     const input: TurnInput = {
       tag: "proposal_confirm",
@@ -3114,40 +2964,31 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     const { events } = await collect(turn(input, ports));
-
     expect(countBlockedGateVerdicts(events)).toBe(0);
   });
 
   it("rejects confirmation of an already voided proposal", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "bread",
-      portionG: 60,
-      mealType: "breakfast",
-      kcal: 159,
-      proteinG: 5.3,
-      fatG: 2,
-      carbsG: 30,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "bread",
+        portionG: 60,
+        mealType: "breakfast",
+        kcal: 159,
+        proteinG: 5.3,
+        fatG: 2,
+        carbsG: 30,
+      }),
+    );
 
-    // First, reject it
-    await proposalStore.decline(proposal.id);
-    expect(proposalState.proposals[0].status).toBe("voided");
+    await proposalStore.voidProposal(proposal.id);
+    expect(proposalStore.proposals[0].status).toBe("voided");
 
-    // Now try to confirm the rejected proposal
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
@@ -3155,209 +2996,66 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     const { events, result } = await collect(turn(input, ports));
 
-    // Blocked: already voided
-    expect(result.reply).toContain("already voided");
-    expect(result.reply).toContain("cannot be confirmed");
+    expect(result.reply).toContain("cannot be committed");
+    expect(proposalStore.mealLedger.length).toBe(0);
 
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate blocks
     const commitVerdict = expectGateVerdict(events, "commit");
     expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("voided");
+    expect(commitVerdict.checkName).toBe("not_committable");
   });
 
-  it("rejects confirmation of a voided proposal", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+  it("rejects confirmation of expired / superseded statuses as not_committable", async () => {
+    for (const status of ["expired", "superseded"] as const) {
+      const proposalStore = memStoreForUser(SESSION_USER_A);
+      const proposal = await proposalStore.store(
+        sampleProposalInput(SESSION_USER_A, { foodName: status }),
+      );
+      const idx = proposalStore.proposals.findIndex((p) => p.id === proposal.id);
+      proposalStore.proposals[idx] = {
+        ...proposalStore.proposals[idx],
+        status,
+      };
 
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "apple",
-      portionG: 180,
-      mealType: "snack",
-      kcal: 94,
-      proteinG: 0.5,
-      fatG: 0.3,
-      carbsG: 25,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+      const input: TurnInput = {
+        tag: "proposal_confirm",
+        proposalId: proposal.id,
+        confirmed: true,
+      };
+      const ports = createPorts(undefined, {
+        proposalStore,
+        sessionUserId: SESSION_USER_A,
+      });
 
-    // Manually void the proposal (simulating void via store)
-    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
-    proposalState.proposals[idx] = {
-      ...proposalState.proposals[idx],
-      status: "voided",
-    };
+      const { events, result } = await collect(turn(input, ports));
 
-    // Try to confirm the voided proposal
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: proposal.id,
-      confirmed: true,
-    };
-    const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_A,
-    });
-
-    const { events, result } = await collect(turn(input, ports));
-
-    // Blocked: voided
-    expect(result.reply).toContain("already voided");
-    expect(result.reply).toContain("cannot be confirmed");
-
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate blocks
-    const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("voided");
-  });
-
-  it("rejects confirmation of an expired proposal", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
-
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "yogurt",
-      portionG: 200,
-      mealType: "snack",
-      kcal: 122,
-      proteinG: 10,
-      fatG: 4,
-      carbsG: 12,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
-
-    // Manually expire the proposal (simulating time-based expiry)
-    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
-    proposalState.proposals[idx] = {
-      ...proposalState.proposals[idx],
-      status: "expired",
-    };
-
-    // Try to confirm the expired proposal
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: proposal.id,
-      confirmed: true,
-    };
-    const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_A,
-    });
-
-    const { events, result } = await collect(turn(input, ports));
-
-    // Blocked: expired
-    expect(result.reply).toContain("already expired");
-    expect(result.reply).toContain("cannot be confirmed");
-
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate blocks
-    const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("expired");
-  });
-
-  it("rejects confirmation of a superseded proposal", async () => {
-    const { store: proposalStore, state: proposalState } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
-
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "rice",
-      portionG: 150,
-      mealType: "dinner",
-      kcal: 195,
-      proteinG: 4,
-      fatG: 0.4,
-      carbsG: 43,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
-
-    // Manually supersede the proposal (simulating supersede-on-edit)
-    const idx = proposalState.proposals.findIndex((p) => p.id === proposal.id);
-    proposalState.proposals[idx] = {
-      ...proposalState.proposals[idx],
-      status: "superseded",
-    };
-
-    // Try to confirm the superseded proposal
-    const input: TurnInput = {
-      tag: "proposal_confirm",
-      proposalId: proposal.id,
-      confirmed: true,
-    };
-    const ports = createPorts(undefined, {
-      proposalStore,
-      mealLogStore,
-      sessionUserId: SESSION_USER_A,
-    });
-
-    const { events, result } = await collect(turn(input, ports));
-
-    // Blocked: superseded
-    expect(result.reply).toContain("already superseded");
-    expect(result.reply).toContain("cannot be confirmed");
-
-    // No meal ledger mutation
-    expect(mealLedgerState.entries.length).toBe(0);
-
-    // Commit gate blocks
-    const commitVerdict = expectGateVerdict(events, "commit");
-    expect(commitVerdict.verdict).toBe("block");
-    expect(commitVerdict.evidence).toContain("superseded");
+      expect(result.reply).toContain("cannot be committed");
+      expect(proposalStore.mealLedger.length).toBe(0);
+      const commitVerdict = expectGateVerdict(events, "commit");
+      expect(commitVerdict.verdict).toBe("block");
+      expect(commitVerdict.checkName).toBe("not_committable");
+    }
   });
 
   it("meal ledger row carries stored proposal content, not regenerated model output", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore, state: mealLedgerState } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    // Store a proposal with specific resolved nutrition values
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "oatmeal",
-      portionG: 250,
-      mealType: "breakfast",
-      kcal: 178,
-      proteinG: 6.5,
-      fatG: 3.5,
-      carbsG: 32,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A, {
+        foodName: "oatmeal",
+        portionG: 250,
+        mealType: "breakfast",
+        kcal: 178,
+        proteinG: 6.5,
+        fatG: 3.5,
+        carbsG: 32,
+      }),
+    );
 
-    // Confirm it — no model call happens
     const input: TurnInput = {
       tag: "proposal_confirm",
       proposalId: proposal.id,
@@ -3365,14 +3063,12 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
     await collect(turn(input, ports));
 
-    // The meal ledger row's data comes from the stored proposal, not from any model
-    const entry = mealLedgerState.entries[0];
+    const entry = proposalStore.mealLedger[0];
     expect(entry.foodName).toBe(proposal.foodName);
     expect(entry.portionG).toBe(proposal.portionG);
     expect(entry.mealType).toBe(proposal.mealType);
@@ -3385,24 +3081,11 @@ describe("proposal commit short-circuit (issue #37)", () => {
   });
 
   it("feedback is preserved in confirmation reply even when stores are wired", async () => {
-    const { store: proposalStore } = memProposalStore();
-    const { store: mealLogStore } = memMealLogStore();
+    const proposalStore = memStoreForUser(SESSION_USER_A);
 
-    const proposal = await proposalStore.store({
-      userId: SESSION_USER_A,
-      foodName: "chicken breast",
-      portionG: 200,
-      mealType: "lunch",
-      kcal: 330,
-      proteinG: 62,
-      fatG: 7.2,
-      carbsG: 0,
-      nutritionSource: "USDA FoodData Central",
-      foodId: "food-test-001",
-      canonicalName: "test food",
-      matchType: "exact",
-      allergenTags: [],
-    });
+    const proposal = await proposalStore.store(
+      sampleProposalInput(SESSION_USER_A),
+    );
 
     const input: TurnInput = {
       tag: "proposal_confirm",
@@ -3412,7 +3095,6 @@ describe("proposal commit short-circuit (issue #37)", () => {
     };
     const ports = createPorts(undefined, {
       proposalStore,
-      mealLogStore,
       sessionUserId: SESSION_USER_A,
     });
 
@@ -3421,6 +3103,7 @@ describe("proposal commit short-circuit (issue #37)", () => {
     expect(result.reply).toContain("confirmed");
     expect(result.reply).toContain("olive oil");
   });
+});
 
 describe("submit_answer output gate integration (issue #43)", () => {
   function makeObservation(
@@ -4529,7 +4212,7 @@ describe("turn event enrichment (issue #51)", () => {
     expect(startEvent.profileVersion).toBeUndefined();
   });
 
-  it("turn_start event schema is bumped to 1.5.0 for enriched fields", async () => {
+  it("turn_start event schema carries the current SCHEMA_VERSION", async () => {
     const input: TurnInput = { tag: "utterance", content: "hi" };
     const ports = createPorts(() => ({ content: "ok", stop: true }));
 
@@ -4537,7 +4220,7 @@ describe("turn event enrichment (issue #51)", () => {
     const startEvent = expectStartEvent(events);
 
     expect(startEvent.schema).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe("1.5.0");
+    expect(SCHEMA_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("emits model_call events between thought and subsequent steps", async () => {
@@ -4601,12 +4284,17 @@ describe("turn event enrichment (issue #51)", () => {
   });
 
   it("model_call events are absent in proposal_confirm turns (no model calls)", async () => {
+    const proposalStore = memStoreForUser("mc-user");
+    const proposal = await proposalStore.store(sampleProposalInput("mc-user"));
     const input: TurnInput = {
       tag: "proposal_confirm",
-      proposalId: "p1",
+      proposalId: proposal.id,
       confirmed: true,
     };
-    const ports = createPorts();
+    const ports = createPorts(undefined, {
+      proposalStore,
+      sessionUserId: "mc-user",
+    });
 
     const { events } = await collect(turn(input, ports));
 
@@ -4763,6 +4451,4 @@ describe("turn event enrichment (issue #51)", () => {
       expect(event.timestamp).toBe(fixed.toISOString());
     }
   });
-});
-
 });

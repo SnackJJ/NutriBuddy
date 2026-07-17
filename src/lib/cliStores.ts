@@ -1,8 +1,9 @@
-// File-backed CLI stores (issue #61).
+// File-backed CLI stores (issue #61 / RFC 0001 Phase 1).
 //
 // 单进程 CLI 的本地持久化：proposals 与 meal ledger 存同一个 JSON 状态文件，
 // 让 propose（一次进程）→ --confirm（下一次进程）跨进程存活。
 // 与 Supabase 实现同一窄端口（ProposalStore / MealLogStore），错误消息对齐。
+// commit/void 在同一 critical section 内完成（单次 read-modify-write）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -14,6 +15,8 @@ import type {
   MealLogStore,
   MealLogEntry,
   MealLogInsert,
+  CommitResult,
+  VoidResult,
 } from "../harness/logMeal";
 import type { MealRecord } from "../catalog/queryCatalog";
 
@@ -55,16 +58,30 @@ export interface CliStores {
   listMealRecords(): MealRecord[];
 }
 
+export interface CreateFileStoresOptions {
+  /**
+   * Bound session subject — only this user's proposed rows are
+   * commit/void-able (issue #74 / RFC §1.1 ownership collapse).
+   */
+  readonly userId: string;
+  readonly now?: () => string;
+}
+
 /**
  * File-backed ProposalStore + MealLogStore sharing one JSON state file.
  *
  * Every mutation re-reads the file so successive CLI invocations see each
  * other's writes; the CLI is single-process so there is no concurrency.
+ * commitProposalAndInsertMeal and voidProposal each do one atomic
+ * read-modify-write (no half-commit), gated by bound userId (issue #74).
  */
 export function createFileStores(
   filePath: string,
-  now: () => string = () => new Date().toISOString(),
+  options: CreateFileStoresOptions,
 ): CliStores {
+  const boundUserId = options.userId;
+  const now = options.now ?? (() => new Date().toISOString());
+
   const proposalStore: ProposalStore = {
     async store(params: ProposalInput): Promise<Proposal> {
       const state = readState(filePath);
@@ -83,33 +100,90 @@ export function createFileStores(
       return readState(filePath).proposals.find((p) => p.id === id);
     },
 
-    async commit(id: string): Promise<Proposal> {
-      return transition(id, "committed");
+    async commitProposalAndInsertMeal(
+      proposalId: string,
+    ): Promise<CommitResult> {
+      // Single critical section: read → mutate proposal + meal → write once.
+      // Ownership collapses into not_committable (same as in-memory / RPC).
+      try {
+        const state = readState(filePath);
+        const index = state.proposals.findIndex(
+          (p) =>
+            p.id === proposalId &&
+            p.userId === boundUserId &&
+            p.status === "proposed",
+        );
+
+        if (index < 0) {
+          return { kind: "not_committable" };
+        }
+
+        const proposal = state.proposals[index];
+        const committed: Proposal = { ...proposal, status: "committed" };
+        state.proposals[index] = committed;
+
+        const entry: MealLogEntry = {
+          id: state.mealLogs.length + 1,
+          userId: proposal.userId,
+          foodName: proposal.foodName,
+          portionG: proposal.portionG,
+          mealType: proposal.mealType,
+          loggedAt: now(),
+          kcal: proposal.kcal,
+          proteinG: proposal.proteinG,
+          fatG: proposal.fatG,
+          carbsG: proposal.carbsG,
+          proposalId: proposal.id,
+          foodId: proposal.foodId,
+          matchType: proposal.matchType,
+          allergenTags: [...proposal.allergenTags],
+        };
+        state.mealLogs.push(entry);
+        writeState(filePath, state);
+
+        return {
+          kind: "committed",
+          proposalId: proposal.id,
+          mealLogId: entry.id,
+        };
+      } catch (err: unknown) {
+        return {
+          kind: "error",
+          cause: err instanceof Error ? err.message : String(err),
+        };
+      }
     },
 
-    async decline(id: string): Promise<Proposal> {
-      return transition(id, "voided");
+    async voidProposal(proposalId: string): Promise<VoidResult> {
+      try {
+        const state = readState(filePath);
+        const index = state.proposals.findIndex(
+          (p) =>
+            p.id === proposalId &&
+            p.userId === boundUserId &&
+            p.status === "proposed",
+        );
+
+        if (index < 0) {
+          return { kind: "not_committable" };
+        }
+
+        const voided: Proposal = {
+          ...state.proposals[index],
+          status: "voided",
+        };
+        state.proposals[index] = voided;
+        writeState(filePath, state);
+
+        return { kind: "voided", proposalId };
+      } catch (err: unknown) {
+        return {
+          kind: "error",
+          cause: err instanceof Error ? err.message : String(err),
+        };
+      }
     },
   };
-
-  async function transition(
-    id: string,
-    status: "committed" | "voided",
-  ): Promise<Proposal> {
-    const state = readState(filePath);
-    const index = state.proposals.findIndex(
-      (p) => p.id === id && p.status === "proposed",
-    );
-
-    if (index < 0) {
-      throw new Error(`Proposal ${id} not found or not in "proposed" status`);
-    }
-
-    const updated: Proposal = { ...state.proposals[index], status };
-    state.proposals[index] = updated;
-    writeState(filePath, state);
-    return updated;
-  }
 
   const mealLogStore: MealLogStore = {
     async insert(params: MealLogInsert): Promise<MealLogEntry> {

@@ -40,7 +40,7 @@ import {
 } from "@/lib/mealLogStore";
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
 import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
-import { getSessionFromHeader } from "@/lib/auth";
+import { assertSessionSubject, getSessionFromHeader } from "@/lib/auth";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
 export const runtime = "nodejs";
@@ -178,6 +178,22 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── Extract session user identity from Supabase auth session ─────
   const session = await getSessionFromHeader(createUserSupabase, request);
+  // RFC 0001: JWT sub must match session.userId before turn assembly.
+  if (session) {
+    try {
+      assertSessionSubject(session);
+    } catch (err) {
+      return new Response(
+        JSON.stringify({
+          error: err instanceof Error ? err.message : "session subject mismatch",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+  }
   const sessionUserId = session?.userId;
 
   // ── Build ports ───────────────────────────────────────────────────
@@ -206,6 +222,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     const proposalStore = createSupabaseProposalStore({
       client: userClient,
     });
+    // mealLogStore remains available for non-confirm reads if needed;
+    // confirm writes go only through proposalStore RPCs (RFC 0001).
     const mealLogStore = createSupabaseMealLogStore(userClient);
 
     ports = {
