@@ -24,7 +24,7 @@ import {
 import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import type { Observation } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
-import type { MealLogStore, Proposal, ProposalStore } from "./logMeal";
+import type { MealLogStore, ProposalStore } from "./logMeal";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -49,8 +49,22 @@ export interface ProposalConfirmInput {
 type Clock = () => Date;
 
 /**
+ * Confirm/reject short-circuit ports (RFC 0001 Phase 1).
+ * Required: proposalStore + sessionUserId only.
+ * mealLogStore is NOT on this port — writes go only through proposalStore RPCs.
+ */
+export interface ConfirmPorts {
+  readonly proposalStore: ProposalStore;
+  readonly sessionUserId: string;
+  readonly clock?: Clock;
+}
+
+/**
  * All external dependencies enter through injected ports.
  * Every field is injectable for deterministic scripted testing.
+ *
+ * Confirm path requires proposalStore + sessionUserId (see ConfirmPorts).
+ * Incomplete confirm assemblies throw — no "no store wired" silent pass.
  */
 export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly clock?: Clock;
@@ -58,9 +72,12 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly observations?: readonly Observation[];
   /** Conflicts detected at the input gate for advisory structure checking. */
   readonly conflicts?: readonly Conflict[];
-  /** Proposal store for the confirmation commit path (issue #37). */
+  /** Proposal store for the confirmation commit path (issue #37 / RFC 0001). */
   readonly proposalStore?: ProposalStore;
-  /** Meal ledger store — only writeable through confirmed proposals (issue #37). */
+  /**
+   * Meal ledger store for non-confirm paths. Confirm writes go only through
+   * proposalStore.commitProposalAndInsertMeal (RFC 0001 Phase 1).
+   */
   readonly mealLogStore?: MealLogStore;
   /** Authenticated user identity — not model-fillable (issue #37). */
   readonly sessionUserId?: string;
@@ -961,11 +978,14 @@ function createRunTurnInput(
   };
 }
 
+
 /** Return value of handleProposalConfirm — carries the turn result plus commit gate details. */
 interface ProposalConfirmOutcome {
   result: TurnResult;
   commitVerdict: CommitGateVerdict;
 }
+
+const NOT_COMMITTABLE = "not_committable";
 
 function createProposalConfirmResult(input: ProposalConfirmInput): TurnResult {
   return createEndTurnResult(createProposalConfirmReply(input));
@@ -992,148 +1012,97 @@ function createProposalConfirmOutcome(
   result: TurnResult,
   verdict: GateVerdict,
   evidence: string,
+  checkName: string = COMMIT_GATE_CHECK,
 ): ProposalConfirmOutcome {
   return {
     result,
     commitVerdict: {
       verdict,
-      checkName: COMMIT_GATE_CHECK,
+      checkName,
       evidence,
     },
   };
 }
 
-async function declineProposalBestEffort(
-  proposalStore: ProposalStore,
-  proposalId: string,
-): Promise<void> {
-  try {
-    await proposalStore.decline(proposalId);
-  } catch {
-    // The rejection reply remains valid even if the store transition fails.
+/**
+ * Require ConfirmPorts fields. Incomplete assembly is unrepresentable —
+ * throw rather than silent "no store wired" pass (RFC 0001 F1 / C1).
+ */
+function requireConfirmPorts(ports: TurnPorts): ConfirmPorts {
+  if (!ports.proposalStore || !ports.sessionUserId) {
+    throw new Error(
+      "ConfirmPorts incomplete: proposalStore and sessionUserId are required",
+    );
   }
-}
-
-async function insertMealLogFromProposal(
-  mealLogStore: MealLogStore,
-  userId: string,
-  proposal: Proposal,
-): Promise<void> {
-  await mealLogStore.insert({
-    userId,
-    foodName: proposal.foodName,
-    portionG: proposal.portionG,
-    mealType: proposal.mealType,
-    kcal: proposal.kcal,
-    proteinG: proposal.proteinG,
-    fatG: proposal.fatG,
-    carbsG: proposal.carbsG,
-    proposalId: proposal.id,
-    foodId: proposal.foodId,
-    matchType: proposal.matchType,
-    allergenTags: proposal.allergenTags,
-  });
+  return {
+    proposalStore: ports.proposalStore,
+    sessionUserId: ports.sessionUserId,
+    clock: ports.clock,
+  };
 }
 
 /**
- * Handle a proposal confirmation turn input (issue #37 / PRD v2 §3.4 / ADD Phase 3).
+ * Handle a proposal confirmation turn input (RFC 0001 Phase 1).
  *
- * Short-circuits the model: verifies the proposal belongs to the current
- * authenticated user and session scope, checks the proposal is in "proposed"
- * status, commits the proposal, and writes the meal ledger row referencing
- * the proposal id.
- *
- * When proposalStore / mealLogStore / sessionUserId are absent, falls back
- * to the legacy reply-only path (backward compatible with scripted tests).
+ * Short-circuits the model. Ownership and status are decided solely by the
+ * store discriminant (kind) — no pre-RPC get-then-branch. mealLogStore is
+ * not used; writes go only through commitProposalAndInsertMeal / voidProposal.
  */
 async function handleProposalConfirm(
   input: ProposalConfirmInput,
   ports: TurnPorts,
 ): Promise<ProposalConfirmOutcome> {
   const { proposalId, confirmed } = input;
-  const { proposalStore, mealLogStore, sessionUserId } = ports;
+  const { proposalStore } = requireConfirmPorts(ports);
 
-  // Backward-compat: when stores are absent, fall back to legacy reply-only path.
-  if (!proposalStore || !mealLogStore || !sessionUserId) {
-    return createProposalConfirmOutcome(
-      createProposalConfirmResult(input),
-      "pass",
-      `Proposal ${proposalId} ${confirmed ? "confirmed" : "rejected"} (no store wired)`,
-    );
+  if (confirmed) {
+    const outcome = await proposalStore.commitProposalAndInsertMeal(proposalId);
+    switch (outcome.kind) {
+      case "committed":
+        return createProposalConfirmOutcome(
+          createProposalConfirmResult(input),
+          "pass",
+          `Proposal ${proposalId} committed — meal ledger row ${outcome.mealLogId}`,
+        );
+      case "not_committable":
+        return createProposalConfirmOutcome(
+          createEndTurnResult(`Proposal ${proposalId} cannot be committed.`),
+          "block",
+          NOT_COMMITTABLE,
+          NOT_COMMITTABLE,
+        );
+      case "error":
+        return createProposalConfirmOutcome(
+          createEndTurnResult(`Proposal ${proposalId} commit failed.`),
+          "error",
+          outcome.cause,
+        );
+    }
   }
 
-  if (!confirmed) {
-    // Ownership check mirrors the confirm path (issue #63 / ADD §Multi-User):
-    // with shared multi-tenant storage an unchecked decline is a
-    // cross-tenant void channel.
-    const declined = await proposalStore.get(proposalId);
-
-    if (declined && declined.userId !== sessionUserId) {
+  const outcome = await proposalStore.voidProposal(proposalId);
+  switch (outcome.kind) {
+    case "voided":
       return createProposalConfirmOutcome(
-        createEndTurnResult(
-          `Cannot decline proposal ${proposalId}: it belongs to a different user.`,
-        ),
-        "block",
-        `Proposal ${proposalId} belongs to user ${declined.userId}, not ${sessionUserId}`,
+        createProposalConfirmResult(input),
+        "pass",
+        `Proposal ${proposalId} explicitly rejected by user`,
       );
-    }
-
-    if (declined) {
-      await declineProposalBestEffort(proposalStore, proposalId);
-    }
-
-    return createProposalConfirmOutcome(
-      createProposalConfirmResult(input),
-      "pass",
-      `Proposal ${proposalId} explicitly rejected by user`,
-    );
+    case "not_committable":
+      return createProposalConfirmOutcome(
+        createEndTurnResult(`Proposal ${proposalId} cannot be voided.`),
+        "block",
+        NOT_COMMITTABLE,
+        NOT_COMMITTABLE,
+      );
+    case "error":
+      // Fail closed: do not claim rejected/voided (RFC 0001 F3).
+      return createProposalConfirmOutcome(
+        createEndTurnResult(`Proposal ${proposalId} void failed.`),
+        "error",
+        outcome.cause,
+      );
   }
-
-  // ── Confirmed: verify ownership and status ──────────────────────────────
-
-  const proposal = await proposalStore.get(proposalId);
-
-  if (!proposal) {
-    return createProposalConfirmOutcome(
-      createEndTurnResult(
-        `Proposal ${proposalId} not found — it may have expired or been voided.`,
-      ),
-      "error",
-      `Proposal ${proposalId} not found — may have expired or been voided`,
-    );
-  }
-
-  if (proposal.userId !== sessionUserId) {
-    return createProposalConfirmOutcome(
-      createEndTurnResult(
-        `Cannot confirm proposal ${proposalId}: it belongs to a different user.`,
-      ),
-      "block",
-      `Proposal ${proposalId} belongs to user ${proposal.userId}, not ${sessionUserId}`,
-    );
-  }
-
-  if (proposal.status !== "proposed") {
-    return createProposalConfirmOutcome(
-      createEndTurnResult(
-        `Proposal ${proposalId} is already ${proposal.status} and cannot be confirmed.`,
-      ),
-      "block",
-      `Proposal ${proposalId} is in status "${proposal.status}" — only "proposed" proposals can be committed`,
-    );
-  }
-
-  // ── Commit: transition status → committed, then write meal ledger ─────
-
-  const committed = await proposalStore.commit(proposalId);
-
-  await insertMealLogFromProposal(mealLogStore, sessionUserId, committed);
-
-  return createProposalConfirmOutcome(
-    createProposalConfirmResult(input),
-    "pass",
-    `Proposal ${proposalId} committed — meal ledger row references proposal ${proposalId}`,
-  );
 }
 
 function createOutputEvidence(result: TurnResult): string {

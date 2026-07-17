@@ -80,19 +80,48 @@ type ScaledNutrition = Pick<
   "kcal" | "proteinG" | "fatG" | "carbsG"
 >;
 
+/**
+ * Result of an atomic commit + meal insert (RFC 0001 Phase 1).
+ * Discriminant `kind` is the sole business control-flow signal.
+ */
+export type CommitResult =
+  | {
+      readonly kind: "committed";
+      readonly proposalId: string;
+      readonly mealLogId: number;
+    }
+  | { readonly kind: "not_committable" }
+  | { readonly kind: "error"; readonly cause: string };
+
+/**
+ * Result of voiding a proposal (RFC 0001 Phase 1).
+ * Same business status set as CommitResult (committed | voided | not_committable).
+ */
+export type VoidResult =
+  | { readonly kind: "voided"; readonly proposalId: string }
+  | { readonly kind: "not_committable" }
+  | { readonly kind: "error"; readonly cause: string };
+
 /** 提案存储端口。可注入 Supabase 实现或单测 mock。 */
 export interface ProposalStore {
   /** Store a new proposal in "proposed" status. */
   store(input: ProposalInput): Promise<Proposal>;
   /** Look up a proposal by id. */
   get(id: string): Promise<Proposal | undefined>;
-  /** Transition a proposal from "proposed" to "committed". */
-  commit(id: string): Promise<Proposal>;
-  /** Transition a proposal from "proposed" to "voided". */
-  decline(id: string): Promise<Proposal>;
+  /**
+   * Atomically transition proposal to committed and insert the meal ledger
+   * row. Ownership and status checks are inside this call (RPC / critical
+   * section) — callers must not pre-check ownership.
+   */
+  commitProposalAndInsertMeal(proposalId: string): Promise<CommitResult>;
+  /**
+   * Transition a proposed proposal to voided. Same ownership collapse as
+   * commit: missing / wrong-owner / non-proposed → not_committable.
+   */
+  voidProposal(proposalId: string): Promise<VoidResult>;
 }
 
-// ─── 遗留膳食存储端口（仅用于 proposal_confirm 提交路径）─────────────────
+// ─── 膳食存储端口（utterance 读路径 / 遗留；confirm 写经 ProposalStore RPC）─
 
 /** 一条已持久化的饮食记录。 */
 export interface MealLogEntry {

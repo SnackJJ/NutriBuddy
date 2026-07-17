@@ -34,6 +34,50 @@ export interface VerifiedSession {
 }
 
 /**
+ * Decode JWT payload.sub without verifying signature (verification already
+ * happened via getUser). Returns undefined when the token is not a
+ * three-part JWT or the payload lacks a string sub.
+ */
+export function decodeJwtSubject(token: string): string | undefined {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return undefined;
+  }
+
+  try {
+    const payloadJson = Buffer.from(parts[1], "base64url").toString("utf8");
+    const payload: unknown = JSON.parse(payloadJson);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "sub" in payload &&
+      typeof (payload as { sub: unknown }).sub === "string"
+    ) {
+      return (payload as { sub: string }).sub;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Assert that session.userId matches the JWT access-token `sub` claim
+ * (RFC 0001 Phase 1 assembly assert). Call at turn assembly before turn().
+ *
+ * When the token is not a decodable JWT (e.g. test stubs), the assert is a
+ * no-op — Supabase getUser already established the subject.
+ */
+export function assertSessionSubject(session: VerifiedSession): void {
+  const sub = decodeJwtSubject(session.accessToken);
+  if (sub !== undefined && sub !== session.userId) {
+    throw new Error(
+      `session subject mismatch: JWT sub "${sub}" !== session.userId "${session.userId}"`,
+    );
+  }
+}
+
+/**
  * Extract and verify the session from the request's Authorization header.
  *
  * Creates a short-lived Supabase client scoped to the user's access token,
