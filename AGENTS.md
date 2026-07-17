@@ -17,30 +17,46 @@
 
 ## 模块
 
-八模块保留为词汇，但切片按 ADD Phase 0-4 推进：
+八模块保留为词汇，但切片按 ADD Phase 0-4 推进（产品能力），结构收敛按 RFC 0001 Appendix B / RFC 0002：
 
-- **Phase 0**：schema-versioned event envelope、tagged turn input、ports、turn skeleton、scripted model fixture、scorer over events
-- **Phase 1**：local catalog seed、reviewed allergen tags、alias/portion tables、resolver cascade、typed query catalog、least-privilege read path
-- **Phase 2**：input/tool/output gates、regenerate-then-refuse、two-region context、observation caps、step-event streaming
-- **Phase 3**：proposal store/state machine、write-proposal terminal event、confirmation short-circuit、ledger lineage
-- **Phase 4**：Web chat driving the seam、confirm/edit UI、profile API、auth/RLS、session trace scoping、nightly live eval
+- **ADD Phase 0–4（能力）**：seam / catalog / gates / write path / surfaces — 大量已落地
+- **RFC 结构 Phase 2–6**：ToolOutcome → events/tracer → turn 分解 → catalog split → assembly purge
 
 推迟：Knowledge RAG、context compaction、autonomous exact-match writes、multi-model fallback、free-text episodic memory。
 
-## 当前状态
+## 当前状态（2026-07-17）
 
-- ADD 已成为当前架构基准（`docs/ADD.md`）
-- PRD v2 已改为从属产品语境（`docs/PRD-v2.md`）
-- ADR 0001 经对抗性验证后加强
-- CONTEXT.md 已建立
-- 自建 harness 切片推进中（Loop/ContextAssembler/ModelAdapter/Tracer/CLI，issue #1）
-- 项目骨架已就绪（issue #3）：Next.js 14 App Router + TS strict + Tailwind + ESLint/Prettier；
-  Supabase 客户端 `src/lib/supabase.ts`（server service-role / browser anon，含单测）；
-  环境变量见 `.env.local.example`。`npm run dev` 可启动（`next build` 已验证编译通过）。
-- Eval 代码评层已就绪（issue #6，PRD §4.1/§4.2）：`src/eval/` = 25 条手工 query（五类失败模式各 5 条）
-  + `CodeScorer`（纯 TS 断言，读 TraceEvent[]：must_call_tools / must_not_contain /
-  should_ask_clarification / should_be_blocked）+ runner + `npm run eval`（pending 模式打印
-  toolless baseline，`-- --strict` 接真实 producer 后做 CI 回归闸）。Tracer 词表新增
-  `tool_call` / `post_gate_blocked`（待 ToolRegistry/Verifier 切片产出）。
-- 当前代码仍有旧架构债务：direct `logMeal`、旧 TraceEvent/AgentEvent 分裂、stub nutrition、缺 query catalog/local catalog/proposal confirmation short-circuit。
-- ADD Phase 0-4 issues 待创建。
+### 已完成
+
+- ADD 为架构基准（`docs/ADD.md`）；PRD v2 从属产品语境
+- 项目骨架：Next.js 14 App Router + TS strict + Tailwind；Supabase 客户端 + RLS 迁移 0001–0009
+- Turn seam：`turn()` 单入口、schema-versioned event stream、scripted fixtures、code scorer
+- Catalog / resolver / query catalog / gates（input/tool/output/commit）/ proposal write path
+- **RFC 0001 已合并（PR #72）**：
+  - Step 0：`canonicalizeTurnEvents` + K1–K14 goldens + F1–F4 invariants
+  - Phase 1：原子 `commit_proposal_and_insert_meal` / `void_proposal`、`not_committable` 折叠、ConfirmPorts、JWT sub assert、`proposalConfirm` 抽取、structured `commit` lineage
+  - Review follow-ups #73–#76 已合入
+- **Live smoke**：`npm run smoke:confirm` 在目标项目上 **PASSED**（migration 0009 已应用；commit / void / re-commit not_committable / missing）
+
+### 进行中 / 下一步
+
+- **RFC 0002 — ToolOutcome**（`docs/rfc/0002-tool-outcome.md`）：工具结果从 stringly `ToolResult` 收敛为判别联合；tool gate 只读 `kind`，不再 JSON 字符串嗅探
+- 结构序列仍按 RFC 0001 Appendix B：Phase 3 events/tracer demotion → Phase 4 turn 分解 / 删 `runTurn` → Phase 5 catalog split → Phase 6 `createTurnAssembly` + legacy purge
+
+### 仍有的债务（非 Phase 1 正确性 blocker）
+
+- `ToolResult.result: string` + ad-hoc `parseHandlerResult`（RFC 0002 目标）
+- `TraceEvent` / `AgentEvent` / `AnyTurnEvent` 三套词表并存；eval scorer 仍偏 TraceEvent
+- `runTurn` 与 `turn` 双入口遗留
+- ConfirmPorts 类型完备，但 utterance 路径仍是扁平 `TurnPorts` bag（Phase 6 assembly 收敛）
+- Web confirm/edit UX 与 nightly live eval 仍可加厚
+
+### 运维备忘
+
+```bash
+# 应用 migration 0009（一次，Supabase SQL Editor 或迁移管线）
+#   supabase/migrations/0009_commit_proposal_and_void.sql
+
+# 写路径 live smoke（需 .env.local：URL + anon + service role）
+npm run smoke:confirm
+```

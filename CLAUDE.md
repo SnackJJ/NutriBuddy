@@ -1,37 +1,36 @@
 # NutriBuddy — 项目行动记录
 
-> 完整 PRD 在 `docs/PRD-v2.md`（2026-06-25 grilling 后重写），v1 保留在 `docs/PRD.md`。
+> 架构原则以 `docs/ADD.md` 为准。`docs/PRD-v2.md` 保留产品语境；冲突按 ADD。  
+> 与 `AGENTS.md` 保持同步；本文件给 Claude Code / 本地 agent 用。
 
 ## 已确定
 
-- **原则**：自建 harness 机械（loop/context/memory/verification/trace），库只填管线（调模型/存向量/rerank）
-- **不做**：LangGraph/CrewAI 等框架、拍照录入、native App（初期）、端侧推理/RL（归 NutriMind）
-- **语言**：TypeScript（全栈）
-- **技术栈**：Next.js + Supabase（Postgres + pgvector）+ 自建 agent harness
-- **Agent 拓扑**：单 agent + 确定性预处理 + post-gate（ADR 0001，经 NutriOrion 对抗性验证后维持）
-- **Loop**：ReAct + CodeAct 混合，SQL 用模板注入
-- **数据**：USDA FoodData Central + NIH ODS + USDA Dietary Guidelines
-- **场景**：英文西式饮食，Web 应用，开源
-- **Eval**：三层评分（代码评 + LLM judge + 人校准），M1 只用代码评
+- **原则**：自建 harness 机械（loop/context/memory/verification/trace），库只填管线
+- **不做**：LangGraph/CrewAI、拍照录入、native App（初期）、端侧推理/RL（NutriMind）
+- **语言 / 栈**：TypeScript；Next.js + Supabase + 自建 harness
+- **拓扑**：单 agent；模型只选择和叙述，事实/数字/实体/写入由确定性代码定义和校验
+- **测试缝**：单 turn boundary；ports 注入 → schema-versioned event stream → exactly one terminal
+- **数据**：USDA snapshot ingestion；runtime 读 local catalog。知识 RAG 推迟
 
-## 模块
+## 当前状态（2026-07-17）
 
-八模块（M1 搭六块）：Loop / ContextAssembler / ToolRegistry / MemoryStore / Tracer / ModelAdapter
+- **RFC 0001 已合入 main（PR #72）** — confirm 路径安全：原子 RPC、ConfirmPorts fail-closed、K/F 回归网、`proposalConfirm` 抽取
+- Live smoke 通过：`npm run smoke:confirm`（migration 0009 已在目标项目）
+- **下一步**：**RFC 0002 ToolOutcome**（`docs/rfc/0002-tool-outcome.md`）— 工具结果类型化，去掉 stringly tool gate
+- 后续结构 Phase 3–6 见 RFC 0001 Appendix B（勿与 ADD 产品 Phase 0–4 编号混淆）
 
-推迟到 M2：Retriever（路 B 知识 RAG）、独立 Verifier 模块
+## 命令
 
-## 当前状态
+```bash
+npm test                 # vitest，排除 .sandcastle
+npm run typecheck
+npm run smoke:confirm    # live Supabase confirm/void（需 .env.local）
+npm run eval
+```
 
-- PRD v2 完成（`docs/PRD-v2.md`）
-- ADR 0001 经对抗性验证后加强
-- CONTEXT.md 已建立
-- 自建 harness 切片推进中（Loop/ContextAssembler/ModelAdapter/Tracer/CLI，issue #1）
-- 项目骨架已就绪（issue #3）：Next.js 14 App Router + TS strict + Tailwind + ESLint/Prettier；
-  Supabase 客户端 `src/lib/supabase.ts`（server service-role / browser anon，含单测）；
-  环境变量见 `.env.local.example`。`npm run dev` 可启动（`next build` 已验证编译通过）。
-- Eval 代码评层已就绪（issue #6，PRD §4.1/§4.2）：`src/eval/` = 25 条手工 query（五类失败模式各 5 条）
-  + `CodeScorer`（纯 TS 断言，读 TraceEvent[]：must_call_tools / must_not_contain /
-  should_ask_clarification / should_be_blocked）+ runner + `npm run eval`（pending 模式打印
-  toolless baseline，`-- --strict` 接真实 producer 后做 CI 回归闸）。Tracer 词表新增
-  `tool_call` / `post_gate_blocked`（待 ToolRegistry/Verifier 切片产出）。
-- M1 Issues 待创建
+## 文档入口
+
+- `docs/ADD.md` — 架构 SoT
+- `docs/rfc/0001-phase1-confirm-safety.md` — confirm 安全（已实现）
+- `docs/rfc/0002-tool-outcome.md` — 下一步结构收敛
+- `docs/PRD-v2.md` — 产品语境

@@ -1,10 +1,10 @@
 # RFC 0001 — Step 0 安全网 + Phase 1 Confirm 路径安全
 
-> Status: **Frozen for implementation** (2026-07-17).  
+> Status: **Implemented** (merged PR #72, 2026-07-17).  
 > Architecture source of truth: `docs/ADD.md`  
-> Scope: Step 0 + Phase 1 only. Phases 2–6 are named for sequencing; not designed here.  
+> Scope: Step 0 + Phase 1 only. Phases 2–6 are sequenced in Appendix B; Phase 2 design is `docs/rfc/0002-tool-outcome.md`.  
 > Precedence: conflicts with AGENTS/BRIEFING/PRD status notes resolve to this RFC for Phase 1 work.  
-> Freeze gate: §1.0–§1.3 and §2–§3 settled before recording keep goldens.
+> Live smoke: `npm run smoke:confirm` (requires migration 0009 on the target Supabase project).
 
 ## Why
 
