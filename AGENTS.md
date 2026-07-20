@@ -42,17 +42,21 @@
   - loop/turn 只吃 `ToolOutcome`；gate 发 `reasonCode`；`SCHEMA_VERSION` 1.7.0
   - `log_meal` / `query_catalog` 直接 emit HandlerOutcome；infra → crash 终端（无 output/commit pass）
   - K10/K11 断言 `reasonCode`；chat 仍经由派生 `toolResult`
+- **结构 Phase 3–6（RFC 0003 / Appendix B）Implemented**：
+  - **Phase 3**：eval 评分以 `AnyTurnEvent` 为 SoT（`scoreSignalsFromTurnEvents`）；Tracer 降级为 side-channel
+  - **Phase 4**：删除公开 `runTurn`；仅 `turn`/`consumeTurn` 为 seam 入口
+  - **Phase 5**：`src/catalog/` 包根（`index.ts`）；in-memory QueryRunner 迁入 catalog；无 catalog→harness 反向依赖
+  - **Phase 6**：`createTurnAssembly` fail-closed；chat/CLI 经 assembly 装配
 
 ### 进行中 / 下一步
 
-- 结构序列按 RFC 0001 Appendix B：**Phase 3** events/tracer demotion → Phase 4 turn 分解 / 删 `runTurn` → Phase 5 catalog split → Phase 6 `createTurnAssembly` + legacy purge
+- 产品表面加厚：Web confirm/edit UX、nightly live eval（非结构 Phase 3–6）
+- ADD 产品 Phase 5 metric-gated 扩展（RAG 等）按指标触发
 
-### 仍有的债务（非 Phase 1/2 正确性 blocker）
+### 仍有的债务（非结构 Phase 3–6 blocker）
 
 - 派生 `toolResult` 仍保留至 UI 迁移（RFC 0002 §2.6）
-- `TraceEvent` / `AgentEvent` / `AnyTurnEvent` 三套词表并存；eval scorer 仍偏 TraceEvent
-- `runTurn` 与 `turn` 双入口遗留
-- ConfirmPorts 类型完备，但 utterance 路径仍是扁平 `TurnPorts` bag（Phase 6 assembly 收敛）
+- TraceEvent 仍可用于 debug/legacy fixtures（评分主路径已不依赖）
 - Web confirm/edit UX 与 nightly live eval 仍可加厚
 
 ### 运维备忘

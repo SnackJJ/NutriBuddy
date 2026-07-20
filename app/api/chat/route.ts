@@ -14,9 +14,10 @@ import type { UserContext } from "@/harness/gate";
 import type { InteractionStore } from "@/lib/drugInteractions";
 import {
   parseChatBody,
-  buildChatTurnPorts,
+  assembleChatTurnPorts,
   type ChatRequestBody,
 } from "@/lib/chatApi";
+import { incompleteAssemblyResult } from "@/harness/turnAssembly";
 import {
   createLogMealHandler,
   LOG_MEAL_SCHEMA,
@@ -25,14 +26,14 @@ import {
 import { SUBMIT_ANSWER_SCHEMA } from "@/harness/submitAnswer";
 import {
   createQueryCatalogHandler,
-  createInMemoryQueryRunner,
   QUERY_CATALOG_SCHEMA,
 } from "@/harness/queryCatalog";
-import { loadConfiguredCatalog } from "@/catalog/snapshotLoader";
 import {
+  loadConfiguredCatalog,
+  createInMemoryQueryRunner,
   createQueryCatalog,
   ALL_QUERY_TEMPLATES,
-} from "@/catalog/queryCatalog";
+} from "@/catalog";
 import { createSupabaseProposalStore } from "@/lib/proposalStore";
 import {
   createSupabaseMealLogStore,
@@ -202,41 +203,21 @@ export async function POST(request: NextRequest): Promise<Response> {
   const sessionId = sessionUserId ?? "anonymous";
   const eventLog = new EventLog(sessionId);
 
-  let ports = buildChatTurnPorts({
-    adapter,
-    tracer,
-    eventLog,
-    sessionUserId,
-    history: getRequestHistory(body, turnInput),
-    catalog,
-    queryCatalog,
-    catalogVersion: catalog.snapshot.version,
-  });
-
   // ── Wire Supabase-backed stores and tools for authenticated users ─
+  let proposalStore: ProposalStore | undefined;
+  let mealLogStore: ReturnType<typeof createSupabaseMealLogStore> | undefined;
+  let tools: ReadonlyMap<string, ToolHandler> | undefined;
+  let userContext: UserContext | undefined;
+  let interactionStore: InteractionStore | undefined;
+
   if (session) {
-    // Session-scoped client: the turn path runs under the user's JWT so
-    // RLS binds beneath the executor's userId scoping (issue #62 /
-    // ADD §Multi-User — the unrestricted role exists in migrations only).
     const userClient = createUserSupabase(session.accessToken);
-    const proposalStore = createSupabaseProposalStore({
+    proposalStore = createSupabaseProposalStore({
       client: userClient,
     });
-    // mealLogStore remains available for non-confirm reads if needed;
-    // confirm writes go only through proposalStore RPCs (RFC 0001).
-    const mealLogStore = createSupabaseMealLogStore(userClient);
-
-    ports = {
-      ...ports,
-      proposalStore,
-      mealLogStore,
-    };
+    mealLogStore = createSupabaseMealLogStore(userClient);
 
     if (turnInput.tag === "utterance") {
-      // SQL runner when configured (issue #64): reviewed SQL under the
-      // SELECT-only role, identity bound via the session JWT. Otherwise
-      // the in-memory runner fed with the user's ledger rows (issue #55) —
-      // scripted CI stays here with zero network.
       const queryRunner =
         process.env.NUTRIBUDDY_QUERY_RUNNER === "sql"
           ? createSupabaseQueryRunner(userClient, catalog)
@@ -245,23 +226,56 @@ export async function POST(request: NextRequest): Promise<Response> {
               await loadUserMeals(userClient, session.userId),
             );
 
-      ports = {
-        ...ports,
-        tools: buildToolMap(session.userId, proposalStore, queryRunner),
-        toolSchemas,
-      };
+      tools = buildToolMap(session.userId, proposalStore, queryRunner);
     }
 
-    // ── Load user safety context (fail-soft) ────────────────────────
     const ctx = await loadUserContext(userClient, session.userId);
     if (ctx) {
-      ports = {
-        ...ports,
-        userContext: ctx.userContext,
-        interactionStore: ctx.interactionStore,
-      };
+      userContext = ctx.userContext;
+      interactionStore = ctx.interactionStore;
     }
   }
+
+  // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)
+  const assembly = assembleChatTurnPorts({
+    kind: turnInput.tag,
+    adapter,
+    tracer,
+    eventLog,
+    sessionUserId,
+    history: getRequestHistory(body, turnInput),
+    catalog,
+    queryCatalog,
+    catalogVersion: catalog.snapshot.version,
+    proposalStore,
+    mealLogStore,
+    tools,
+    toolSchemas: tools ? toolSchemas : undefined,
+    userContext,
+    interactionStore,
+    requireTools: Boolean(session && turnInput.tag === "utterance"),
+  });
+
+  if (!assembly.ok) {
+    const fail = incompleteAssemblyResult(
+      assembly.reason,
+      turnInput.tag === "proposal_confirm" ? turnInput.proposalId : undefined,
+    );
+    const encoder = new TextEncoder();
+    return new Response(
+      encoder.encode(
+        JSON.stringify({ type: "terminal", ...fail }) + "\n",
+      ),
+      {
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "Cache-Control": "no-cache, no-store",
+        },
+      },
+    );
+  }
+
+  const ports = assembly.ports;
 
   // ── Stream ────────────────────────────────────────────────────────
   const encoder = new TextEncoder();

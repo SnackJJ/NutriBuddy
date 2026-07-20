@@ -13,23 +13,27 @@
 //
 // API key 从环境变量 DEEPSEEK_API_KEY 读取（对齐 .sandcastle/.env）。
 
-import { consumeTurn, turn, type AnyTurnEvent, type TurnInput, type TurnPorts } from "./harness/turn";
+import { consumeTurn, turn, type AnyTurnEvent, type TurnInput } from "./harness/turn";
 import { buildTurnEventSink, Tracer } from "./harness/tracer";
+import {
+  createTurnAssembly,
+  incompleteAssemblyResult,
+} from "./harness/turnAssembly";
 import type { EventLog } from "./harness/eventLog";
 import { DeepSeekAdapter } from "./harness/modelAdapter";
 import type { ModelAdapter, ToolHandler } from "./harness/types";
 import { createLogMealHandler, LOG_MEAL_SCHEMA } from "./harness/logMeal";
 import {
   createQueryCatalogHandler,
-  createInMemoryQueryRunner,
   QUERY_CATALOG_SCHEMA,
 } from "./harness/queryCatalog";
 import { SUBMIT_ANSWER_SCHEMA } from "./harness/submitAnswer";
-import { loadConfiguredCatalog } from "./catalog/snapshotLoader";
 import {
+  loadConfiguredCatalog,
+  createInMemoryQueryRunner,
   createQueryCatalog,
   ALL_QUERY_TEMPLATES,
-} from "./catalog/queryCatalog";
+} from "./catalog";
 import { createFileStores } from "./lib/cliStores";
 
 /** 本地单用户 CLI 的固定身份：绑定为 userId 与 sessionUserId。 */
@@ -153,21 +157,13 @@ export async function main(
       ? confirmModeAdapter()
       : new DeepSeekAdapter());
 
-  let ports: TurnPorts = {
-    adapter,
-    tracer,
-    eventLog: deps.eventLog,
-    userId: CLI_USER_ID,
-    sessionUserId: CLI_USER_ID,
-    proposalStore: stores.proposalStore,
-    mealLogStore: stores.mealLogStore,
-    catalog,
-    queryCatalog,
-    catalogVersion: catalog.snapshot.version,
-  };
+  let tools: ReadonlyMap<string, ToolHandler> | undefined;
+  let toolSchemas:
+    | readonly (typeof LOG_MEAL_SCHEMA | typeof QUERY_CATALOG_SCHEMA | typeof SUBMIT_ANSWER_SCHEMA)[]
+    | undefined;
 
   if (turnInput.tag === "utterance") {
-    const tools = new Map<string, ToolHandler>([
+    tools = new Map<string, ToolHandler>([
       [
         "log_meal",
         createLogMealHandler({
@@ -185,17 +181,38 @@ export async function main(
         }),
       ],
     ]);
+    toolSchemas = [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA];
+  }
 
-    ports = {
-      ...ports,
-      tools,
-      toolSchemas: [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA],
-    };
+  const assembly = createTurnAssembly({
+    kind: turnInput.tag,
+    adapter,
+    tracer,
+    eventLog: deps.eventLog,
+    userId: CLI_USER_ID,
+    sessionUserId: CLI_USER_ID,
+    proposalStore: stores.proposalStore,
+    mealLogStore: stores.mealLogStore,
+    catalog,
+    queryCatalog,
+    catalogVersion: catalog.snapshot.version,
+    tools,
+    toolSchemas,
+    requireTools: turnInput.tag === "utterance",
+  });
+
+  if (!assembly.ok) {
+    const fail = incompleteAssemblyResult(
+      assembly.reason,
+      turnInput.tag === "proposal_confirm" ? turnInput.proposalId : undefined,
+    );
+    stdout(`${fail.reply}\n`);
+    return 1;
   }
 
   const turnEvents: AnyTurnEvent[] = [];
 
-  const result = await consumeTurn(turn(turnInput, ports), (event) =>
+  const result = await consumeTurn(turn(turnInput, assembly.ports), (event) =>
     turnEvents.push(event),
   );
 

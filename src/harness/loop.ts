@@ -1,9 +1,8 @@
 // ① Loop：ReAct 循环（Thought→Act→Observe）+ MAX_STEPS 上限 + 可中断
 // （PRD §4 / §2.2）。
 //
-// run() 是主体：async generator 在每个 turn 边界产出 AgentEvent，
-// 调用方（CLI / Next.js route / 测试）可逐事件消费。runTurn() 是
-// 同步收集的便捷包装，兼容既有调用方。
+// run() is the ReAct loop body (async generator of AgentEvent).
+// Public seam entry is turn()/consumeTurn (structural Phase 4 — runTurn removed).
 //
 // Issue #41：工具调用切换到原生 DeepSeek/OpenAI 协议：
 //   - 模型 assistant 消息携带 tool_calls[]（非 [tool_call] 伪标签）
@@ -545,15 +544,4 @@ export async function* run(
   return { reply, steps: maxSteps, stopReason: "max_steps", interactions };
 }
 
-/**
- * run() 的便捷包装：收集所有事件，返回 TurnResult。
- * 兼容 loop 的既有调用方（CLI、测试）。
- */
-export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
-  const gen = run(input);
-  let next = await gen.next();
-  while (!next.done) {
-    next = await gen.next();
-  }
-  return next.value;
-}
+

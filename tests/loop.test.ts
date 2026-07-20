@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { run, runTurn } from "../src/harness/loop";
+import { run, type RunTurnInput } from "../src/harness/loop";
 import { Tracer } from "../src/harness/tracer";
 import { EventLog, type LogEvent } from "../src/harness/eventLog";
 import { fixedDeps } from "./helpers/eventLog";
@@ -11,6 +11,16 @@ import type {
   AgentEvent,
   TerminalResult,
 } from "../src/harness/types";
+
+/** Drain loop.run for unit tests (not a public dual seam entry — Phase 4). */
+async function drainLoop(input: RunTurnInput): Promise<TerminalResult> {
+  const gen = run(input);
+  let next = await gen.next();
+  while (!next.done) {
+    next = await gen.next();
+  }
+  return next.value;
+}
 import type { UserContext } from "../src/harness/gate";
 import type {
   DrugNutrientInteraction,
@@ -671,7 +681,7 @@ describe("run", () => {
   });
 });
 
-describe("runTurn (backward compat)", () => {
+describe("loop drain (internal unit helper)", () => {
   it("runs one turn: assembles context, calls the model, returns the reply", async () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({
@@ -679,7 +689,7 @@ describe("runTurn (backward compat)", () => {
       stop: true,
     }));
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "一个鸡蛋多少蛋白质？",
       adapter,
       tracer,
@@ -693,7 +703,7 @@ describe("runTurn (backward compat)", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "hi back", stop: true }));
 
-    await runTurn({ userInput: "hi", adapter, tracer });
+    await drainLoop({ userInput: "hi", adapter, tracer });
 
     const types = tracer.events().map((e) => e.type);
     expect(types).toContain("user_input");
@@ -713,7 +723,7 @@ describe("runTurn (backward compat)", () => {
       }),
     );
 
-    await runTurn({
+    await drainLoop({
       userInput: "q",
       adapter: { generate },
       tracer,
@@ -735,7 +745,7 @@ describe("runTurn (backward compat)", () => {
       return { content: `step ${calls}`, stop: false };
     });
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "go",
       adapter,
       tracer,
@@ -757,7 +767,7 @@ describe("runTurn (backward compat)", () => {
         : { content: "final", stop: true };
     });
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "go",
       adapter,
       tracer,
@@ -780,7 +790,7 @@ describe("runTurn (backward compat)", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
 
-    await runTurn({
+    await drainLoop({
       userInput: "and how much in two eggs?",
       adapter,
       tracer,
@@ -807,7 +817,7 @@ describe("runTurn (backward compat)", () => {
     controller.abort();
 
     await expect(
-      runTurn({
+      drainLoop({
         userInput: "q",
         adapter: { generate },
         tracer,
@@ -828,7 +838,7 @@ describe("runTurn (backward compat)", () => {
       stop: true,
     }));
 
-    await runTurn({
+    await drainLoop({
       userInput: "一个鸡蛋多少蛋白质？",
       adapter,
       tracer,
@@ -866,7 +876,7 @@ describe("runTurn (backward compat)", () => {
     const eventLog = new EventLog("sess-2", deps);
     const adapter = stubAdapter(() => ({ content: "not done", stop: false }));
 
-    await runTurn({
+    await drainLoop({
       userInput: "go",
       adapter,
       tracer,
@@ -905,7 +915,7 @@ describe("runTurn (backward compat)", () => {
     controller.abort();
 
     await expect(
-      runTurn({
+      drainLoop({
         userInput: "q",
         adapter: { generate },
         tracer,
@@ -924,7 +934,7 @@ describe("runTurn (backward compat)", () => {
     const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
 
     // should not throw
-    const result = await runTurn({ userInput: "hi", adapter, tracer });
+    const result = await drainLoop({ userInput: "hi", adapter, tracer });
     expect(result.reply).toBe("ok");
   });
 
@@ -950,7 +960,7 @@ describe("runTurn (backward compat)", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "safe answer", stop: true }));
 
-    await runTurn({
+    await drainLoop({
       userInput: "what should I eat?",
       adapter,
       tracer,
@@ -969,7 +979,7 @@ describe("runTurn (backward compat)", () => {
     const tracer = new Tracer();
     const adapter = stubAdapter(() => ({ content: "ok", stop: true }));
 
-    await runTurn({ userInput: "hi", adapter, tracer });
+    await drainLoop({ userInput: "hi", adapter, tracer });
 
     const prompt = tracer.events().find((e) => e.type === "model_prompt");
     expect(prompt?.payload).not.toContain("SAFETY CONSTRAINT");
@@ -991,7 +1001,7 @@ describe("runTurn (backward compat)", () => {
       stop: true,
     }));
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "what should I drink?",
       adapter,
       tracer,
@@ -1018,7 +1028,7 @@ describe("runTurn (backward compat)", () => {
       stop: true,
     }));
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "how can I get more calcium?",
       adapter,
       tracer,
@@ -1039,7 +1049,7 @@ describe("runTurn (backward compat)", () => {
       stop: true,
     }));
 
-    const result = await runTurn({
+    const result = await drainLoop({
       userInput: "what salad should I make?",
       adapter,
       tracer,
@@ -1206,7 +1216,7 @@ describe("runTurn (backward compat)", () => {
         ],
       }));
 
-      const result = await runTurn({
+      const result = await drainLoop({
         userInput: "what should I drink?",
         adapter,
         tracer,
@@ -1239,7 +1249,7 @@ describe("runTurn (backward compat)", () => {
         ],
       }));
 
-      const result = await runTurn({
+      const result = await drainLoop({
         userInput: "how can I get more calcium?",
         adapter,
         tracer,

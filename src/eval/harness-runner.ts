@@ -5,11 +5,12 @@
 
 import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
 import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
-import { buildTurnEventSink, Tracer } from "../harness/tracer";
+import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { Catalog } from "../catalog/catalog";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
+import { scoreSignalsFromTurnEvents } from "./scoreSignals";
 
 /**
  * 对一批 eval case 执行完整 harness 运行。
@@ -78,21 +79,26 @@ export async function runHarnessEval(
       reply = result.reply;
       steps = result.steps;
       stopReason = result.stopReason;
-
-      tracer.sink(buildTurnEventSink(turnEvents, result.steps));
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
-      tracer.sink(buildTurnEventSink(turnEvents, steps));
     }
+
+    // Phase 3: score from turn-event facts, not TraceEvent tool_call/gate_block.
+    const signals = scoreSignalsFromTurnEvents(turnEvents, reply);
+    const scoredToolCalls =
+      signals.toolCalls.length > 0 ? signals.toolCalls : toolCalls;
+    const scoredBlocks = signals.wasBlocked
+      ? Math.max(1, gateVerdictBlocks)
+      : gateVerdictBlocks;
 
     const durationMs = Date.now() - start;
     const scored = scoreHarness(
       reply,
-      toolCalls,
+      scoredToolCalls,
       c.expected,
       c.userContext,
-      gateVerdictBlocks,
+      scoredBlocks,
     );
 
     results.push({

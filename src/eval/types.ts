@@ -61,8 +61,8 @@ export interface ScoreResult {
 }
 
 /**
- * 把一条 eval case 跑成一条 trace 的生产者。
- * 真实实现接 runTurn；测试注入假 producer、CLI 注入 pending producer。
+ * Legacy demoted producer: TraceEvent stream for offline fixtures.
+ * Prefer turn() + scoreCaseFromTurnEvents for harness truth (Phase 3).
  */
 export type TraceProducer = (
   evalCase: EvalCase,

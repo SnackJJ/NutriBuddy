@@ -3,7 +3,7 @@
 //   npm run eval            # pending 模式：打印 toolless baseline，框架自检，恒返回 0
 //   npm run eval -- --strict  # 任一 case 失败即非零退出（接真实 producer 后做 CI 回归闸）
 //
-// 真实 trace producer 要等 ToolRegistry + Verifier 切片落地后接 runTurn；本切片用
+// Offline fixtures use TraceProducer; harness truth uses turn() (Phase 3/4). 本切片用
 // pendingProducer（空 trace）占位——此时凡需工具/拦截/追问的 case 都「失败」，是诚实的
 // 无 harness 基线，而非框架 bug，故默认（非 strict）不让它把 CI 染红。
 

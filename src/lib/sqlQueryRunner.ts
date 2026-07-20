@@ -24,7 +24,7 @@ import {
   type QueryRunner,
   type QueryTemplate,
 } from "../catalog/queryCatalog";
-import { createInMemoryQueryRunner } from "../harness/queryCatalog";
+import { createInMemoryQueryRunner } from "../catalog";
 
 type RpcArgs = Record<string, string | number>;
 

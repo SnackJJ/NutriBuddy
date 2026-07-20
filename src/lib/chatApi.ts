@@ -11,6 +11,11 @@ import type { ModelAdapter } from "../harness/types";
 import type { EventLog } from "../harness/eventLog";
 import type { Catalog } from "../catalog/catalog";
 import type { QueryCatalog } from "../catalog/queryCatalog";
+import {
+  createTurnAssembly,
+  type CreateTurnAssemblyInput,
+  type TurnAssemblyResult,
+} from "../harness/turnAssembly";
 
 // ─── Request body types ───────────────────────────────────────────────
 
@@ -110,25 +115,54 @@ export interface BuildChatTurnPortsInput {
 }
 
 /**
- * Build TurnPorts from chat API parameters.
+ * Build TurnPorts from chat API parameters via createTurnAssembly (Phase 6).
+ * Throws on incomplete assembly so the route can map to HTTP errors.
  *
  * The sessionUserId comes from the request header (not the body)
  * and is bound as both userId and sessionUserId on the ports.
- * The model never sees the userId — it's for tool scoping only.
- *
- * This is the boundary where user identity enters the harness
- * outside of model-fillable input (issue #39 / PRD v2 §3.1).
  */
 export function buildChatTurnPorts(input: BuildChatTurnPortsInput): TurnPorts {
-  return {
+  const result = assembleChatTurnPorts(input);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return result.ports;
+}
+
+/** Fail-closed assembly without throw — preferred for new call sites. */
+export function assembleChatTurnPorts(
+  input: BuildChatTurnPortsInput &
+    Partial<
+      Pick<
+        CreateTurnAssemblyInput,
+        | "kind"
+        | "proposalStore"
+        | "mealLogStore"
+        | "tools"
+        | "toolSchemas"
+        | "userContext"
+        | "interactionStore"
+        | "requireTools"
+      >
+    >,
+): TurnAssemblyResult {
+  return createTurnAssembly({
+    kind: input.kind ?? "utterance",
     adapter: input.adapter,
     tracer: input.tracer,
     eventLog: input.eventLog,
-    userId: input.sessionUserId,
     sessionUserId: input.sessionUserId,
+    userId: input.sessionUserId,
     history: input.history,
     catalog: input.catalog,
     queryCatalog: input.queryCatalog,
     catalogVersion: input.catalogVersion,
-  };
+    proposalStore: input.proposalStore,
+    mealLogStore: input.mealLogStore,
+    tools: input.tools,
+    toolSchemas: input.toolSchemas,
+    userContext: input.userContext,
+    interactionStore: input.interactionStore,
+    requireTools: input.requireTools,
+  });
 }

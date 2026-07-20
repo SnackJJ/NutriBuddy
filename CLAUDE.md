@@ -17,7 +17,8 @@
 - **RFC 0001 已合入 main（PR #72）** — confirm 路径安全：原子 RPC、ConfirmPorts fail-closed、K/F 回归网、`proposalConfirm` 抽取
 - Live smoke 通过：`npm run smoke:confirm`（migration 0009 已在目标项目）
 - **RFC 0002 ToolOutcome 已实现** — `toolOutcome.ts`、gate `reasonCode`、SCHEMA 1.7.0、handlers 结构化 outcome
-- **下一步**：结构 Phase 3 events/tracer demotion（RFC 0001 Appendix B；勿与 ADD 产品 Phase 0–4 编号混淆）
+- **结构 Phase 3–6 已交付**（见 `docs/rfc/0003-structural-phases-3-6.md`）：turn-event scoring、删 `runTurn`、catalog 包边界、`createTurnAssembly`
+- **下一步**：Web confirm/edit UX / nightly live eval（产品表面）；勿与 ADD 产品 Phase 编号混淆
 
 ## 命令
 

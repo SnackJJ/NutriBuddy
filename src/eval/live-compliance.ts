@@ -26,7 +26,7 @@ import {
   type GateCheckpoint,
   type GateVerdict,
 } from "../harness/turn";
-import { buildTurnEventSink, Tracer } from "../harness/tracer";
+import { Tracer } from "../harness/tracer";
 import type {
   ModelAdapter,
   ToolHandler,
@@ -36,6 +36,7 @@ import type {
 import type { EvalCase, EvalExpected } from "./types";
 import type { InteractionStore } from "../lib/drugInteractions";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
+import { scoreSignalsFromTurnEvents } from "./scoreSignals";
 import { loadEvalCases } from "./dataset";
 import { DeepSeekAdapter } from "../harness/modelAdapter";
 import { createCatalog, SEED_FOODS, type Catalog } from "../catalog/catalog";
@@ -238,22 +239,26 @@ export async function runLiveComplianceEval(
       steps = result.steps;
       stopReason = result.stopReason;
       typedOutput = buildTypedOutputSignal(result.output);
-      tracer.sink(buildTurnEventSink(turnEvents, result.steps));
     } catch (err) {
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
       steps = eventSignals.steps;
-      tracer.sink(buildTurnEventSink(turnEvents, steps));
     }
 
     const durationMs = Date.now() - start;
 
+    // Phase 3: scoring authority is the turn event stream.
+    const scoreSignals = scoreSignalsFromTurnEvents(turnEvents, reply);
     const scored = scoreHarness(
       reply,
-      eventSignals.toolCalls,
+      scoreSignals.toolCalls.length > 0
+        ? scoreSignals.toolCalls
+        : eventSignals.toolCalls,
       c.expected,
       c.userContext,
-      eventSignals.gateVerdictBlocks,
+      scoreSignals.wasBlocked
+        ? Math.max(1, eventSignals.gateVerdictBlocks)
+        : eventSignals.gateVerdictBlocks,
     );
 
     signals.push({

@@ -1,15 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   createQueryCatalogHandler,
-  createInMemoryQueryRunner,
   QUERY_CATALOG_SCHEMA,
   QUERY_CATALOG_TOOL,
   type QueryCatalogHandlerDeps,
 } from "../src/harness/queryCatalog";
 import {
+  createCatalog,
+  SEED_FOODS,
   createQueryCatalog,
   FOOD_LOOKUP_TEMPLATE,
   ALL_QUERY_TEMPLATES,
+  createInMemoryQueryRunner,
+  type Catalog,
   type QueryCatalog,
   type QueryRunner,
   type Observation,
@@ -17,12 +20,7 @@ import {
   type ColumnDef,
   type QueryResult,
   type MealRecord,
-} from "../src/catalog/queryCatalog";
-import {
-  createCatalog,
-  SEED_FOODS,
-  type Catalog,
-} from "../src/catalog/catalog";
+} from "../src/catalog";
 import { Tracer } from "../src/harness/tracer";
 import type { HandlerOutcome } from "../src/harness/toolOutcome";
 

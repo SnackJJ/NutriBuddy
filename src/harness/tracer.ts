@@ -1,8 +1,10 @@
-// ⑦ Tracer：记录 turn 内每一步（模型看到什么 / 决定什么 / 返回什么）。
-// 早做可观测，debug 快十倍（PRD §10）。
+// ⑦ Tracer：debug / side-channel recording (PRD §10).
 //
-// Loop 仍直接记录内部事件；工具调用和 gate block 从 turn 事件流派生，
-// 再作为 render()/events() 可消费的 trace 事件暴露。
+// Structural Phase 3: TraceEvent is **demoted**. Schema-versioned turn events
+// (`AnyTurnEvent`) are the source of truth for tool/gate/terminal correctness
+// (eval scorers, goldens). Loop may still record model_prompt/model_return here
+// for humans; buildTurnEventSink remains for CLI/debug render only — not for
+// scoring authority.
 
 import type { AnyTurnEvent } from "./turn";
 
