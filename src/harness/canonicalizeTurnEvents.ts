@@ -15,6 +15,7 @@ const ID_KEYS = new Set([
   "tool_call_id",
   // Nested tool call id on agentEvent.toolCall / toolCalls entries.
   // Handled when key === "id" under a tool-call-shaped parent (see walk).
+  // Nested proposal id under toolOutcome.data.proposal.id (RFC 0002).
 ]);
 
 const TIME_KEYS = new Set([
@@ -96,6 +97,24 @@ function isToolCallParent(parentKey: string | undefined): boolean {
   );
 }
 
+/** Nested `id` under proposal objects participates in bijection (RFC 0002). */
+function isProposalParent(parentKey: string | undefined): boolean {
+  return parentKey === "proposal";
+}
+
+function isBijectionIdKey(
+  key: string,
+  parentKey: string | undefined,
+): boolean {
+  if (ID_KEYS.has(key)) {
+    return true;
+  }
+  if (key === "id" && (isToolCallParent(parentKey) || isProposalParent(parentKey))) {
+    return true;
+  }
+  return false;
+}
+
 function collectIds(
   value: unknown,
   allocate: (raw: string) => string,
@@ -113,12 +132,8 @@ function collectIds(
   }
 
   for (const [key, child] of Object.entries(value)) {
-    if (typeof child === "string") {
-      if (ID_KEYS.has(key)) {
-        allocate(child);
-      } else if (key === "id" && isToolCallParent(parentKey)) {
-        allocate(child);
-      }
+    if (typeof child === "string" && isBijectionIdKey(key, parentKey)) {
+      allocate(child);
     }
     collectIds(child, allocate, key);
   }
@@ -151,7 +166,7 @@ function rewrite(
         continue;
       }
 
-      if (ID_KEYS.has(key) || (key === "id" && isToolCallParent(parentKey))) {
+      if (isBijectionIdKey(key, parentKey)) {
         out[key] = idMap.get(child) ?? child;
         continue;
       }

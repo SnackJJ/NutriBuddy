@@ -634,7 +634,8 @@ describe("RFC 0001 keep goldens", () => {
         e.type === "gate_verdict" && e.checkpoint === "tool",
     );
     expect(toolGate?.verdict).toBe("pass");
-    expect(toolGate?.evidence).toMatch(/typed miss|miss_/i);
+    expect(toolGate?.checkName).toBe("tool_gate_check");
+    expect(toolGate?.reasonCode).toBe("typed_miss");
     expect(result.stopReason).not.toBe("write_proposal");
     expect(proposalStore.proposals).toHaveLength(0);
   });
@@ -696,6 +697,7 @@ describe("RFC 0001 keep goldens", () => {
     );
     expect(toolGate?.verdict).toBe("error");
     expect(toolGate?.checkName).toBe("tool_gate_check");
+    expect(toolGate?.reasonCode).toBe("typed_error");
   });
 
   // ── K12: Output gate retry → pass ───────────────────────────────────────

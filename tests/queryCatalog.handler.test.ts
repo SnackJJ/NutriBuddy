@@ -24,6 +24,7 @@ import {
   type Catalog,
 } from "../src/catalog/catalog";
 import { Tracer } from "../src/harness/tracer";
+import type { HandlerOutcome } from "../src/harness/toolOutcome";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -65,17 +66,22 @@ function expectRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function parseResult(result: string): QueryResult {
-  const parsed: unknown = JSON.parse(result);
+function parseResult(result: string | HandlerOutcome): QueryResult {
+  let parsed: unknown;
+  if (typeof result === "string") {
+    parsed = JSON.parse(result);
+  } else {
+    parsed = result.data;
+  }
   const record = expectRecord(parsed);
   if (record.type === "observation" || record.type === "error") {
     return parsed as QueryResult;
   }
 
-  throw new Error(`unexpected query_catalog result: ${result}`);
+  throw new Error(`unexpected query_catalog result: ${JSON.stringify(parsed)}`);
 }
 
-function expectObservationResult(result: string): Observation {
+function expectObservationResult(result: string | HandlerOutcome): Observation {
   const parsed = parseResult(result);
   expect(parsed.type).toBe("observation");
   if (parsed.type !== "observation") {
@@ -85,7 +91,7 @@ function expectObservationResult(result: string): Observation {
   return parsed.observation;
 }
 
-function expectErrorResult(result: string): QueryErrorResult {
+function expectErrorResult(result: string | HandlerOutcome): QueryErrorResult {
   const parsed = parseResult(result);
   expect(parsed.type).toBe("error");
   if (parsed.type !== "error") {
@@ -500,7 +506,7 @@ describe("createInMemoryQueryRunner", () => {
         food_id: "food-salmon-001",
       });
 
-      const parsed: Record<string, unknown> = JSON.parse(result);
+      const parsed: Record<string, unknown> = parseResult(result);
       expect(parsed.type).toBe("observation");
       expect(typeof parsed.text).toBe("string");
       expect((parsed.text as string).length).toBeGreaterThan(0);
@@ -515,7 +521,7 @@ describe("createInMemoryQueryRunner", () => {
         food_id: "food-chicken-breast-001",
       });
 
-      const parsed: Record<string, unknown> = JSON.parse(result);
+      const parsed: Record<string, unknown> = parseResult(result);
       const text = parsed.text as string;
       expect(text).toContain("kcal:");
       expect(text).toContain("protein_g:");
@@ -561,7 +567,7 @@ describe("createInMemoryQueryRunner", () => {
         food_id: "food-chicken-breast-001",
       });
 
-      const parsed: Record<string, unknown> = JSON.parse(result);
+      const parsed: Record<string, unknown> = parseResult(result);
       const obsEvents = tracer.events().filter((e) => e.type === "observation");
       const tracePayload: Record<string, unknown> = JSON.parse(
         obsEvents[0].payload,
@@ -581,7 +587,7 @@ describe("createInMemoryQueryRunner", () => {
         food_id: "food-egg-001",
       });
 
-      const parsed: Record<string, unknown> = JSON.parse(result);
+      const parsed: Record<string, unknown> = parseResult(result);
       expect(parsed.type).toBe("observation");
       expect(parsed.text).toBeDefined();
     });
@@ -592,7 +598,7 @@ describe("createInMemoryQueryRunner", () => {
         template_id: "nonexistent",
       });
 
-      const parsed: Record<string, unknown> = JSON.parse(result);
+      const parsed: Record<string, unknown> = parseResult(result);
       expect(parsed.type).toBe("error");
       expect(parsed.text).toBeUndefined();
     });

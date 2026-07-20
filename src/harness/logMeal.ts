@@ -19,6 +19,7 @@ import type {
   ResolveResult,
 } from "../catalog/catalog";
 import { resolveFood } from "../catalog/resolver";
+import type { HandlerOutcome, JsonValue } from "./toolOutcome";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -245,8 +246,8 @@ function scaleNutrition(
 
 // ─── 响应构建 ─────────────────────────────────────────────────────────────
 
-function proposalResponse(proposal: Proposal): string {
-  return JSON.stringify({
+function proposalResponse(proposal: Proposal): HandlerOutcome {
+  const data: JsonValue = {
     proposal_id: proposal.id,
     message: `Log ${proposal.portionG}g ${proposal.foodName} for ${proposal.mealType}? (${proposal.kcal} kcal, ${proposal.proteinG}g protein) — Confirm?`,
     proposal: {
@@ -265,7 +266,7 @@ function proposalResponse(proposal: Proposal): string {
       },
       nutrition_source: proposal.nutritionSource,
       match_type: proposal.matchType,
-      allergen_tags: proposal.allergenTags,
+      allergen_tags: [...proposal.allergenTags],
     },
     nutrition_summary: {
       kcal: proposal.kcal,
@@ -273,35 +274,42 @@ function proposalResponse(proposal: Proposal): string {
       fat_g: proposal.fatG,
       carbs_g: proposal.carbsG,
     },
-  });
+  };
+  return { kind: "ok", data };
 }
 
 function isResolverMiss(result: ResolveResult): result is ResolveMissResult {
   return result.foodRef === null;
 }
 
-function resolverMissResponse(result: ResolveMissResult): string {
-  const base = {
+function resolverMissResponse(result: ResolveMissResult): HandlerOutcome {
+  const candidates = (result.candidates ?? []).map((candidate) => {
+    const row: { [key: string]: JsonValue } = {
+      food_id: candidate.foodId,
+      food_name: candidate.canonicalName,
+      match_score: Math.round(candidate.matchScore * 100) / 100,
+    };
+    // Preserve unreviewed allergen state: omit key when undefined (not []).
+    if (candidate.allergenTags !== undefined) {
+      row.allergen_tags = [...candidate.allergenTags];
+    }
+    return row;
+  });
+
+  const data: JsonValue = {
     error: `food not found in catalog: "${result.input}"`,
     match_type: result.matchType,
     catalog_snapshot: result.catalogSnapshotId,
     message: clarificationMessage(result),
+    ...(candidates.length > 0 ? { candidates } : {}),
   };
 
-  const candidates = result.candidates ?? [];
-  if (candidates.length === 0) {
-    return JSON.stringify(base);
-  }
-
-  return JSON.stringify({
-    ...base,
-    candidates: candidates.map((candidate) => ({
-      food_id: candidate.foodId,
-      food_name: candidate.canonicalName,
-      match_score: Math.round(candidate.matchScore * 100) / 100,
-      allergen_tags: candidate.allergenTags,
-    })),
-  });
+  return {
+    kind: "typed_miss",
+    message: `food not found in catalog: "${result.input}"`,
+    data,
+    candidates: candidates.length > 0 ? candidates : undefined,
+  };
 }
 
 function clarificationMessage(result: ResolveMissResult): string {
@@ -326,8 +334,12 @@ function clarificationMessage(result: ResolveMissResult): string {
   }
 }
 
-function errorResponse(message: string): string {
-  return JSON.stringify({ error: message });
+function errorResponse(message: string): HandlerOutcome {
+  return {
+    kind: "typed_error",
+    message,
+    data: { error: message },
+  };
 }
 
 // ─── OpenAI Function-Calling Schema ────────────────────────────────────────
@@ -386,46 +398,44 @@ export const LOG_MEAL_SCHEMA = {
 export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
   const { catalog, proposalStore, userId } = deps;
 
-  return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
-    try {
-      const parsed = parseArgs(args);
-      if (typeof parsed === "string") {
-        return errorResponse(parsed);
-      }
-
-      const resolved = resolveFood(catalog, parsed.foodName);
-
-      // ── Resolver miss → clarification ──────────────────────────────────
-      if (isResolverMiss(resolved)) {
-        return resolverMissResponse(resolved);
-      }
-
-      const foodRef = resolved.foodRef;
-      const scaled = scaleNutrition(foodRef.per100g, parsed.portionG);
-
-      const proposal = await proposalStore.store({
-        userId,
-        foodId: foodRef.foodId,
-        foodName: parsed.foodName,
-        canonicalName: foodRef.canonicalName,
-        portionG: parsed.portionG,
-        mealType: parsed.mealType,
-        kcal: scaled.kcal,
-        proteinG: scaled.proteinG,
-        fatG: scaled.fatG,
-        carbsG: scaled.carbsG,
-        nutritionSource: resolved.catalogSnapshotId,
-        matchType: foodRef.matchType,
-        // Record path: unreviewed tags degrade to [] in the ledger row.
-        // The recommendation surface is protected by the output entity
-        // check, which reads the catalog entry itself (issue #66).
-        allergenTags: foodRef.allergenTags ?? [],
-      });
-
-      return proposalResponse(proposal);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return errorResponse(`failed to create meal proposal: ${message}`);
+  return async (
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<HandlerOutcome> => {
+    const parsed = parseArgs(args);
+    if (typeof parsed === "string") {
+      return errorResponse(parsed);
     }
+
+    const resolved = resolveFood(catalog, parsed.foodName);
+
+    // ── Resolver miss → clarification ──────────────────────────────────
+    if (isResolverMiss(resolved)) {
+      return resolverMissResponse(resolved);
+    }
+
+    const foodRef = resolved.foodRef;
+    const scaled = scaleNutrition(foodRef.per100g, parsed.portionG);
+
+    // ProposalStore / unexpected throws propagate → dispatch maps to infra_error
+    const proposal = await proposalStore.store({
+      userId,
+      foodId: foodRef.foodId,
+      foodName: parsed.foodName,
+      canonicalName: foodRef.canonicalName,
+      portionG: parsed.portionG,
+      mealType: parsed.mealType,
+      kcal: scaled.kcal,
+      proteinG: scaled.proteinG,
+      fatG: scaled.fatG,
+      carbsG: scaled.carbsG,
+      nutritionSource: resolved.catalogSnapshotId,
+      matchType: foodRef.matchType,
+      // Record path: unreviewed tags degrade to [] in the ledger row.
+      // The recommendation surface is protected by the output entity
+      // check, which reads the catalog entry itself (issue #66).
+      allergenTags: foodRef.allergenTags ?? [],
+    });
+
+    return proposalResponse(proposal);
   };
 }

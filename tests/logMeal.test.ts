@@ -12,8 +12,18 @@ import {
   SEED_FOODS,
   type Catalog,
 } from "../src/catalog/catalog";
+import type { HandlerOutcome } from "../src/harness/toolOutcome";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Normalize handler return (string | HandlerOutcome) to parsed JSON data. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseHandlerJson(result: string | HandlerOutcome): any {
+  if (typeof result === "string") {
+    return JSON.parse(result);
+  }
+  return result.data;
+}
 
 const TEST_USER = "b4e0a1c2-3d4e-5f6a-7b8c-9d0e1f2a3b4c";
 let proposalCounter = 0;
@@ -139,7 +149,7 @@ describe("createLogMealHandler", () => {
       portion_g: 150,
       meal_type: "dinner",
     });
-    const parsed = JSON.parse(result);
+    const parsed = parseHandlerJson(result);
 
     // The record path degrades unreviewed tags to [] — the recommendation
     // surface is guarded by the output entity check reading the catalog.
@@ -160,7 +170,7 @@ describe("createLogMealHandler", () => {
       });
 
       const result = await handler({ portion_g: 200 });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("food_name");
     });
@@ -174,7 +184,7 @@ describe("createLogMealHandler", () => {
       });
 
       const result = await handler({ food_name: "", portion_g: 200 });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("food_name");
     });
@@ -188,7 +198,7 @@ describe("createLogMealHandler", () => {
       });
 
       const result = await handler({ food_name: "   ", portion_g: 200 });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("food_name");
     });
@@ -202,7 +212,7 @@ describe("createLogMealHandler", () => {
       });
 
       const result = await handler({ food_name: "chicken breast" });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("portion_g");
     });
@@ -219,7 +229,7 @@ describe("createLogMealHandler", () => {
         food_name: "chicken breast",
         portion_g: 0,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("portion_g");
     });
@@ -236,7 +246,7 @@ describe("createLogMealHandler", () => {
         food_name: "chicken breast",
         portion_g: -50,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("portion_g");
     });
@@ -253,7 +263,7 @@ describe("createLogMealHandler", () => {
         food_name: "chicken breast",
         portion_g: "a lot",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("portion_g");
     });
@@ -271,7 +281,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "brunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("meal_type");
     });
@@ -290,7 +300,7 @@ describe("createLogMealHandler", () => {
           portion_g: 200,
           meal_type: mt,
         });
-        const parsed = JSON.parse(result);
+        const parsed = parseHandlerJson(result);
         expect(parsed.error).toBeUndefined();
         expect(parsed.proposal_id).toBeDefined();
       }
@@ -312,7 +322,7 @@ describe("createLogMealHandler", () => {
         food_name: "chicken breast",
         portion_g: 200,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.meal_type).toBe("snack");
       expect(state.proposals[0].mealType).toBe("snack");
@@ -335,7 +345,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
       expect(parsed.proposal.canonical_name).toBe("chicken breast");
@@ -361,7 +371,7 @@ describe("createLogMealHandler", () => {
         portion_g: 150,
         meal_type: "dinner",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.food_id).toBe("food-beef-steak-001");
       expect(parsed.proposal.canonical_name).toBe("beef steak");
@@ -385,7 +395,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
       expect(parsed.proposal.canonical_name).toBe("chicken breast");
@@ -405,7 +415,7 @@ describe("createLogMealHandler", () => {
         food_name: "xyzzy_nonexistent_food_12345",
         portion_g: 100,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("not found in catalog");
@@ -461,7 +471,7 @@ describe("createLogMealHandler", () => {
         food_name: "test food",
         portion_g: 100,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.error).toBeDefined();
       expect(parsed.error).toContain("not found in catalog");
@@ -486,7 +496,7 @@ describe("createLogMealHandler", () => {
         food_name: "salmon",
         portion_g: 150,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.allergen_tags).toContain("fish");
       expect(state.proposals[0].allergenTags).toContain("fish");
@@ -507,7 +517,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.nutrition_summary.kcal).toBe(330);
       expect(parsed.nutrition_summary.protein_g).toBe(62);
@@ -543,7 +553,7 @@ describe("createLogMealHandler", () => {
         food_name: "CHICKEN BREAST",
         portion_g: 200,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.canonical_name).toBe("chicken breast");
     });
@@ -560,7 +570,7 @@ describe("createLogMealHandler", () => {
         food_name: "rice",
         portion_g: 150,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.food_id).toBe("food-rice-white-001");
       expect(state.proposals[0].matchType).toBe("alias");
@@ -583,7 +593,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.proposal_id).toBeDefined();
       expect(typeof parsed.proposal_id).toBe("string");
@@ -621,7 +631,7 @@ describe("createLogMealHandler", () => {
         food_name: "  chicken breast  ",
         portion_g: 200,
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
       expect(parsed.proposal.food_name).toBe("chicken breast");
     });
@@ -634,10 +644,10 @@ describe("createLogMealHandler", () => {
         userId: TEST_USER,
       });
 
-      const r1 = JSON.parse(
+      const r1 = parseHandlerJson(
         await handler({ food_name: "chicken breast", portion_g: 200 }),
       );
-      const r2 = JSON.parse(
+      const r2 = parseHandlerJson(
         await handler({ food_name: "white rice", portion_g: 150 }),
       );
 
@@ -695,7 +705,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.proposal_id).toBeDefined();
       expect(state.proposals.length).toBe(1);
@@ -710,21 +720,19 @@ describe("createLogMealHandler", () => {
   // ─── Error Handling ─────────────────────────────────────────────────────
 
   describe("error handling", () => {
-    it("returns error when proposal store fails", async () => {
+    it("propagates proposal store failures for dispatch infra_error mapping", async () => {
       const handler = createLogMealHandler({
         catalog: testCatalog(),
         proposalStore: throwingProposalStore("DB connection failed"),
         userId: TEST_USER,
       });
 
-      const result = await handler({
-        food_name: "chicken breast",
-        portion_g: 200,
-      });
-      const parsed = JSON.parse(result);
-      expect(parsed.error).toBeDefined();
-      expect(parsed.error).toContain("failed to create meal proposal");
-      expect(parsed.error).toContain("DB connection failed");
+      await expect(
+        handler({
+          food_name: "chicken breast",
+          portion_g: 200,
+        }),
+      ).rejects.toThrow(/DB connection failed/);
     });
 
     it("does not store proposal when resolver returns a miss", async () => {
@@ -761,7 +769,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
       });
 
-      expect(() => JSON.parse(result)).not.toThrow();
+      expect(() => parseHandlerJson(result)).not.toThrow();
     });
 
     it("error responses contain an error key", async () => {
@@ -773,7 +781,7 @@ describe("createLogMealHandler", () => {
       });
 
       const result = await handler({});
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.error).toBeDefined();
     });
 
@@ -790,7 +798,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "dinner",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.proposal_id).toBeDefined();
       expect(typeof parsed.proposal_id).toBe("string");
@@ -817,7 +825,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.message).toContain("Confirm?");
       expect(parsed.message).toContain("330 kcal");
@@ -838,7 +846,7 @@ describe("createLogMealHandler", () => {
         portion_g: 200,
         meal_type: "lunch",
       });
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
 
       expect(parsed.proposal.id).toBeDefined();
       expect(parsed.proposal.food_id).toBe("food-chicken-breast-001");
@@ -927,7 +935,7 @@ describe("createLogMealHandler", () => {
         user_id: "evil-user",
       });
 
-      const parsed = JSON.parse(result);
+      const parsed = parseHandlerJson(result);
       expect(parsed.proposal_id).toBeDefined();
 
       expect(state.proposals).toHaveLength(1);

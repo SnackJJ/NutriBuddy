@@ -122,7 +122,15 @@ export interface AgentEvent {
   readonly content?: string;
   /** act 的工具调用。 */
   readonly toolCall?: ToolCall;
-  /** observe 的工具返回。 */
+  /**
+   * Structured tool outcome (RFC 0002). Prefer this over toolResult for kind/gate.
+   * Optional only while older producers exist; turn/loop emit it for gated observes.
+   */
+  readonly toolOutcome?: import("./toolOutcome").ToolOutcome;
+  /**
+   * Deprecated compatibility string form (RFC 0002 §2.6) — derived from toolOutcome
+   * via renderToolOutcome for chat UI / role:tool messages.
+   */
   readonly toolResult?: ToolResult;
 }
 
@@ -196,10 +204,15 @@ export interface TerminalResult {
   readonly interactions?: readonly import("../lib/drugInteractions").DrugNutrientInteraction[];
 }
 
-/** 工具处理器：接收 args 返回字符串结果。 */
+/**
+ * 工具处理器：接收 args。
+ * RFC 0002 Slice C: production handlers return HandlerOutcome;
+ * string remains allowed for legacy eval/test stubs (dispatch bridges via
+ * normalizeLegacyToolResult).
+ */
 export type ToolHandler = (
   args: Readonly<Record<string, unknown>>,
-) => Promise<string>;
+) => Promise<string | import("./toolOutcome").HandlerOutcome>;
 
 // ── Typed final output contract (ADD §Loop / §Output gate) ──
 

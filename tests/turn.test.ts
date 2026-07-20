@@ -2069,8 +2069,10 @@ describe("output gate — numeric provenance and advisory structure", () => {
 });
 
 describe("write-proposal turn flow (issue #36)", () => {
-  function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
-    return JSON.stringify({
+  function makeLogMealPayload(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
       proposal_id: "proposal-001",
       message: "Log 200g chicken breast for lunch? Confirm?",
       proposal: {
@@ -2093,11 +2095,15 @@ describe("write-proposal turn flow (issue #36)", () => {
       },
       nutrition_summary: { kcal: 330, protein_g: 62, fat_g: 7.2, carbs_g: 0 },
       ...overrides,
-    });
+    };
   }
 
-  it("parses resolved proposal data from a log_meal response", () => {
-    const data = parseWriteProposalData(makeLogMealResult());
+  function makeLogMealResult(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify(makeLogMealPayload(overrides));
+  }
+
+  it("parses resolved proposal data from a structured log_meal ok.data payload", () => {
+    const data = parseWriteProposalData(makeLogMealPayload());
 
     expect(data).toEqual({
       proposalId: "proposal-001",
@@ -2119,13 +2125,15 @@ describe("write-proposal turn flow (issue #36)", () => {
 
   it("returns undefined for malformed proposal tool responses", () => {
     expect(parseWriteProposalData("not json")).toBeUndefined();
+    expect(parseWriteProposalData({ error: "failed" })).toBeUndefined();
     expect(
-      parseWriteProposalData(JSON.stringify({ error: "failed" })),
+      parseWriteProposalData({ proposal: { id: "proposal-001" } }),
     ).toBeUndefined();
     expect(
-      parseWriteProposalData(
-        JSON.stringify({ proposal: { id: "proposal-001" } }),
-      ),
+      parseWriteProposalData({
+        proposal_id: "a",
+        proposal: { id: "b", food_name: "x", portion_g: 1, meal_type: "snack" },
+      }),
     ).toBeUndefined();
   });
 

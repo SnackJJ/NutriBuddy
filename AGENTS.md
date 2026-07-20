@@ -24,7 +24,7 @@
 
 推迟：Knowledge RAG、context compaction、autonomous exact-match writes、multi-model fallback、free-text episodic memory。
 
-## 当前状态（2026-07-17）
+## 当前状态（2026-07-20）
 
 ### 已完成
 
@@ -37,15 +37,19 @@
   - Phase 1：原子 `commit_proposal_and_insert_meal` / `void_proposal`、`not_committable` 折叠、ConfirmPorts、JWT sub assert、`proposalConfirm` 抽取、structured `commit` lineage
   - Review follow-ups #73–#76 已合入
 - **Live smoke**：`npm run smoke:confirm` 在目标项目上 **PASSED**（migration 0009 已应用；commit / void / re-commit not_committable / missing）
+- **RFC 0002 — ToolOutcome（Implemented）**：
+  - `src/harness/toolOutcome.ts`：判别联合 + `toolGateFromOutcome` + `renderToolOutcome` + legacy bridge
+  - loop/turn 只吃 `ToolOutcome`；gate 发 `reasonCode`；`SCHEMA_VERSION` 1.7.0
+  - `log_meal` / `query_catalog` 直接 emit HandlerOutcome；infra → crash 终端（无 output/commit pass）
+  - K10/K11 断言 `reasonCode`；chat 仍经由派生 `toolResult`
 
 ### 进行中 / 下一步
 
-- **RFC 0002 — ToolOutcome**（`docs/rfc/0002-tool-outcome.md`）：工具结果从 stringly `ToolResult` 收敛为判别联合；tool gate 只读 `kind`，不再 JSON 字符串嗅探
-- 结构序列仍按 RFC 0001 Appendix B：Phase 3 events/tracer demotion → Phase 4 turn 分解 / 删 `runTurn` → Phase 5 catalog split → Phase 6 `createTurnAssembly` + legacy purge
+- 结构序列按 RFC 0001 Appendix B：**Phase 3** events/tracer demotion → Phase 4 turn 分解 / 删 `runTurn` → Phase 5 catalog split → Phase 6 `createTurnAssembly` + legacy purge
 
-### 仍有的债务（非 Phase 1 正确性 blocker）
+### 仍有的债务（非 Phase 1/2 正确性 blocker）
 
-- `ToolResult.result: string` + ad-hoc `parseHandlerResult`（RFC 0002 目标）
+- 派生 `toolResult` 仍保留至 UI 迁移（RFC 0002 §2.6）
 - `TraceEvent` / `AgentEvent` / `AnyTurnEvent` 三套词表并存；eval scorer 仍偏 TraceEvent
 - `runTurn` 与 `turn` 双入口遗留
 - ConfirmPorts 类型完备，但 utterance 路径仍是扁平 `TurnPorts` bag（Phase 6 assembly 收敛）

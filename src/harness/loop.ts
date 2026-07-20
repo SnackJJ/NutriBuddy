@@ -31,7 +31,6 @@ import type {
   ToolCall,
   ToolCallDelta,
   ToolHandler,
-  ToolResult,
   ToolSchema,
   TypedOutput,
 } from "./types";
@@ -42,6 +41,14 @@ import type { InteractionStore } from "../lib/drugInteractions";
 import type { QueryCatalog } from "../catalog/queryCatalog";
 import { SUBMIT_ANSWER_TOOL, parseSubmitAnswerArgs } from "./submitAnswer";
 import { computeCostUsd } from "./modelAdapter";
+import {
+  deriveToolResult,
+  INFRA_ERROR_PUBLIC_CAUSE,
+  isToolOutcomePayloadSerializable,
+  normalizeLegacyToolResult,
+  projectTypedOutput,
+  type ToolOutcome,
+} from "./toolOutcome";
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
@@ -133,37 +140,73 @@ function validateArgs(
   return null;
 }
 
-function toolDispatchError(name: string, result: string): ToolResult {
-  return { name, result, dispatchError: true };
-}
-
 async function dispatchTool(
   toolCall: ToolCall,
   tools: ReadonlyMap<string, ToolHandler> | undefined,
   toolSchemas: readonly ToolSchema[] | undefined,
-): Promise<ToolResult> {
-  const schema = toolSchemas?.find((s) => s.function.name === toolCall.name);
+): Promise<ToolOutcome> {
+  const name = toolCall.name;
+  const schema = toolSchemas?.find((s) => s.function.name === name);
 
-  const handler = tools?.get(toolCall.name);
+  const handler = tools?.get(name);
   if (!handler) {
-    return toolDispatchError(
-      toolCall.name,
-      `tool "${toolCall.name}" not found — no handler registered`,
-    );
+    return {
+      kind: "dispatch_error",
+      name,
+      message: `tool "${name}" not found — no handler registered`,
+    };
   }
 
   if (schema) {
     const validationError = validateArgs(toolCall.args, schema);
     if (validationError) {
-      return toolDispatchError(
-        toolCall.name,
-        `argument validation failed for "${toolCall.name}": ${validationError}`,
-      );
+      return {
+        kind: "dispatch_error",
+        name,
+        message: `argument validation failed for "${name}": ${validationError}`,
+      };
     }
   }
 
-  const result = await handler(toolCall.args);
-  return { name: toolCall.name, result };
+  try {
+    const raw = await handler(toolCall.args);
+    const outcome =
+      typeof raw === "string"
+        ? normalizeLegacyToolResult(name, raw)
+        : ({ ...raw, name } as ToolOutcome);
+    if (
+      (outcome.kind === "ok" ||
+        outcome.kind === "typed_miss" ||
+        outcome.kind === "typed_error") &&
+      !isToolOutcomePayloadSerializable(
+        outcome.data,
+        outcome.kind === "ok" ? outcome.observation : undefined,
+        outcome.kind === "typed_miss" ? outcome.candidates : undefined,
+      )
+    ) {
+      return {
+        kind: "infra_error",
+        name,
+        cause: INFRA_ERROR_PUBLIC_CAUSE,
+      };
+    }
+    return outcome;
+  } catch {
+    return {
+      kind: "infra_error",
+      name,
+      cause: INFRA_ERROR_PUBLIC_CAUSE,
+    };
+  }
+}
+
+function observeFromOutcome(step: number, outcome: ToolOutcome): AgentEvent {
+  return {
+    type: "observe",
+    step,
+    toolOutcome: outcome,
+    toolResult: deriveToolResult(outcome),
+  };
 }
 
 export interface RunTurnInput {
@@ -243,12 +286,19 @@ function createToolResultMessage(
   };
 }
 
-function describeSubmitAnswerResult(output: TypedOutput | null): string {
+function submitAnswerOutcome(output: TypedOutput | null): ToolOutcome {
   if (!output) {
-    return "Answer submitted (prose-only fallback)";
+    return { kind: "ok", name: SUBMIT_ANSWER_TOOL, data: null };
   }
-
-  return `Answer submitted with ${output.foodRefs.length} food ref(s) and ${output.ruleRefs.length} rule ref(s)`;
+  const data = projectTypedOutput(output);
+  if (!isToolOutcomePayloadSerializable(data)) {
+    return {
+      kind: "infra_error",
+      name: SUBMIT_ANSWER_TOOL,
+      cause: INFRA_ERROR_PUBLIC_CAUSE,
+    };
+  }
+  return { kind: "ok", name: SUBMIT_ANSWER_TOOL, data };
 }
 
 /**
@@ -395,15 +445,19 @@ export async function* run(
         yield { type: "act", step, toolCall: submitAnswerCall };
 
         const output = parseSubmitAnswerArgs(submitAnswerCall.args);
+        const outcome = submitAnswerOutcome(output);
 
-        yield {
-          type: "observe",
-          step,
-          toolResult: {
-            name: SUBMIT_ANSWER_TOOL,
-            result: describeSubmitAnswerResult(output),
-          },
-        };
+        yield observeFromOutcome(step, outcome);
+
+        if (outcome.kind === "infra_error") {
+          return {
+            reply:
+              "Something went wrong while running a tool. Please try again.",
+            steps: step,
+            stopReason: "crash",
+            interactions,
+          };
+        }
 
         reply = output?.prose ?? response.content;
 
@@ -430,19 +484,24 @@ export async function* run(
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
-        const toolResult = await dispatchTool(
-          tc,
-          tools,
-          toolSchemas,
+        const outcome = await dispatchTool(tc, tools, toolSchemas);
+
+        yield observeFromOutcome(step, outcome);
+
+        working.push(
+          createToolResultMessage(tc, deriveToolResult(outcome).result),
         );
 
-        yield {
-          type: "observe",
-          step,
-          toolResult,
-        };
-
-        working.push(createToolResultMessage(tc, toolResult.result));
+        // RFC 0002 §2.5: stop remaining tool calls; no later model step
+        if (outcome.kind === "infra_error") {
+          return {
+            reply:
+              "Something went wrong while running a tool. Please try again.",
+            steps: step,
+            stopReason: "crash",
+            interactions,
+          };
+        }
       }
       // 工具调用后继续循环（不在此步交卷）
       continue;

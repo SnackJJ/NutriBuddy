@@ -9,7 +9,6 @@ import type {
   ModelTier,
   ModelUsage,
   TerminalResult,
-  ToolResult,
   TypedOutput,
   WriteProposalData,
 } from "./types";
@@ -29,11 +28,15 @@ import {
   handleProposalConfirm,
   type ProposalConfirmOutcome,
 } from "./proposalConfirm";
+import {
+  toolGateFromOutcome,
+  type ToolOutcome,
+} from "./toolOutcome";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.6.0";
+export const SCHEMA_VERSION = "1.7.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -164,6 +167,8 @@ export interface TurnGateVerdictEvent extends TurnEvent {
   readonly verdict: GateVerdict;
   readonly checkName: string;
   readonly evidence: string;
+  /** Stable tool-gate reason code (RFC 0002); required for checkpoint "tool". */
+  readonly reasonCode?: string;
 }
 
 export interface TurnStartEvent extends TurnEvent {
@@ -214,13 +219,12 @@ type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
 type GateVerdictEventDetails = Pick<
   TurnGateVerdictEvent,
-  "checkpoint" | "verdict" | "checkName" | "evidence"
+  "checkpoint" | "verdict" | "checkName" | "evidence" | "reasonCode"
 >;
 type CommitGateVerdict = Omit<GateVerdictEventDetails, "checkpoint">;
 
 const PRE_GATE_INPUT_CHECK = "pre_gate_input_check";
 const COMMIT_GATE_CHECK = "commit_gate_check";
-const TOOL_GATE_CHECK = "tool_gate_check";
 
 function createEventMetadata(clock: Clock): NextEventMetadata {
   let seq = 0;
@@ -406,84 +410,8 @@ function createTurnModelCallEvent(
   };
 }
 
-/**
- * Typed handler results the tool gate distinguishes (issue #56):
- * - typed_error: the handler returned a structured error (query_catalog
- *   `{type:"error"}`, log_meal `{error:...}`) — verdict "error".
- * - typed_miss: a resolver miss carrying `match_type: miss_*` — the designed
- *   clarification flow (#44), verdict "pass" with distinguishing evidence.
- */
-interface ParsedHandlerResult {
-  readonly kind: "typed_error" | "typed_miss";
-  readonly message: string;
-}
-
-function parseHandlerResult(result: string): ParsedHandlerResult | null {
-  try {
-    const parsed: unknown = JSON.parse(result);
-    if (!isRecord(parsed)) {
-      return null;
-    }
-
-    if (parsed.type === "error") {
-      const message = readString(parsed, "message");
-      return { kind: "typed_error", message: message ?? "typed error result" };
-    }
-
-    const error = readString(parsed, "error");
-    if (error === undefined) {
-      return null;
-    }
-
-    const matchType = readString(parsed, "match_type");
-    if (matchType?.startsWith("miss_")) {
-      return { kind: "typed_miss", message: error };
-    }
-
-    return { kind: "typed_error", message: error };
-  } catch {
-    return null;
-  }
-}
-
-function createToolGateVerdict(
-  toolResult: ToolResult,
-): GateVerdictEventDetails {
-  if (toolResult.dispatchError) {
-    return {
-      checkpoint: "tool",
-      verdict: "error",
-      checkName: TOOL_GATE_CHECK,
-      evidence: `Tool ${toolResult.name} dispatch error: ${toolResult.result}`,
-    };
-  }
-
-  const handlerResult = parseHandlerResult(toolResult.result);
-
-  if (handlerResult?.kind === "typed_error") {
-    return {
-      checkpoint: "tool",
-      verdict: "error",
-      checkName: TOOL_GATE_CHECK,
-      evidence: `Tool ${toolResult.name} returned a typed error: ${handlerResult.message}`,
-    };
-  }
-
-  if (handlerResult?.kind === "typed_miss") {
-    return {
-      checkpoint: "tool",
-      verdict: "pass",
-      checkName: TOOL_GATE_CHECK,
-      evidence: `Tool ${toolResult.name} returned a typed miss (clarification): ${handlerResult.message}`,
-    };
-  }
-
-  return {
-    checkpoint: "tool",
-    verdict: "pass",
-    checkName: TOOL_GATE_CHECK,
-    evidence: `Tool ${toolResult.name} executed successfully`,
-  };
+function createToolGateVerdict(outcome: ToolOutcome): GateVerdictEventDetails {
+  return toolGateFromOutcome(outcome);
 }
 
 /** Max retry attempts for the consolidated output gate (issue #47).
@@ -780,28 +708,6 @@ function createOutputGateBlockedResult(
   };
 }
 
-function isObservationQueryResult(value: unknown): value is {
-  readonly type: "observation";
-  readonly observation: Observation;
-} {
-  return (
-    isRecord(value) && value.type === "observation" && "observation" in value
-  );
-}
-
-function parseQueryCatalogObservation(result: string): Observation | null {
-  try {
-    const parsed: unknown = JSON.parse(result);
-    if (!isObservationQueryResult(parsed)) {
-      return null;
-    }
-
-    return parsed.observation;
-  } catch {
-    return null;
-  }
-}
-
 function readString(
   record: Record<string, unknown>,
   key: string,
@@ -824,44 +730,55 @@ function readStringArray(
   return undefined;
 }
 
+/**
+ * Structural validator for log_meal proposal payloads (RFC 0002).
+ * Accepts only the structured proposalResponse object (ok.data) — no result-string parse.
+ */
 export function parseWriteProposalData(
-  toolResult: string,
+  data: unknown,
 ): WriteProposalData | undefined {
-  try {
-    const parsed: unknown = JSON.parse(toolResult);
-    if (!isRecord(parsed) || !isRecord(parsed.proposal)) {
-      return undefined;
-    }
-
-    const proposal = parsed.proposal;
-    const proposalId = readString(proposal, "id");
-    const foodName = readString(proposal, "food_name");
-    const portionG = readNumber(proposal, "portion_g");
-    const mealType = readString(proposal, "meal_type");
-    if (!proposalId || !foodName || portionG === undefined || !mealType) {
-      return undefined;
-    }
-
-    const nutrition = isRecord(proposal.nutrition) ? proposal.nutrition : {};
-    return {
-      proposalId,
-      foodId: readString(proposal, "food_id"),
-      foodName,
-      canonicalName: readString(proposal, "canonical_name"),
-      portionG,
-      mealType,
-      kcal: readNumber(nutrition, "kcal"),
-      proteinG: readNumber(nutrition, "protein_g"),
-      fatG: readNumber(nutrition, "fat_g"),
-      carbsG: readNumber(nutrition, "carbs_g"),
-      nutritionSource: readString(proposal, "nutrition_source") ?? "",
-      matchType: readString(proposal, "match_type"),
-      allergenTags: readStringArray(proposal, "allergen_tags"),
-      createdAt: readString(proposal, "created_at") ?? "",
-    };
-  } catch {
+  if (!isRecord(data) || !isRecord(data.proposal)) {
     return undefined;
   }
+
+  const topProposalId = readString(data, "proposal_id");
+  const proposal = data.proposal;
+  const nestedId = readString(proposal, "id");
+  const foodName = readString(proposal, "food_name");
+  const portionG = readNumber(proposal, "portion_g");
+  const mealType = readString(proposal, "meal_type");
+  const createdAt = readString(proposal, "created_at");
+  const nutritionSource = readString(proposal, "nutrition_source");
+  if (
+    !topProposalId ||
+    !nestedId ||
+    topProposalId !== nestedId ||
+    !foodName ||
+    portionG === undefined ||
+    !mealType ||
+    createdAt === undefined ||
+    nutritionSource === undefined
+  ) {
+    return undefined;
+  }
+
+  const nutrition = isRecord(proposal.nutrition) ? proposal.nutrition : {};
+  return {
+    proposalId: nestedId,
+    foodId: readString(proposal, "food_id"),
+    foodName,
+    canonicalName: readString(proposal, "canonical_name"),
+    portionG,
+    mealType,
+    kcal: readNumber(nutrition, "kcal"),
+    proteinG: readNumber(nutrition, "protein_g"),
+    fatG: readNumber(nutrition, "fat_g"),
+    carbsG: readNumber(nutrition, "carbs_g"),
+    nutritionSource,
+    matchType: readString(proposal, "match_type"),
+    allergenTags: readStringArray(proposal, "allergen_tags"),
+    createdAt,
+  };
 }
 
 interface UtteranceTurnOutput {
@@ -921,26 +838,41 @@ async function* runUtteranceTurn(
         yield mcEvent;
       }
 
-      // Emit tool gate verdict after each tool observation
-      if (next.value.type === "observe" && next.value.toolResult) {
+      // Emit tool gate verdict after each tool observation (RFC 0002)
+      if (next.value.type === "observe" && next.value.toolOutcome) {
+        const outcome = next.value.toolOutcome;
         yield createGateVerdictEvent(
-          createToolGateVerdict(next.value.toolResult),
+          createToolGateVerdict(outcome),
           nextMetadata,
         );
 
-        if (next.value.toolResult.name === QUERY_CATALOG_TOOL) {
-          const observation = parseQueryCatalogObservation(
-            next.value.toolResult.result,
-          );
-          if (observation) {
-            observations.push(observation);
-          }
+        if (
+          outcome.kind === "ok" &&
+          outcome.name === QUERY_CATALOG_TOOL &&
+          outcome.observation
+        ) {
+          observations.push(outcome.observation);
         }
 
-        if (next.value.toolResult.name === "log_meal") {
-          lastWriteProposalData = parseWriteProposalData(
-            next.value.toolResult.result,
-          );
+        if (outcome.kind === "ok" && outcome.name === "log_meal") {
+          lastWriteProposalData = parseWriteProposalData(outcome.data);
+        }
+
+        // infra_error: stop consuming further loop events; crash terminal
+        if (outcome.kind === "infra_error") {
+          result = {
+            reply:
+              "Something went wrong while running a tool. Please try again.",
+            steps: next.value.step,
+            stopReason: "crash",
+            interactions: undefined,
+          };
+          // Drain remaining generator events without processing
+          let drain = await gen.next();
+          while (!drain.done) {
+            drain = await gen.next();
+          }
+          return { result, writeProposal: lastWriteProposalData };
         }
       }
 
@@ -1258,12 +1190,31 @@ export async function* turn(
     }
   }
 
-  if (writeProposal && result.stopReason !== "gate_blocked") {
+  // RFC 0002: crash must not be overridden by a captured write proposal
+  if (
+    writeProposal &&
+    result.stopReason !== "gate_blocked" &&
+    result.stopReason !== "crash"
+  ) {
     result = {
       ...result,
       stopReason: "write_proposal",
       proposal: writeProposal,
     };
+  }
+
+  // RFC 0002 §2.5: tool-path infra_error → crash terminal without output/commit
+  // "pass". Confirm-path fail-closed (RFC 0001 F1) also uses stopReason crash
+  // but still emits its commit error verdict via confirmCommitVerdict.
+  if (result.stopReason === "crash") {
+    if (confirmCommitVerdict) {
+      yield createGateVerdictEvent(
+        { checkpoint: "commit", ...confirmCommitVerdict },
+        nextMetadata,
+      );
+    }
+    yield createTurnEndEvent(result, nextMetadata);
+    return result;
   }
 
   const isGateBlocked = result.stopReason === "gate_blocked";

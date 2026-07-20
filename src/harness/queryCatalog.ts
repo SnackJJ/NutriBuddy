@@ -27,6 +27,7 @@ import {
 } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
 import type { Tracer } from "./tracer";
+import type { HandlerOutcome, JsonValue } from "./toolOutcome";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -96,15 +97,18 @@ function availableTemplateText(queryCatalog: QueryCatalog): string {
   return queryCatalog.templateList.map((template) => template.id).join(", ");
 }
 
-function errorResponse(templateId: string, message: string): string {
-  const error: QueryCatalogError = {
+function errorResponse(
+  templateId: string,
+  message: string,
+  availableTemplates: readonly string[] = [],
+): HandlerOutcome {
+  const data: JsonValue = {
     type: "error",
     templateId,
     message,
-    availableTemplates: [],
+    availableTemplates: [...availableTemplates],
   };
-
-  return JSON.stringify(error);
+  return { kind: "typed_error", message, data };
 }
 
 function templateParams(
@@ -160,19 +164,17 @@ function capObservationForModel(
   };
 }
 
-function observationResponse(
+function observationOutcome(
   observation: Observation,
   rendered: RenderedObservation,
-): {
-  readonly type: "observation";
-  readonly text: string;
-  readonly observation: Observation;
-} {
-  return {
+): HandlerOutcome {
+  const capped = capObservationForModel(observation, rendered);
+  const data: JsonValue = {
     type: "observation",
     text: rendered.text,
-    observation: capObservationForModel(observation, rendered),
+    observation: capped as unknown as JsonValue,
   };
+  return { kind: "ok", data, observation: capped };
 }
 
 // ─── 工具工厂 ─────────────────────────────────────────────────────────────
@@ -189,8 +191,11 @@ export function createQueryCatalogHandler(
   deps: QueryCatalogHandlerDeps,
 ): ToolHandler {
   const { queryCatalog, runner, userId, tracer } = deps;
+  const available = queryCatalog.templateList.map((t) => t.id);
 
-  return async (args: Readonly<Record<string, unknown>>): Promise<string> => {
+  return async (
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<HandlerOutcome> => {
     const templateId = args.template_id;
     if (typeof templateId !== "string" || templateId.trim().length === 0) {
       return errorResponse(
@@ -198,6 +203,7 @@ export function createQueryCatalogHandler(
         "Missing or invalid template_id: must be a non-empty string. " +
           "Available templates: " +
           availableTemplateText(queryCatalog),
+        available,
       );
     }
 
@@ -213,16 +219,27 @@ export function createQueryCatalogHandler(
       if (result.type === "observation") {
         const rendered = renderObservationText(result.observation);
         recordObservationTrace(tracer, result.observation, rendered);
-
-        return JSON.stringify(
-          observationResponse(result.observation, rendered),
-        );
+        return observationOutcome(result.observation, rendered);
       }
 
-      return JSON.stringify(result);
+      // Structured catalog error (unknown template / param validation)
+      return {
+        kind: "typed_error",
+        message: result.message,
+        data: {
+          type: "error",
+          templateId: result.templateId,
+          message: result.message,
+          availableTemplates: [...result.availableTemplates],
+        },
+      };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return errorResponse(templateId, `Query execution failed: ${message}`);
+      // food_lookup unknown id is a business typed_error (RFC §8), not infra
+      if (err instanceof FoodNotFoundError) {
+        return errorResponse(templateId, err.message, available);
+      }
+      // QueryRunner / other throws → rethrow → dispatch maps to infra_error
+      throw err;
     }
   };
 }
@@ -364,6 +381,16 @@ function makeObservation(
 
 // ── per-template handlers ────────────────────────────────────────────────
 
+/** Domain miss for unknown catalog food id — not infrastructure. */
+export class FoodNotFoundError extends Error {
+  readonly foodId: string;
+  constructor(foodId: string) {
+    super(`Food not found in catalog: ${foodId}`);
+    this.name = "FoodNotFoundError";
+    this.foodId = foodId;
+  }
+}
+
 function runFoodLookup(
   catalog: Catalog,
   params: Record<string, unknown>,
@@ -376,7 +403,7 @@ function runFoodLookup(
 
   const food = catalog.allFoods.find((f) => f.id === foodId);
   if (!food) {
-    throw new Error(`Food not found in catalog: ${foodId}`);
+    throw new FoodNotFoundError(foodId);
   }
 
   const scale = portionG / 100;
