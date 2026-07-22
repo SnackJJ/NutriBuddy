@@ -1,6 +1,6 @@
 # NutriBuddy — Project Briefing
 
-> **Archived.** Snapshot prepared for an early codebase review (2026-07). Implementation status and module lists are outdated. Architecture source of truth is `docs/ADD.md`; product context lives in `docs/PRD-v2.md`. Kept only as historical reference.
+> **Archived.** Snapshot prepared for an early codebase review (2026-07). Implementation status and module lists are outdated. Architecture source of truth is `docs/ADD.md`; product context lives in `docs/PRD-v2.md`. PRD v1 is `docs/archive/PRD.md`. Kept only as historical reference.
 
 > Original note: Review briefing for the then-current codebase. If this briefing or older PRDs conflict with the ADD, follow the ADD.
 
@@ -165,7 +165,7 @@ tests/                   — 21 test files (Vitest)
 docs/
   ADD.md                 — Architectural source of truth
   PRD-v2.md              — Product goals and milestone context; subordinate to ADD
-  PRD.md                 — Original PRD
+  archive/PRD.md         — Original PRD (archived)
   adr/0001-main-agent-plus-retrieval-subagent.md  — Topology decision
   agents/                — Issue tracker, triage labels, domain config
 ```

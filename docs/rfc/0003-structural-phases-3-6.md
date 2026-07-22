@@ -1,6 +1,7 @@
 # RFC 0003 — Structural Phases 3–6 (tickets)
 
 > Status: **Implemented** (2026-07-20).  
+> **Not always-on agent context** — open only when working structural package boundaries or this history.  
 > Authority: `docs/rfc/0001-phase1-confirm-safety.md` Appendix B; non-goals of RFC 0002.  
 > Numbering: **structural** Phases 3–6 (not ADD product Phase 0–4).
 

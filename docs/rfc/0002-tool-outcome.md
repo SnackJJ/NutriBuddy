@@ -1,6 +1,7 @@
 # RFC 0002 — Phase 2 ToolOutcome（工具结果类型收敛）
 
 > Status: **Implemented** (2026-07-20) — Slices A–C landed; D no-op (scorer already name-based).  
+> **Not always-on agent context** — open only when working ToolOutcome / handler path or its history.  
 > Note: `ToolHandler` may still return `string` for **eval/test stubs only**; production handlers return `HandlerOutcome`. Dispatch bridges strings via `normalizeLegacyToolResult`.  
 > Prior: Frozen 2026-07-17; amended 2026-07-19; **Codex gpt-5.6-sol xhigh** reviews applied 2026-07-20.  
 > Architecture source of truth: `docs/ADD.md`  

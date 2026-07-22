@@ -1,7 +1,9 @@
 # NutriBuddy — PRD v2
 
+> **Role: product context, not architecture. Not always-on agent context.**
+>
 > 2026-06-25，经 `/grill-with-docs` 全面挑战原 PRD 后重写。
-> 原 PRD v1 保留在 `docs/PRD.md`，作为历史参考。
+> 原 PRD v1 在 `docs/archive/PRD.md`（历史参考 only）。
 >
 > 2026-07-05 架构收敛：`docs/ADD.md` 是当前架构基准。本文保留产品目标与里程碑语境；凡与 ADD 冲突处，以 ADD 为准。
 

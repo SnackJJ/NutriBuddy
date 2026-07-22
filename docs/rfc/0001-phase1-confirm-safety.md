@@ -1,6 +1,7 @@
 # RFC 0001 — Step 0 安全网 + Phase 1 Confirm 路径安全
 
 > Status: **Implemented** (merged PR #72, 2026-07-17).  
+> **Not always-on agent context** — open only when working this path or its history.  
 > Architecture source of truth: `docs/ADD.md`  
 > Scope: Step 0 + Phase 1 only. Phases 2–6 are sequenced in Appendix B; Phase 2 design is `docs/rfc/0002-tool-outcome.md`.  
 > Precedence: conflicts with AGENTS/BRIEFING/PRD status notes resolve to this RFC for Phase 1 work.  

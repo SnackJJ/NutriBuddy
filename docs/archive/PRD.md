@@ -1,5 +1,7 @@
 # NutriBuddy — PRD / 项目骨架
 
+> **Archived.** Historical PRD v1. Architecture SoT is `docs/ADD.md`; product context is `docs/PRD-v2.md`. Do not treat this file as active requirements.
+>
 > **一句话定位**：用 RL 让一个端侧小模型，在一个自建的 agent harness 里，可靠地扮演个人营养顾问。
 > **营养是 benchmark，harness 是手段，on-device 是终点。**
 
