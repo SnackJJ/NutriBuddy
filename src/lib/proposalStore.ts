@@ -36,7 +36,10 @@ interface ProposalDbRow {
   readonly created_at: string;
 }
 
-function rowToProposal(row: ProposalDbRow): Proposal {
+function rowToProposal(
+  row: ProposalDbRow,
+  allergenCoverage: Proposal["allergenCoverage"] = "reviewed",
+): Proposal {
   return {
     id: row.id,
     userId: row.user_id,
@@ -52,6 +55,9 @@ function rowToProposal(row: ProposalDbRow): Proposal {
     nutritionSource: row.nutrition_source,
     matchType: row.match_type as Proposal["matchType"],
     allergenTags: row.allergen_tags ?? [],
+    // Not persisted yet (no migration): callers pass through from ProposalInput
+    // on store(); get()/legacy rows default to reviewed.
+    allergenCoverage,
     status: row.status as ProposalStatus,
     createdAt: row.created_at,
   };
@@ -76,6 +82,7 @@ function inputToRow(
     carbs_g: params.carbsG,
     nutrition_source: params.nutritionSource,
     match_type: params.matchType,
+    // Keep NOT NULL text[] contract; coverage lives on the tool/terminal payload.
     allergen_tags: [...params.allergenTags],
     created_at: now,
   };
@@ -199,7 +206,11 @@ export function createSupabaseProposalStore(
         throw new Error(`Failed to store proposal: ${error.message}`);
       }
 
-      return rowToProposal(data as ProposalDbRow);
+      // Pass coverage through from input — not a DB column yet (no migration).
+      return rowToProposal(
+        data as ProposalDbRow,
+        params.allergenCoverage ?? "reviewed",
+      );
     },
 
     async get(id: string): Promise<Proposal | undefined> {

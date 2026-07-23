@@ -21,6 +21,7 @@ import {
   type UserContext,
 } from "./gate";
 import type { DrugNutrientInteraction } from "../lib/drugInteractions";
+import { projectProposalSafetyNotices } from "../lib/proposalSafety";
 import type { Observation } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
 import type { MealLogStore, ProposalStore } from "./logMeal";
@@ -36,7 +37,7 @@ import {
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.7.0";
+export const SCHEMA_VERSION = "1.8.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -777,8 +778,18 @@ export function parseWriteProposalData(
     nutritionSource,
     matchType: readString(proposal, "match_type"),
     allergenTags: readStringArray(proposal, "allergen_tags"),
+    allergenCoverage: readAllergenCoverage(proposal, "allergen_coverage"),
     createdAt,
   };
+}
+
+function readAllergenCoverage(
+  record: Record<string, unknown>,
+  key: string,
+): "reviewed" | "unreviewed" | undefined {
+  const value = record[key];
+  if (value === "reviewed" || value === "unreviewed") return value;
+  return undefined;
 }
 
 interface UtteranceTurnOutput {
@@ -1196,10 +1207,16 @@ export async function* turn(
     result.stopReason !== "gate_blocked" &&
     result.stopReason !== "crash"
   ) {
+    // RFC 0004 §6.4: project confirm-card safety at the turn seam
+    const safetyNotices = projectProposalSafetyNotices(
+      writeProposal,
+      result.interactions ?? [],
+    );
     result = {
       ...result,
       stopReason: "write_proposal",
       proposal: writeProposal,
+      safetyNotices,
     };
   }
 

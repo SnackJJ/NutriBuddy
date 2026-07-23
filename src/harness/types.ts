@@ -167,6 +167,8 @@ export interface WriteProposalData {
   readonly nutritionSource: string;
   readonly matchType?: string;
   readonly allergenTags?: readonly string[];
+  /** When "unreviewed", tags are not authoritative (confirm card must warn). */
+  readonly allergenCoverage?: "reviewed" | "unreviewed";
   readonly createdAt: string;
 }
 
@@ -202,6 +204,12 @@ export interface TerminalResult {
    * lexical backstop without re-querying (issue #47).
    */
   readonly interactions?: readonly import("../lib/drugInteractions").DrugNutrientInteraction[];
+  /**
+   * Proposal-relevant safety notices projected at the turn seam
+   * (RFC 0004 §6.4). Present on write_proposal terminals so every surface
+   * renders the same typed notices without re-deriving relevance in the UI.
+   */
+  readonly safetyNotices?: readonly import("../lib/proposalSafety").ProposalSafetyNotice[];
 }
 
 /**

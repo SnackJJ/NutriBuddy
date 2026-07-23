@@ -3,6 +3,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChatMessage, WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
+import type { DrugNutrientInteraction } from "@/lib/drugInteractions";
+import {
+  matchQualityLabel,
+  projectProposalSafetyNotices,
+  type ProposalSafetyNotice,
+} from "@/lib/proposalSafety";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 import type { Session } from "@supabase/supabase-js";
 
@@ -56,6 +62,8 @@ interface StreamTerminalResult {
   readonly steps?: number;
   readonly stopReason?: string;
   readonly proposal?: WriteProposalData;
+  readonly interactions?: readonly DrugNutrientInteraction[];
+  readonly safetyNotices?: readonly ProposalSafetyNotice[];
 }
 
 /** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
@@ -71,6 +79,8 @@ interface StreamEvent {
   readonly stopReason?: string;
   readonly output?: unknown;
   readonly proposal?: WriteProposalData;
+  readonly interactions?: readonly DrugNutrientInteraction[];
+  readonly safetyNotices?: readonly ProposalSafetyNotice[];
   readonly checkpoint?: string;
   readonly verdict?: string;
   readonly checkName?: string;
@@ -85,6 +95,8 @@ interface AssistantStreamState {
   stopReason: string;
   gateReasons: string[];
   writeProposal?: WriteProposalData;
+  interactions: DrugNutrientInteraction[];
+  safetyNotices: ProposalSafetyNotice[];
 }
 
 interface AssistantStreamHandlers {
@@ -98,6 +110,8 @@ function createAssistantStreamState(): AssistantStreamState {
     toolCalls: [],
     stopReason: "",
     gateReasons: [],
+    interactions: [],
+    safetyNotices: [],
   };
 }
 
@@ -254,6 +268,14 @@ function applyTerminalResult(
 
   if (result.stopReason === "write_proposal" && result.proposal) {
     state.writeProposal = result.proposal;
+  }
+
+  if (result.interactions && result.interactions.length > 0) {
+    state.interactions = [...result.interactions];
+  }
+
+  if (result.safetyNotices) {
+    state.safetyNotices = [...result.safetyNotices];
   }
 }
 
@@ -506,26 +528,37 @@ function MessageBubble({
   );
 }
 
-/** Write-proposal confirmation card (issue #39 / mobile thumb targets #83). */
+/** Write-proposal confirmation card (issue #39 / mobile thumb targets #83).
+ *  RFC 0004 §6.1 / §6.4: match quality + safety notices before confirm. */
 function ProposalCard({
   proposal,
+  safetyNotices,
   onConfirm,
   onReject,
   confirming,
 }: {
   proposal: WriteProposalData;
+  safetyNotices: readonly ProposalSafetyNotice[];
   onConfirm: (feedback?: string) => void;
   onReject: () => void;
   confirming: boolean;
 }) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const quality = matchQualityLabel(proposal.matchType);
+  const hasSafety = safetyNotices.length > 0;
 
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
+    <div
+      className={`rounded-xl border p-4 shadow-sm ${
+        hasSafety
+          ? "border-amber-300 bg-amber-50"
+          : "border-blue-200 bg-blue-50"
+      }`}
+    >
       <div className="mb-3 flex items-center gap-2">
         <svg
-          className="h-5 w-5 shrink-0 text-blue-600"
+          className={`h-5 w-5 shrink-0 ${hasSafety ? "text-amber-700" : "text-blue-600"}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -538,17 +571,48 @@ function ProposalCard({
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
           />
         </svg>
-        <span className="text-sm font-semibold text-blue-800">
+        <span
+          className={`text-sm font-semibold ${hasSafety ? "text-amber-900" : "text-blue-800"}`}
+        >
           Confirm Meal Log
         </span>
       </div>
 
-      <div className="mb-4 space-y-1 text-sm text-blue-900">
+      <div
+        className={`mb-4 space-y-1 text-sm ${hasSafety ? "text-amber-950" : "text-blue-900"}`}
+      >
         <p>
           <span className="font-medium">{proposal.foodName}</span> —{" "}
           {proposal.portionG}g ({proposal.mealType})
         </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-blue-700">
+        {proposal.canonicalName &&
+          proposal.canonicalName !== proposal.foodName && (
+            <p className="text-xs opacity-80">
+              Catalog: {proposal.canonicalName}
+            </p>
+          )}
+        {quality && (
+          <p
+            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+              quality.kind === "estimated"
+                ? "bg-yellow-100 text-yellow-900"
+                : "bg-orange-100 text-orange-900"
+            }`}
+            data-match-quality={quality.kind}
+          >
+            {quality.label}
+            {proposal.matchType ? ` (${proposal.matchType})` : ""}
+          </p>
+        )}
+        <div
+          className={`flex flex-wrap gap-x-4 gap-y-0.5 text-xs ${
+            quality?.kind === "estimated"
+              ? "text-amber-800/80"
+              : hasSafety
+                ? "text-amber-800"
+                : "text-blue-700"
+          }`}
+        >
           {proposal.kcal !== undefined && <span>{proposal.kcal} kcal</span>}
           {proposal.proteinG !== undefined && (
             <span>{proposal.proteinG}g protein</span>
@@ -559,9 +623,35 @@ function ProposalCard({
           )}
         </div>
         {proposal.nutritionSource && (
-          <p className="text-xs text-blue-500">
+          <p className="text-xs opacity-70">
             Source: {proposal.nutritionSource}
           </p>
+        )}
+        {hasSafety && (
+          <div
+            className="mt-2 space-y-1.5 rounded-lg border border-amber-400 bg-amber-100/80 p-3"
+            role="status"
+            aria-live="polite"
+            data-safety-notices="true"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-950">
+              Review before confirm
+            </p>
+            <ul className="space-y-1 text-xs text-amber-950">
+              {safetyNotices.map((notice, i) => (
+                <li key={`${notice.kind}-${notice.detail}-${i}`}>
+                  <span className="font-medium">{notice.title}</span>
+                  {": "}
+                  {notice.detail}
+                  {notice.severity === "high"
+                    ? " — high severity"
+                    : notice.severity === "moderate"
+                      ? " — moderate"
+                      : " — low"}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -626,6 +716,9 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingProposal, setPendingProposal] =
     useState<WriteProposalData | null>(null);
+  const [pendingSafetyNotices, setPendingSafetyNotices] = useState<
+    readonly ProposalSafetyNotice[]
+  >([]);
   const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -739,6 +832,15 @@ export default function ChatPage() {
 
         if (streamState.writeProposal) {
           setPendingProposal(streamState.writeProposal);
+          // Prefer turn-seam projection; fall back only if terminal omitted notices.
+          setPendingSafetyNotices(
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
+          );
         }
       }
 
@@ -806,6 +908,7 @@ export default function ChatPage() {
         };
         setMessages((prev) => [...prev, confirmMsg]);
         setPendingProposal(null);
+        setPendingSafetyNotices([]);
       } catch (err) {
         setError(
           err instanceof Error
@@ -903,6 +1006,7 @@ export default function ChatPage() {
                 <div className="w-full max-w-full sm:max-w-[75%]">
                   <ProposalCard
                     proposal={pendingProposal}
+                    safetyNotices={pendingSafetyNotices}
                     onConfirm={(fb) => handleConfirmProposal(true, fb)}
                     onReject={() => handleConfirmProposal(false)}
                     confirming={confirming}

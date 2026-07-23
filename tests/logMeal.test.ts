@@ -66,6 +66,7 @@ function memProposalStore(state?: MemProposalState): {
           nutritionSource: params.nutritionSource,
           matchType: params.matchType,
           allergenTags: params.allergenTags,
+          allergenCoverage: params.allergenCoverage ?? "reviewed",
           status: "proposed",
           createdAt: new Date("2026-06-26T12:00:00Z").toISOString(),
         };
@@ -151,11 +152,11 @@ describe("createLogMealHandler", () => {
     });
     const parsed = parseHandlerJson(result);
 
-    // The record path degrades unreviewed tags to [] — the recommendation
-    // surface is guarded by the output entity check reading the catalog.
+    // Unreviewed catalog tags store [] (NOT NULL) but mark allergenCoverage.
     expect(parsed.error).toBeUndefined();
     expect(state.proposals).toHaveLength(1);
     expect(state.proposals[0].allergenTags).toEqual([]);
+    expect(state.proposals[0].allergenCoverage).toBe("unreviewed");
   });
 
   // ─── Input Validation ──────────────────────────────────────────────────

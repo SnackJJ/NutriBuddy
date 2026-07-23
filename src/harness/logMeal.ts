@@ -53,7 +53,13 @@ export interface ProposalInput {
   readonly carbsG: number;
   readonly nutritionSource: string;
   readonly matchType: ResolvedMatchType;
+  /**
+   * Stored tags for the ledger (always an array for NOT NULL column).
+   * Pair with allergenCoverage: unreviewed keeps [] but must not look "safe".
+   */
   readonly allergenTags: readonly string[];
+  /** reviewed = tags are authoritative; unreviewed = catalog never audited tags. Defaults to reviewed. */
+  readonly allergenCoverage?: "reviewed" | "unreviewed";
 }
 
 /** 已持久化的不可变提案。 */
@@ -72,6 +78,7 @@ export interface Proposal {
   readonly nutritionSource: string;
   readonly matchType: ResolvedMatchType;
   readonly allergenTags: readonly string[];
+  readonly allergenCoverage?: "reviewed" | "unreviewed";
   readonly status: ProposalStatus;
   readonly createdAt: string;
 }
@@ -267,6 +274,7 @@ function proposalResponse(proposal: Proposal): HandlerOutcome {
       nutrition_source: proposal.nutritionSource,
       match_type: proposal.matchType,
       allergen_tags: [...proposal.allergenTags],
+      allergen_coverage: proposal.allergenCoverage ?? "reviewed",
     },
     nutrition_summary: {
       kcal: proposal.kcal,
@@ -430,10 +438,10 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
       carbsG: scaled.carbsG,
       nutritionSource: resolved.catalogSnapshotId,
       matchType: foodRef.matchType,
-      // Record path: unreviewed tags degrade to [] in the ledger row.
-      // The recommendation surface is protected by the output entity
-      // check, which reads the catalog entry itself (issue #66).
+      // DB column is NOT NULL text[]; preserve unreviewed via allergenCoverage.
       allergenTags: foodRef.allergenTags ?? [],
+      allergenCoverage:
+        foodRef.allergenTags === undefined ? "unreviewed" : "reviewed",
     });
 
     return proposalResponse(proposal);
