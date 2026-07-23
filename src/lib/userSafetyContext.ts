@@ -24,6 +24,8 @@ export interface UserSafetyContextDeps {
  * Load allergies/medications for gate ports.
  * - No profile / empty safety fields → undefined (legitimate no-op).
  * - Store/network errors → throw (fail closed; callers must not swallow).
+ * - When medications are present, preloads interaction rules so table failures
+ *   surface before the NDJSON stream opens.
  */
 export async function loadUserSafetyContext(
   deps: UserSafetyContextDeps,
@@ -36,11 +38,25 @@ export async function loadUserSafetyContext(
   ) {
     return undefined;
   }
+  const interactionStore = deps.createInteractionStore();
+  if (profile.medications.length > 0) {
+    // Fail closed before streaming: cache rules for this request.
+    const rules = await interactionStore.all();
+    return {
+      userContext: {
+        allergies: profile.allergies,
+        medications: profile.medications,
+      },
+      interactionStore: {
+        all: async () => rules,
+      },
+    };
+  }
   return {
     userContext: {
       allergies: profile.allergies,
       medications: profile.medications,
     },
-    interactionStore: deps.createInteractionStore(),
+    interactionStore,
   };
 }

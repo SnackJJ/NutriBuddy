@@ -136,7 +136,7 @@ export function createFileStores(
           proposalId: proposal.id,
           foodId: proposal.foodId,
           matchType: proposal.matchType,
-          allergenTags: [...proposal.allergenTags],
+          allergenTags: [...(proposal.allergenTags ?? [])],
         };
         state.mealLogs.push(entry);
         writeState(filePath, state);

@@ -59,15 +59,25 @@ export function projectProposalSafetyNotices(
 ): readonly ProposalSafetyNotice[] {
   const notices: ProposalSafetyNotice[] = [];
 
-  for (const tag of proposal.allergenTags ?? []) {
-    const trimmed = tag.trim();
-    if (!trimmed) continue;
+  // Tri-state: undefined = unreviewed; [] = reviewed empty; non-empty = known tags.
+  if (proposal.allergenTags === undefined) {
     notices.push({
       kind: "allergen",
       severity: "high",
-      title: "Allergen",
-      detail: trimmed,
+      title: "Allergen coverage",
+      detail: "Not reviewed for allergens — treat as unknown before confirming",
     });
+  } else {
+    for (const tag of proposal.allergenTags) {
+      const trimmed = tag.trim();
+      if (!trimmed) continue;
+      notices.push({
+        kind: "allergen",
+        severity: "high",
+        title: "Allergen",
+        detail: trimmed,
+      });
+    }
   }
 
   const haystack = [proposal.foodName, proposal.canonicalName]
@@ -92,15 +102,14 @@ function interactionDetail(
   interaction: DrugNutrientInteraction,
   matchedExample: string,
 ): string {
+  // Rules carry severity/examples/source only — never invent clinical actions
+  // like "avoid" from severity alone (Codex review).
   const examples = interaction.foodExamples.join(", ");
-  const source = interaction.source;
-  if (interaction.severity === "high") {
-    return `Avoid foods like ${examples} (matched "${matchedExample}"; ${source})`;
-  }
-  if (interaction.severity === "moderate") {
-    return `Advisory: monitor intake of foods like ${examples} (matched "${matchedExample}"; ${source})`;
-  }
-  return `Note: possible interaction with foods like ${examples} (matched "${matchedExample}"; ${source})`;
+  return (
+    `Known ${interaction.severity}-severity interaction with foods like ${examples} ` +
+    `(matched "${matchedExample}"; ${interaction.source}). ` +
+    `Confirm only if this matches your clinician guidance.`
+  );
 }
 
 /**

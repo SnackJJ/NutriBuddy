@@ -20,25 +20,51 @@ describe("loadUserSafetyContext", () => {
     expect(createInteractionStore).not.toHaveBeenCalled();
   });
 
-  it("returns userContext + interactionStore when profile has safety fields", async () => {
+  it("returns userContext + preloaded interactionStore when profile has meds", async () => {
     const getProfile = vi.fn().mockResolvedValue({
       allergies: ["peanut"],
       medications: ["warfarin"],
     });
-    const interactionStore = { all: vi.fn() };
+    const rules = [
+      {
+        drugName: "warfarin",
+        nutrient: "vitamin K",
+        foodExamples: ["spinach"],
+        severity: "high" as const,
+        source: "NIH",
+      },
+    ];
+    const all = vi.fn().mockResolvedValue(rules);
     const result = await loadUserSafetyContext({
       userId: "user-1",
       createMemoryStore: () => ({ getProfile }),
-      createInteractionStore: () => interactionStore,
+      createInteractionStore: () => ({ all }),
     });
 
-    expect(result).toEqual({
-      userContext: {
-        allergies: ["peanut"],
-        medications: ["warfarin"],
-      },
-      interactionStore,
+    expect(all).toHaveBeenCalledOnce();
+    expect(result?.userContext).toEqual({
+      allergies: ["peanut"],
+      medications: ["warfarin"],
     });
+    // Subsequent all() uses the preloaded cache, not another network call.
+    await expect(result?.interactionStore.all()).resolves.toEqual(rules);
+    expect(all).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when interaction table preload throws", async () => {
+    const getProfile = vi.fn().mockResolvedValue({
+      allergies: [],
+      medications: ["warfarin"],
+    });
+    const all = vi.fn().mockRejectedValue(new Error("interactions down"));
+
+    await expect(
+      loadUserSafetyContext({
+        userId: "user-1",
+        createMemoryStore: () => ({ getProfile }),
+        createInteractionStore: () => ({ all }),
+      }),
+    ).rejects.toThrow(/interactions down/);
   });
 
   it("fails closed: rethrows when profile loading throws (never silent empty)", async () => {

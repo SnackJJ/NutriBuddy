@@ -85,6 +85,23 @@ describe("projectProposalSafetyNotices", () => {
     ]);
   });
 
+  it("emits unreviewed allergen notice when allergenTags is undefined", () => {
+    const notices = projectProposalSafetyNotices(
+      baseProposal({ allergenTags: undefined }),
+      [],
+    );
+    expect(notices.some((n) => n.title === "Allergen coverage")).toBe(true);
+    expect(notices[0]?.detail.toLowerCase()).toContain("not reviewed");
+  });
+
+  it("does not emit allergen notices when allergenTags is reviewed empty", () => {
+    const notices = projectProposalSafetyNotices(
+      baseProposal({ allergenTags: [] }),
+      [],
+    );
+    expect(notices.filter((n) => n.kind === "allergen")).toHaveLength(0);
+  });
+
   it("includes only drug interactions relevant to the proposal food", () => {
     const notices = projectProposalSafetyNotices(
       baseProposal({ foodName: "Spinach omelette", canonicalName: "spinach" }),
@@ -98,10 +115,11 @@ describe("projectProposalSafetyNotices", () => {
       title: "warfarin × vitamin K",
     });
     expect(drugs[0]?.detail.toLowerCase()).toContain("spinach");
-    expect(drugs[0]?.detail.startsWith("Avoid ")).toBe(true);
+    expect(drugs[0]?.detail.toLowerCase()).toContain("high-severity");
+    expect(drugs[0]?.detail.startsWith("Avoid ")).toBe(false);
   });
 
-  it("uses advisory wording for moderate interactions (not unqualified Avoid)", () => {
+  it("uses neutral interaction wording for moderate severity (no Avoid)", () => {
     const notices = projectProposalSafetyNotices(
       baseProposal({ foodName: "beer battered fish" }),
       [metforminGrapefruit],
@@ -109,7 +127,7 @@ describe("projectProposalSafetyNotices", () => {
     const drugs = notices.filter((n) => n.kind === "drug_interaction");
     expect(drugs).toHaveLength(1);
     expect(drugs[0]?.severity).toBe("moderate");
-    expect(drugs[0]?.detail.startsWith("Advisory:")).toBe(true);
+    expect(drugs[0]?.detail.toLowerCase()).toContain("moderate-severity");
     expect(drugs[0]?.detail.startsWith("Avoid ")).toBe(false);
   });
 
@@ -140,9 +158,12 @@ describe("projectProposalSafetyNotices", () => {
     );
   });
 
-  it("returns empty when there are no allergens or matching interactions", () => {
+  it("returns empty when allergens are reviewed-empty and no interactions match", () => {
     expect(
-      projectProposalSafetyNotices(baseProposal({ foodName: "rice" }), []),
+      projectProposalSafetyNotices(
+        baseProposal({ foodName: "rice", allergenTags: [] }),
+        [],
+      ),
     ).toEqual([]);
   });
 });

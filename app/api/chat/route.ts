@@ -221,22 +221,26 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   let userContext: UserContext | undefined;
   let interactionStore: InteractionStore | undefined;
-  try {
-    const ctx = await loadUserContext(userClient, session.userId);
-    if (ctx) {
-      userContext = ctx.userContext;
-      interactionStore = ctx.interactionStore;
+  // Confirm path only needs proposalStore + session user — do not block confirm
+  // on an unrelated profile/interaction outage (Codex review).
+  if (turnInput.tag === "utterance") {
+    try {
+      const ctx = await loadUserContext(userClient, session.userId);
+      if (ctx) {
+        userContext = ctx.userContext;
+        interactionStore = ctx.interactionStore;
+      }
+    } catch (err) {
+      // Keep Supabase/DB detail server-side; stable client code only.
+      console.error("[chat] safety context load failed", err);
+      return new Response(
+        JSON.stringify({ error: "safety_context_unavailable" }),
+        {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
-  } catch (err) {
-    // Keep Supabase/DB detail server-side (Codex review); stable client code only.
-    console.error("[chat] safety context load failed", err);
-    return new Response(
-      JSON.stringify({ error: "safety_context_unavailable" }),
-      {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
   }
 
   // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)

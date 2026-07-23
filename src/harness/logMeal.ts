@@ -53,7 +53,8 @@ export interface ProposalInput {
   readonly carbsG: number;
   readonly nutritionSource: string;
   readonly matchType: ResolvedMatchType;
-  readonly allergenTags: readonly string[];
+  /** undefined = unreviewed; [] = reviewed with none; non-empty = known tags. */
+  readonly allergenTags?: readonly string[];
 }
 
 /** 已持久化的不可变提案。 */
@@ -71,7 +72,8 @@ export interface Proposal {
   readonly carbsG: number;
   readonly nutritionSource: string;
   readonly matchType: ResolvedMatchType;
-  readonly allergenTags: readonly string[];
+  /** undefined = unreviewed; [] = reviewed with none; non-empty = known tags. */
+  readonly allergenTags?: readonly string[];
   readonly status: ProposalStatus;
   readonly createdAt: string;
 }
@@ -266,7 +268,10 @@ function proposalResponse(proposal: Proposal): HandlerOutcome {
       },
       nutrition_source: proposal.nutritionSource,
       match_type: proposal.matchType,
-      allergen_tags: [...proposal.allergenTags],
+      // Preserve unreviewed state: omit key when undefined (not []).
+      ...(proposal.allergenTags !== undefined
+        ? { allergen_tags: [...proposal.allergenTags] }
+        : {}),
     },
     nutrition_summary: {
       kcal: proposal.kcal,
@@ -430,10 +435,9 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
       carbsG: scaled.carbsG,
       nutritionSource: resolved.catalogSnapshotId,
       matchType: foodRef.matchType,
-      // Record path: unreviewed tags degrade to [] in the ledger row.
-      // The recommendation surface is protected by the output entity
-      // check, which reads the catalog entry itself (issue #66).
-      allergenTags: foodRef.allergenTags ?? [],
+      // Keep tri-state for confirm UI (RFC 0004 §6.4). Meal ledger insert
+      // still collapses undefined → [] at commit time.
+      allergenTags: foodRef.allergenTags,
     });
 
     return proposalResponse(proposal);

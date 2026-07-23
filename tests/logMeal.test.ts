@@ -151,11 +151,12 @@ describe("createLogMealHandler", () => {
     });
     const parsed = parseHandlerJson(result);
 
-    // The record path degrades unreviewed tags to [] — the recommendation
-    // surface is guarded by the output entity check reading the catalog.
+    // Unreviewed catalog tags stay undefined on the proposal so the confirm
+    // card can show "not reviewed" (RFC 0004 §6.4). Ledger insert still
+    // collapses to [] at commit time.
     expect(parsed.error).toBeUndefined();
     expect(state.proposals).toHaveLength(1);
-    expect(state.proposals[0].allergenTags).toEqual([]);
+    expect(state.proposals[0].allergenTags).toBeUndefined();
   });
 
   // ─── Input Validation ──────────────────────────────────────────────────
