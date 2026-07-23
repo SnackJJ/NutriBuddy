@@ -289,6 +289,20 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("data-stale-notice");
     expect(source).toContain("proposalStatus");
   });
+
+  it("supports portion edit as superseding proposal (RFC 0004 §6.3 edit)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-edit-portion");
+    expect(source).toContain("handleEditPortion");
+    expect(source).toContain("Apply as new proposal");
+  });
+
+  it("shows TodayBar fed by /api/today (RFC 0004 §2/§5)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-today-bar");
+    expect(source).toContain("/api/today");
+    expect(source).toContain("TodayBar");
+  });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {

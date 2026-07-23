@@ -674,6 +674,7 @@ function ProposalCard({
   status = "pending",
   onConfirm,
   onReject,
+  onEditPortion,
   confirming,
 }: {
   proposal: WriteProposalData;
@@ -681,10 +682,14 @@ function ProposalCard({
   status?: ProposalUiStatus;
   onConfirm: (feedback?: string) => void;
   onReject: () => void;
+  /** True edit: supersede with a new proposal (not optional note). */
+  onEditPortion?: (portionG: number) => void;
   confirming: boolean;
 }) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [editPortion, setEditPortion] = useState(String(proposal.portionG));
   const quality = matchQualityLabel(proposal.matchType);
   const hasSafety = safetyNotices.length > 0;
   const stale =
@@ -864,6 +869,17 @@ function ProposalCard({
                 + Add optional note
               </button>
             )}
+            {onEditPortion && !showEdit && (
+              <button
+                type="button"
+                onClick={() => setShowEdit(true)}
+                disabled={confirming || !proposal.foodId}
+                className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-700 hover:text-blue-900 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
+                data-edit-portion="true"
+              >
+                Edit portion (new proposal)
+              </button>
+            )}
           </div>
 
           {showFeedback && (
@@ -881,6 +897,36 @@ function ProposalCard({
               />
             </div>
           )}
+
+          {showEdit && onEditPortion && (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="block flex-1 text-xs font-medium text-blue-800">
+                New portion (g)
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={editPortion}
+                  onChange={(e) => setEditPortion(e.target.value)}
+                  disabled={confirming}
+                  className="mt-1 min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  data-edit-portion-input="true"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={() => {
+                  const n = Number(editPortion);
+                  if (!Number.isFinite(n) || n <= 0) return;
+                  onEditPortion(n);
+                }}
+                className="min-h-[44px] rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                Apply as new proposal
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -888,6 +934,88 @@ function ProposalCard({
 }
 
 // ─── Page ──────────────────────────────────────────────────────────────
+
+interface TodaySnapshot {
+  readonly date: string;
+  readonly consumed: {
+    readonly kcal: number;
+    readonly proteinG: number;
+    readonly fatG: number;
+    readonly carbsG: number;
+  };
+  readonly remaining: {
+    readonly kcal: number | null;
+    readonly proteinG: number | null;
+    readonly fatG: number | null;
+    readonly carbsG: number | null;
+  };
+  readonly mealCount: number;
+}
+
+function TodayBar({
+  data,
+  expanded,
+  onToggle,
+}: {
+  data: TodaySnapshot | null;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className="shrink-0 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur"
+      data-today-bar="true"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="mx-auto flex w-full max-w-3xl items-center justify-between gap-2 text-left text-xs text-gray-700"
+      >
+        <span className="font-semibold text-gray-900">Today</span>
+        {data ? (
+          <span className="truncate">
+            {Math.round(data.consumed.kcal)} kcal
+            {data.remaining.kcal !== null &&
+              ` · ${Math.round(data.remaining.kcal)} left`}
+            {" · "}
+            P {Math.round(data.consumed.proteinG)}g
+            {data.remaining.proteinG !== null &&
+              ` (${Math.round(data.remaining.proteinG)} left)`}
+          </span>
+        ) : (
+          <span className="text-gray-400">Loading…</span>
+        )}
+        <span className="text-gray-400">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && data && (
+        <div className="mx-auto mt-2 grid max-w-3xl grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {(
+            [
+              ["kcal", data.consumed.kcal, data.remaining.kcal],
+              ["protein", data.consumed.proteinG, data.remaining.proteinG],
+              ["fat", data.consumed.fatG, data.remaining.fatG],
+              ["carbs", data.consumed.carbsG, data.remaining.carbsG],
+            ] as const
+          ).map(([label, c, r]) => (
+            <div
+              key={label}
+              className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5"
+            >
+              <div className="font-medium capitalize text-gray-800">{label}</div>
+              <div>
+                {Math.round(c)}
+                {r !== null ? ` / rem ${Math.round(r)}` : ""}
+              </div>
+            </div>
+          ))}
+          <div className="col-span-2 text-gray-500 sm:col-span-4">
+            {data.mealCount} meals · {data.date}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const { session, loading: sessionLoading, configured } = useSupabaseSession();
@@ -897,6 +1025,8 @@ export default function ChatPage() {
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [partialResponse, setPartialResponse] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [today, setToday] = useState<TodaySnapshot | null>(null);
+  const [todayExpanded, setTodayExpanded] = useState(false);
   const [pendingProposal, setPendingProposal] =
     useState<WriteProposalData | null>(null);
   const [pendingSafetyNotices, setPendingSafetyNotices] = useState<
@@ -913,6 +1043,27 @@ export default function ChatPage() {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  const refreshToday = useCallback(async () => {
+    if (!session) {
+      setToday(null);
+      return;
+    }
+    try {
+      const res = await fetch("/api/today", {
+        headers: authHeader(session),
+      });
+      if (!res.ok) return;
+      const body = (await res.json()) as TodaySnapshot;
+      setToday(body);
+    } catch {
+      // TodayBar is best-effort; chat still works.
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void refreshToday();
+  }, [refreshToday]);
 
   useEffect(() => {
     scrollToBottom();
@@ -1197,6 +1348,87 @@ export default function ChatPage() {
     [pendingResolverMiss, streaming, session, sessionLoading],
   );
 
+  /** Edit portion: void current proposal, open a new one bound to foodId. */
+  const handleEditPortion = useCallback(
+    async (portionG: number) => {
+      if (!pendingProposal?.foodId || confirming || !session || sessionLoading) {
+        return;
+      }
+      setConfirming(true);
+      setError(null);
+      const old = pendingProposal;
+      try {
+        // Void old proposal (best-effort) — immutable bytes never mutated.
+        await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "proposal_confirm",
+            proposalId: old.proposalId,
+            confirmed: false,
+          }),
+        });
+
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "candidate_log",
+            foodId: old.foodId,
+            foodName: old.canonicalName ?? old.foodName,
+            portionG,
+            mealType: old.mealType,
+          }),
+        });
+        if (!response.ok) {
+          setError(await responseErrorMessage(response, "Edit failed."));
+          return;
+        }
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "Edit failed.");
+          }
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
+        });
+        if (streamState.writeProposal) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `Superseded with ${portionG}g ${old.foodName}.`,
+              proposal: old,
+              proposalStatus: "voided",
+            },
+            {
+              role: "assistant",
+              content: "New proposal awaiting confirmation.",
+              stopReason: "write_proposal",
+              proposal: streamState.writeProposal,
+            },
+          ]);
+          setPendingProposal(streamState.writeProposal);
+          setPendingSafetyNotices(
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
+          );
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Edit failed.");
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [pendingProposal, confirming, session, sessionLoading],
+  );
+
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
     async (confirmed: boolean, feedback?: string) => {
@@ -1271,6 +1503,9 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, confirmMsg]);
         setPendingProposal(null);
         setPendingSafetyNotices([]);
+        if (nextStatus === "committed") {
+          void refreshToday();
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -1281,7 +1516,7 @@ export default function ChatPage() {
         setConfirming(false);
       }
     },
-    [pendingProposal, confirming, sessionLoading, session],
+    [pendingProposal, confirming, sessionLoading, session, refreshToday],
   );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */
@@ -1338,6 +1573,14 @@ export default function ChatPage() {
         </div>
       )}
 
+      {!signedOut && (
+        <TodayBar
+          data={today}
+          expanded={todayExpanded}
+          onToggle={() => setTodayExpanded((v) => !v)}
+        />
+      )}
+
       {/* ── Messages ──────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-6">
@@ -1371,6 +1614,7 @@ export default function ChatPage() {
                     safetyNotices={pendingSafetyNotices}
                     onConfirm={(fb) => handleConfirmProposal(true, fb)}
                     onReject={() => handleConfirmProposal(false)}
+                    onEditPortion={handleEditPortion}
                     confirming={confirming}
                   />
                 </div>
