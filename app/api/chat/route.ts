@@ -147,8 +147,9 @@ async function loadUserMeals(
  * Streams typed AnyTurnEvents as NDJSON (one JSON object per line).
  *
  * Identity derives from the authenticated Supabase session (Authorization
- * header), not from a client-asserted header. The session user identity is
- * verified server-side and never enters model-fillable input.
+ * header), not from a client-asserted header. Missing or invalid sessions
+ * return 401 before any model call (issue #82 / ADR 0002). The session user
+ * identity is verified server-side and never enters model-fillable input.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   // ── Parse body ────────────────────────────────────────────────────
@@ -178,62 +179,64 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // ── Extract session user identity from Supabase auth session ─────
+  // ADR 0002 / issue #82: unauthenticated callers must not reach the
+  // model path (public endpoint would otherwise burn API credits).
   const session = await getSessionFromHeader(createUserSupabase, request);
-  // RFC 0001: JWT sub must match session.userId before turn assembly.
-  if (session) {
-    try {
-      assertSessionSubject(session);
-    } catch (err) {
-      return new Response(
-        JSON.stringify({
-          error: err instanceof Error ? err.message : "session subject mismatch",
-        }),
-        {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
-    }
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-  const sessionUserId = session?.userId;
+
+  // RFC 0001: JWT sub must match session.userId before turn assembly.
+  try {
+    assertSessionSubject(session);
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "session subject mismatch",
+      }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const sessionUserId = session.userId;
 
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();
   const tracer = new Tracer();
-  const sessionId = sessionUserId ?? "anonymous";
-  const eventLog = new EventLog(sessionId);
+  const eventLog = new EventLog(sessionUserId);
 
-  // ── Wire Supabase-backed stores and tools for authenticated users ─
-  let proposalStore: ProposalStore | undefined;
-  let mealLogStore: ReturnType<typeof createSupabaseMealLogStore> | undefined;
+  // ── Wire Supabase-backed stores and tools ─────────────────────────
+  const userClient = createUserSupabase(session.accessToken);
+  const proposalStore = createSupabaseProposalStore({
+    client: userClient,
+  });
+  const mealLogStore = createSupabaseMealLogStore(userClient);
+
   let tools: ReadonlyMap<string, ToolHandler> | undefined;
+  if (turnInput.tag === "utterance") {
+    const queryRunner =
+      process.env.NUTRIBUDDY_QUERY_RUNNER === "sql"
+        ? createSupabaseQueryRunner(userClient, catalog)
+        : createInMemoryQueryRunner(
+            catalog,
+            await loadUserMeals(userClient, session.userId),
+          );
+
+    tools = buildToolMap(session.userId, proposalStore, queryRunner);
+  }
+
   let userContext: UserContext | undefined;
   let interactionStore: InteractionStore | undefined;
-
-  if (session) {
-    const userClient = createUserSupabase(session.accessToken);
-    proposalStore = createSupabaseProposalStore({
-      client: userClient,
-    });
-    mealLogStore = createSupabaseMealLogStore(userClient);
-
-    if (turnInput.tag === "utterance") {
-      const queryRunner =
-        process.env.NUTRIBUDDY_QUERY_RUNNER === "sql"
-          ? createSupabaseQueryRunner(userClient, catalog)
-          : createInMemoryQueryRunner(
-              catalog,
-              await loadUserMeals(userClient, session.userId),
-            );
-
-      tools = buildToolMap(session.userId, proposalStore, queryRunner);
-    }
-
-    const ctx = await loadUserContext(userClient, session.userId);
-    if (ctx) {
-      userContext = ctx.userContext;
-      interactionStore = ctx.interactionStore;
-    }
+  const ctx = await loadUserContext(userClient, session.userId);
+  if (ctx) {
+    userContext = ctx.userContext;
+    interactionStore = ctx.interactionStore;
   }
 
   // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)
@@ -253,7 +256,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     toolSchemas: tools ? toolSchemas : undefined,
     userContext,
     interactionStore,
-    requireTools: Boolean(session && turnInput.tag === "utterance"),
+    requireTools: turnInput.tag === "utterance",
   });
 
   if (!assembly.ok) {

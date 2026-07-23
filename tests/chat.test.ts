@@ -193,6 +193,67 @@ describe("chat route uses the session-scoped client", () => {
   });
 });
 
+// ── Reject anonymous chat (issue #82 / ADR 0002 上线门槛) ────────────────
+
+describe("chat route rejects unauthenticated requests (issue #82)", () => {
+  const routeSource = () => fs.readFileSync("app/api/chat/route.ts", "utf-8");
+
+  it("returns 401 when no session is present", () => {
+    const source = routeSource();
+    // Fail closed: missing session is unauthorized, not anonymous.
+    expect(source).toMatch(/if\s*\(\s*!session\s*\)/);
+    expect(source).toMatch(/status:\s*401/);
+    expect(source).toMatch(/unauthorized/i);
+  });
+
+  it("does not construct DeepSeekAdapter before the session gate", () => {
+    const source = routeSource();
+    const sessionGate = source.search(/if\s*\(\s*!session\s*\)/);
+    const adapterCtor = source.indexOf("new DeepSeekAdapter");
+    expect(sessionGate).toBeGreaterThan(-1);
+    expect(adapterCtor).toBeGreaterThan(-1);
+    expect(sessionGate).toBeLessThan(adapterCtor);
+  });
+
+  it("does not fall back to an anonymous session id", () => {
+    const source = routeSource();
+    expect(source).not.toContain('"anonymous"');
+    expect(source).not.toMatch(/sessionUserId\s*\?\?\s*["']anonymous["']/);
+  });
+});
+
+// ── PWA shell (issue #83 / ADR 0002) ───────────────────────────────────
+
+describe("PWA shell + mobile chat surface (issue #83)", () => {
+  it("exports a standalone web app manifest", () => {
+    const source = fs.readFileSync("app/manifest.ts", "utf-8");
+    expect(source).toContain('display: "standalone"');
+    expect(source).toContain("NutriBuddy");
+    expect(source).toContain("/icons/icon-192.png");
+    expect(source).toContain("/icons/icon-512.png");
+  });
+
+  it("ships install icons including apple-touch-icon", () => {
+    expect(fs.existsSync("public/icons/icon-192.png")).toBe(true);
+    expect(fs.existsSync("public/icons/icon-512.png")).toBe(true);
+    expect(fs.existsSync("public/apple-touch-icon.png")).toBe(true);
+  });
+
+  it("sets viewport-fit=cover and theme colour on the root layout", () => {
+    const source = fs.readFileSync("app/layout.tsx", "utf-8");
+    expect(source).toContain('viewportFit: "cover"');
+    expect(source).toContain("themeColor");
+    expect(source).toContain("apple-touch-icon");
+  });
+
+  it("uses safe-area padding and thumb-sized confirm controls on chat", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toMatch(/pt-safe|safe-area-inset/);
+    expect(source).toContain("min-h-[44px]");
+    expect(source).toMatch(/optional note|feedback/i);
+  });
+});
+
 // ── Turn Seam body parsing (issue #39) ─────────────────────────────────
 
 describe("parseChatBody", () => {
@@ -343,7 +404,9 @@ describe("buildChatTurnPorts", () => {
     // sessionUserId is the only path user identity enters the harness
   });
 
-  it("builds ports without sessionUserId when user is anonymous", () => {
+  it("builds ports without sessionUserId when identity is omitted (unit seam)", () => {
+    // Pure port assembly still accepts optional sessionUserId for tests;
+    // the HTTP route (issue #82) never reaches this path without a session.
     const tracer = new Tracer();
 
     const ports = buildChatTurnPorts({

@@ -1,8 +1,8 @@
 // Supabase Auth helpers for server-side session extraction (issue #48 / ADD §Multi-User).
 //
 // Replaces the client-asserted X-User-Id header with real Supabase session
-// verification at the turn seam. On failure, callers treat the request as
-// anonymous and do not wire user-scoped stores or tools.
+// verification at the turn seam. Callers that require auth (e.g. /api/chat,
+// issue #82) must 401 when getSessionFromHeader returns null.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 

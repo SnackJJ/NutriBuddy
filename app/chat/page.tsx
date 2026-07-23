@@ -101,16 +101,20 @@ function createAssistantStreamState(): AssistantStreamState {
   };
 }
 
-/** Identity travels in the verified Authorization header (issue #48/#62/#65)
- *  — signed-out users chat anonymously with no identity header at all. */
+/** Identity travels in the verified Authorization header (issue #48/#62/#65).
+ *  /api/chat rejects missing sessions with 401 (issue #82). */
 function chatHeaders(session: Session | null): Record<string, string> {
   return { "Content-Type": "application/json", ...authHeader(session) };
 }
 
+/** Prefer caller fallback for machine status codes (401 "unauthorized"). */
 async function responseErrorMessage(
   response: Response,
   fallback: string,
 ): Promise<string> {
+  if (response.status === 401) {
+    return fallback;
+  }
   try {
     const body = (await response.json()) as { error?: unknown };
     return typeof body.error === "string" && body.error.length > 0
@@ -502,7 +506,7 @@ function MessageBubble({
   );
 }
 
-/** Write-proposal confirmation card (issue #39). */
+/** Write-proposal confirmation card (issue #39 / mobile thumb targets #83). */
 function ProposalCard({
   proposal,
   onConfirm,
@@ -521,7 +525,7 @@ function ProposalCard({
     <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
       <div className="mb-3 flex items-center gap-2">
         <svg
-          className="h-5 w-5 text-blue-600"
+          className="h-5 w-5 shrink-0 text-blue-600"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -539,7 +543,7 @@ function ProposalCard({
         </span>
       </div>
 
-      <div className="mb-3 space-y-1 text-sm text-blue-900">
+      <div className="mb-4 space-y-1 text-sm text-blue-900">
         <p>
           <span className="font-medium">{proposal.foodName}</span> —{" "}
           {proposal.portionG}g ({proposal.mealType})
@@ -561,12 +565,13 @@ function ProposalCard({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Thumb-reach: stacked full-width actions on phone, row on sm+ */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <button
           type="button"
           onClick={() => onConfirm(showFeedback ? feedback : undefined)}
           disabled={confirming}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
         >
           {confirming ? "Confirming…" : "✓ Confirm"}
         </button>
@@ -574,7 +579,7 @@ function ProposalCard({
           type="button"
           onClick={onReject}
           disabled={confirming}
-          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
         >
           ✗ Reject
         </button>
@@ -583,22 +588,25 @@ function ProposalCard({
             type="button"
             onClick={() => setShowFeedback(true)}
             disabled={confirming}
-            className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+            className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
           >
-            + Add feedback
+            + Add optional note
           </button>
         )}
       </div>
 
       {showFeedback && (
-        <div className="mt-3">
+        <div className="mt-3 space-y-2">
+          <label className="block text-xs font-medium text-blue-800">
+            Optional note (does not change logged fields)
+          </label>
           <textarea
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Optional feedback (e.g. reduce portion, change meal type)…"
+            placeholder="e.g. felt full, rough estimate…"
             rows={2}
             disabled={confirming}
-            className="w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            className="min-h-[44px] w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
           />
         </div>
       )}
@@ -609,7 +617,7 @@ function ProposalCard({
 // ─── Page ──────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const { session } = useSupabaseSession();
+  const { session, loading: sessionLoading, configured } = useSupabaseSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -651,7 +659,13 @@ export default function ChatPage() {
 
   const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || streaming) return;
+    if (!trimmed || streaming || sessionLoading) return;
+
+    // Issue #82: /api/chat is auth-only — block before the network call.
+    if (!session) {
+      setError("Sign in required. Open Profile to sign in, then return here.");
+      return;
+    }
 
     setInput("");
     setStreaming(true);
@@ -675,12 +689,11 @@ export default function ChatPage() {
       });
 
       if (!response.ok) {
-        setError(
-          await responseErrorMessage(
-            response,
-            "Failed to get a response. Please try again.",
-          ),
-        );
+        const fallback =
+          response.status === 401
+            ? "Session expired or missing. Sign in via Profile and try again."
+            : "Failed to get a response. Please try again.";
+        setError(await responseErrorMessage(response, fallback));
         return;
       }
 
@@ -738,12 +751,17 @@ export default function ChatPage() {
     } finally {
       setStreaming(false);
     }
-  }, [input, streaming, messages, session, buildHistory]);
+  }, [input, streaming, sessionLoading, messages, session, buildHistory]);
 
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
     async (confirmed: boolean, feedback?: string) => {
-      if (!pendingProposal || confirming) return;
+      if (!pendingProposal || confirming || sessionLoading) return;
+
+      if (!session) {
+        setError("Sign in required. Open Profile to sign in, then return here.");
+        return;
+      }
 
       setConfirming(true);
       setError(null);
@@ -761,12 +779,11 @@ export default function ChatPage() {
         });
 
         if (!response.ok) {
-          setError(
-            await responseErrorMessage(
-              response,
-              "Failed to process confirmation.",
-            ),
-          );
+          const fallback =
+            response.status === 401
+              ? "Session expired or missing. Sign in via Profile and try again."
+              : "Failed to process confirmation.";
+          setError(await responseErrorMessage(response, fallback));
           return;
         }
 
@@ -799,7 +816,7 @@ export default function ChatPage() {
         setConfirming(false);
       }
     },
-    [pendingProposal, confirming, session],
+    [pendingProposal, confirming, sessionLoading, session],
   );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */
@@ -821,9 +838,11 @@ export default function ChatPage() {
   }, []);
 
   const isEmpty = messages.length === 0 && !streaming;
+  const signedOut = configured && !sessionLoading && !session;
+  const chatBlocked = sessionLoading || signedOut;
 
   return (
-    <main className="flex h-dvh flex-col bg-gray-50">
+    <main className="flex h-dvh flex-col bg-gray-50 pt-safe">
       {/* ── Header ────────────────────────────────────────────────── */}
       <header className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
@@ -844,6 +863,15 @@ export default function ChatPage() {
           </nav>
         </div>
       </header>
+
+      {signedOut && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-center text-sm text-amber-900">
+          Sign in required to chat.{" "}
+          <a href="/profile" className="font-semibold underline">
+            Open Profile
+          </a>
+        </div>
+      )}
 
       {/* ── Messages ──────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
@@ -869,10 +897,10 @@ export default function ChatPage() {
               <ThinkingIndicator />
             )}
 
-            {/* Write-proposal confirmation card */}
+            {/* Write-proposal confirmation card — full width on phone (#83) */}
             {pendingProposal && !streaming && (
               <div className="flex justify-start">
-                <div className="max-w-[85%] sm:max-w-[75%]">
+                <div className="w-full max-w-full sm:max-w-[75%]">
                   <ProposalCard
                     proposal={pendingProposal}
                     onConfirm={(fb) => handleConfirmProposal(true, fb)}
@@ -897,7 +925,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── Input ─────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3 sm:py-4">
+      <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3 pb-safe sm:py-4">
         <div className="mx-auto max-w-3xl">
           <div className="flex items-end gap-2 sm:gap-3">
             <textarea
@@ -905,16 +933,22 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask NutriBuddy anything about nutrition…"
+              placeholder={
+                sessionLoading
+                  ? "Restoring session…"
+                  : signedOut
+                    ? "Sign in via Profile to start chatting…"
+                    : "Ask NutriBuddy anything about nutrition…"
+              }
               rows={1}
-              disabled={streaming}
-              className="flex-1 resize-none rounded-xl border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={streaming || chatBlocked}
+              className="min-h-[44px] flex-1 resize-none rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-base placeholder:text-gray-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5 sm:text-sm"
             />
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!input.trim() || streaming}
-              className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!input.trim() || streaming || chatBlocked}
+              className="min-h-[44px] min-w-[44px] shrink-0 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:min-w-0 sm:py-2.5"
               aria-label="Send message"
             >
               <span className="hidden sm:inline">Send</span>

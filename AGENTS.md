@@ -25,7 +25,7 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 
 Keep this list short. Prefer GitHub issues as the live backlog.
 
-1. Web confirm / edit UX for proposals  
+1. 交付形态与上线（`docs/adr/0002`）：#82 关闭匿名通道、#83 PWA + confirm/edit UX  
 2. Nightly live eval thickening  
 3. Remaining debt: drop derived `toolResult` after UI migration (RFC 0002 §2.6); TraceEvent debug-only  
 

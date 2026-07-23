@@ -4,7 +4,7 @@
 // session (access token + user), sign-in/sign-up/sign-out, and stays
 // subscribed to auth state changes. When the Supabase env vars are absent
 // (e.g. local dev without a project), the hook degrades to a permanent
-// signed-out state so anonymous chat keeps working.
+// signed-out state — chat and profile routes require a real session (#82).
 
 "use client";
 
