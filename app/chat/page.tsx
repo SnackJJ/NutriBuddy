@@ -20,6 +20,10 @@ import {
   retryableTitle,
   type RetryableTurnState,
 } from "@/lib/retryableTurn";
+import {
+  isProposalStale,
+  type ProposalUiStatus,
+} from "@/lib/proposalLifecycle";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 import type { Session } from "@supabase/supabase-js";
 
@@ -44,6 +48,8 @@ interface DisplayMessage {
   readonly proposal?: WriteProposalData;
   /** Resolver miss projection (RFC 0004 §6.1). */
   readonly resolverMiss?: ResolverMissProjection;
+  /** Proposal lifecycle status for retained cards (RFC 0004 §6.3). */
+  readonly proposalStatus?: ProposalUiStatus;
 }
 
 interface ToolCallEntry {
@@ -461,6 +467,20 @@ function MessageBubble({
           )}
         </div>
 
+        {/* Retained proposal lifecycle card (committed / voided / stale) */}
+        {message.proposal && message.proposalStatus && (
+          <div className="mt-2">
+            <ProposalCard
+              proposal={message.proposal}
+              safetyNotices={[]}
+              status={message.proposalStatus}
+              onConfirm={() => undefined}
+              onReject={() => undefined}
+              confirming={false}
+            />
+          </div>
+        )}
+
         {/* Citation sources */}
         {message.sources && message.sources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -647,16 +667,18 @@ function CandidatePicker({
 }
 
 /** Write-proposal confirmation card (issue #39 / mobile thumb targets #83).
- *  RFC 0004 §6.1 / §6.4: match quality + safety notices before confirm. */
+ *  RFC 0004 §6.1 / §6.3 / §6.4: match quality, lifecycle, safety before confirm. */
 function ProposalCard({
   proposal,
   safetyNotices,
+  status = "pending",
   onConfirm,
   onReject,
   confirming,
 }: {
   proposal: WriteProposalData;
   safetyNotices: readonly ProposalSafetyNotice[];
+  status?: ProposalUiStatus;
   onConfirm: (feedback?: string) => void;
   onReject: () => void;
   confirming: boolean;
@@ -665,14 +687,32 @@ function ProposalCard({
   const [feedback, setFeedback] = useState("");
   const quality = matchQualityLabel(proposal.matchType);
   const hasSafety = safetyNotices.length > 0;
+  const stale =
+    status === "stale" ||
+    (status === "pending" && isProposalStale(proposal.createdAt));
+  const interactive = status === "pending" && !stale;
+  const statusLabel = stale
+    ? "stale"
+    : status === "committed"
+      ? "committed"
+      : status === "voided"
+        ? "voided"
+        : "pending";
 
   return (
     <div
       className={`rounded-xl border p-4 shadow-sm ${
-        hasSafety
-          ? "border-amber-300 bg-amber-50"
-          : "border-blue-200 bg-blue-50"
+        stale
+          ? "border-gray-300 bg-gray-50 opacity-90"
+          : status === "committed"
+            ? "border-green-200 bg-green-50"
+            : status === "voided"
+              ? "border-gray-200 bg-gray-50 opacity-80"
+              : hasSafety
+                ? "border-amber-300 bg-amber-50"
+                : "border-blue-200 bg-blue-50"
       }`}
+      data-proposal-status={statusLabel}
     >
       <div className="mb-3 flex items-center gap-2">
         <svg
@@ -690,11 +730,32 @@ function ProposalCard({
           />
         </svg>
         <span
-          className={`text-sm font-semibold ${hasSafety ? "text-amber-900" : "text-blue-800"}`}
+          className={`text-sm font-semibold ${
+            stale
+              ? "text-gray-700"
+              : status === "committed"
+                ? "text-green-900"
+                : hasSafety
+                  ? "text-amber-900"
+                  : "text-blue-800"
+          }`}
         >
-          Confirm Meal Log
+          {stale
+            ? "Proposal expired"
+            : status === "committed"
+              ? "Meal logged"
+              : status === "voided"
+                ? "Proposal cancelled"
+                : "Confirm Meal Log"}
         </span>
       </div>
+
+      {stale && (
+        <p className="mb-2 text-xs text-gray-600" data-stale-notice="true">
+          This proposal is older than 30 minutes or no longer committable.
+          Generate a new proposal to continue.
+        </p>
+      )}
 
       <div
         className={`mb-4 space-y-1 text-sm ${hasSafety ? "text-amber-950" : "text-blue-900"}`}
@@ -773,50 +834,54 @@ function ProposalCard({
         )}
       </div>
 
-      {/* Thumb-reach: stacked full-width actions on phone, row on sm+ */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <button
-          type="button"
-          onClick={() => onConfirm(showFeedback ? feedback : undefined)}
-          disabled={confirming}
-          className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
-        >
-          {confirming ? "Confirming…" : "✓ Confirm"}
-        </button>
-        <button
-          type="button"
-          onClick={onReject}
-          disabled={confirming}
-          className="min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
-        >
-          ✗ Reject
-        </button>
-        {!showFeedback && (
-          <button
-            type="button"
-            onClick={() => setShowFeedback(true)}
-            disabled={confirming}
-            className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
-          >
-            + Add optional note
-          </button>
-        )}
-      </div>
+      {interactive && (
+        <>
+          {/* Thumb-reach: stacked full-width actions on phone, row on sm+ */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <button
+              type="button"
+              onClick={() => onConfirm(showFeedback ? feedback : undefined)}
+              disabled={confirming}
+              className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
+            >
+              {confirming ? "Confirming…" : "✓ Confirm"}
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              disabled={confirming}
+              className="min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
+            >
+              ✗ Reject
+            </button>
+            {!showFeedback && (
+              <button
+                type="button"
+                onClick={() => setShowFeedback(true)}
+                disabled={confirming}
+                className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
+              >
+                + Add optional note
+              </button>
+            )}
+          </div>
 
-      {showFeedback && (
-        <div className="mt-3 space-y-2">
-          <label className="block text-xs font-medium text-blue-800">
-            Optional note (does not change logged fields)
-          </label>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. felt full, rough estimate…"
-            rows={2}
-            disabled={confirming}
-            className="min-h-[44px] w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
-          />
-        </div>
+          {showFeedback && (
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-medium text-blue-800">
+                Optional note (does not change logged fields)
+              </label>
+              <textarea
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="e.g. felt full, rough estimate…"
+                rows={2}
+                disabled={confirming}
+                className="min-h-[44px] w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1167,6 +1232,7 @@ export default function ChatPage() {
         }
 
         let reply = "";
+        let notCommittable = false;
         await readChatStream(response, (event) => {
           if (event.type === "error") {
             throw new Error(event.error ?? "Confirmation failed.");
@@ -1176,12 +1242,31 @@ export default function ChatPage() {
           if (result?.reply) {
             reply = result.reply;
           }
+          if (
+            typeof result?.reply === "string" &&
+            /not_committable|expired|cannot be processed/i.test(result.reply)
+          ) {
+            notCommittable = true;
+          }
         });
 
+        const nextStatus: ProposalUiStatus = notCommittable
+          ? "stale"
+          : confirmed
+            ? "committed"
+            : "voided";
+
+        // Retain proposal card in history with lifecycle status (RFC 0004 §6.3).
         const confirmMsg: DisplayMessage = {
           role: "assistant",
-          content: reply || `Proposal ${confirmed ? "confirmed" : "rejected"}.`,
+          content:
+            reply ||
+            (nextStatus === "stale"
+              ? "Proposal is no longer committable (expired or already handled)."
+              : `Proposal ${confirmed ? "confirmed" : "rejected"}.`),
           stopReason: "end_turn",
+          proposal: pendingProposal,
+          proposalStatus: nextStatus,
         };
         setMessages((prev) => [...prev, confirmMsg]);
         setPendingProposal(null);

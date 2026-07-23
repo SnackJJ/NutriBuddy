@@ -281,6 +281,14 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("Retry same input");
     expect(source).toContain("setInput(trimmed)");
   });
+
+  it("renders proposal lifecycle statuses including stale (RFC 0004 §6.3)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-proposal-status");
+    expect(source).toContain("isProposalStale");
+    expect(source).toContain("data-stale-notice");
+    expect(source).toContain("proposalStatus");
+  });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {
