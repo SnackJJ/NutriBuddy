@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Semantic design tokens (RFC 0004 §8) — pages use semantic roles only. */
+:root {
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-border: #e5e7eb;
+  --color-accent: #2563eb;
+  --color-status-warning: #d97706;
+  --color-status-danger: #dc2626;
+  --color-status-success: #16a34a;
+  --color-macro-kcal: #7c3aed;
+  --color-macro-protein: #2563eb;
+  --color-macro-fat: #d97706;
+  --color-macro-carbs: #059669;
+}
+
 /* PWA / iOS safe-area helpers (issue #83). */
 @layer utilities {
   .pb-safe {
