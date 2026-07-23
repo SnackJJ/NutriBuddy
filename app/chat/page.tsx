@@ -25,6 +25,10 @@ import {
   type ProposalUiStatus,
 } from "@/lib/proposalLifecycle";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
+import {
+  CustomMealForm,
+  type CustomMealFormValues,
+} from "@/components/CustomMealForm";
 import type { Session } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -1348,6 +1352,50 @@ export default function ChatPage() {
     [pendingResolverMiss, streaming, session, sessionLoading],
   );
 
+  /** Hand-entry custom meal → proposal (RFC 0005 packaging escape hatch). */
+  const handleCustomMeal = useCallback(
+    async (values: CustomMealFormValues) => {
+      if (!session || streaming || sessionLoading) return;
+      setConfirming(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/custom-meal", {
+          method: "POST",
+          headers: {
+            ...chatHeaders(session),
+          },
+          body: JSON.stringify(values),
+        });
+        if (!res.ok) {
+          setError(await responseErrorMessage(res, "Custom meal failed."));
+          return;
+        }
+        const body = (await res.json()) as {
+          proposal: WriteProposalData;
+        };
+        setPendingResolverMiss(null);
+        setPendingProposal(body.proposal);
+        setPendingSafetyNotices(
+          projectProposalSafetyNotices(body.proposal, []),
+        );
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Custom meal proposal for ${body.proposal.foodName}.`,
+            stopReason: "write_proposal",
+            proposal: body.proposal,
+          },
+        ]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Custom meal failed.");
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [session, streaming, sessionLoading],
+  );
+
   /** Edit portion: void current proposal, open a new one bound to foodId. */
   const handleEditPortion = useCallback(
     async (portionG: number) => {
@@ -1624,12 +1672,19 @@ export default function ChatPage() {
             {/* Resolver miss candidates (RFC 0004 §6.1) */}
             {pendingResolverMiss && !streaming && !pendingProposal && (
               <div className="flex justify-start">
-                <div className="w-full max-w-full sm:max-w-[75%]">
+                <div className="w-full max-w-full space-y-3 sm:max-w-[75%]">
                   <CandidatePicker
                     miss={pendingResolverMiss}
                     onPick={handlePickCandidate}
                     disabled={streaming}
                   />
+                  {pendingResolverMiss.matchType === "miss_unknown" && (
+                    <CustomMealForm
+                      initialName={pendingResolverMiss.input}
+                      disabled={streaming || confirming}
+                      onSubmit={handleCustomMeal}
+                    />
+                  )}
                 </div>
               </div>
             )}

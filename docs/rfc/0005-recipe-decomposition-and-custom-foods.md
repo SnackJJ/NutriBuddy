@@ -1,6 +1,6 @@
 # RFC 0005 — 菜谱分解与自建食物
 
-> Status: **Proposed** (2026-07-23) — 待评审。
+> Status: **Accepted** (2026-07-23) — joint decisions + MVP ship path. Hand-entry escape hatch and recipe math landed; full catalog merge / versioned user foods still open.
 > **Not always-on agent context** — 只在做 catalog / resolver / 自建食物路径时打开。
 > Authority: `docs/adr/0003-recipe-decomposition-boundary.md` 定边界与不变量；本文定设计。
 > Architecture source of truth: `docs/ADD.md`。本文不改 gate、observation、matchType 的定义。
