@@ -228,10 +228,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       interactionStore = ctx.interactionStore;
     }
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Failed to load safety profile";
+    // Keep Supabase/DB detail server-side (Codex review); stable client code only.
+    console.error("[chat] safety context load failed", err);
     return new Response(
-      JSON.stringify({ error: `safety_context_unavailable: ${message}` }),
+      JSON.stringify({ error: "safety_context_unavailable" }),
       {
         status: 503,
         headers: { "Content-Type": "application/json" },

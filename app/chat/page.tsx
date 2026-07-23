@@ -63,6 +63,7 @@ interface StreamTerminalResult {
   readonly stopReason?: string;
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
+  readonly safetyNotices?: readonly ProposalSafetyNotice[];
 }
 
 /** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
@@ -79,6 +80,7 @@ interface StreamEvent {
   readonly output?: unknown;
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
+  readonly safetyNotices?: readonly ProposalSafetyNotice[];
   readonly checkpoint?: string;
   readonly verdict?: string;
   readonly checkName?: string;
@@ -94,6 +96,7 @@ interface AssistantStreamState {
   gateReasons: string[];
   writeProposal?: WriteProposalData;
   interactions: DrugNutrientInteraction[];
+  safetyNotices: ProposalSafetyNotice[];
 }
 
 interface AssistantStreamHandlers {
@@ -108,6 +111,7 @@ function createAssistantStreamState(): AssistantStreamState {
     stopReason: "",
     gateReasons: [],
     interactions: [],
+    safetyNotices: [],
   };
 }
 
@@ -268,6 +272,10 @@ function applyTerminalResult(
 
   if (result.interactions && result.interactions.length > 0) {
     state.interactions = [...result.interactions];
+  }
+
+  if (result.safetyNotices) {
+    state.safetyNotices = [...result.safetyNotices];
   }
 }
 
@@ -635,7 +643,11 @@ function ProposalCard({
                   <span className="font-medium">{notice.title}</span>
                   {": "}
                   {notice.detail}
-                  {notice.severity === "high" ? " — high severity" : ""}
+                  {notice.severity === "high"
+                    ? " — high severity"
+                    : notice.severity === "moderate"
+                      ? " — moderate"
+                      : " — low"}
                 </li>
               ))}
             </ul>
@@ -820,11 +832,14 @@ export default function ChatPage() {
 
         if (streamState.writeProposal) {
           setPendingProposal(streamState.writeProposal);
+          // Prefer turn-seam projection; fall back only if terminal omitted notices.
           setPendingSafetyNotices(
-            projectProposalSafetyNotices(
-              streamState.writeProposal,
-              streamState.interactions,
-            ),
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
           );
         }
       }

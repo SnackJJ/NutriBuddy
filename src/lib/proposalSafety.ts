@@ -1,5 +1,6 @@
 // Proposal confirmation safety / match-quality projections (RFC 0004 §6.1 / §6.4).
 // Pure functions: turn/wire data in → UI notices out. No prose parsing.
+// Prefer calling from the turn seam so all surfaces get the same typed notices.
 
 import type { WriteProposalData } from "@/harness/types";
 import type { DrugNutrientInteraction } from "@/lib/drugInteractions";
@@ -47,6 +48,7 @@ export function matchQualityLabel(
 /**
  * Project allergen tags + proposal-relevant drug interactions for the
  * confirm card. Does not dump every medication rule onto every meal.
+ * Intended to run at the turn seam (not only in React).
  */
 export function projectProposalSafetyNotices(
   proposal: Pick<
@@ -68,37 +70,60 @@ export function projectProposalSafetyNotices(
     });
   }
 
-  const haystack = normalize(
-    [proposal.foodName, proposal.canonicalName].filter(Boolean).join(" "),
-  );
+  const haystack = [proposal.foodName, proposal.canonicalName]
+    .filter(Boolean)
+    .join(" ");
 
   for (const interaction of interactions) {
-    if (!interactionRelevantToFood(haystack, interaction)) continue;
+    const hit = matchingFoodExample(haystack, interaction);
+    if (!hit) continue;
     notices.push({
       kind: "drug_interaction",
       severity: interaction.severity,
       title: `${interaction.drugName} × ${interaction.nutrient}`,
-      detail: `Avoid foods like ${interaction.foodExamples.join(", ")} (${interaction.source})`,
+      detail: interactionDetail(interaction, hit),
     });
   }
 
   return notices;
 }
 
-function interactionRelevantToFood(
-  foodHaystack: string,
+function interactionDetail(
   interaction: DrugNutrientInteraction,
-): boolean {
-  if (!foodHaystack) return false;
-  for (const example of interaction.foodExamples) {
-    const term = normalize(example);
-    if (term && foodHaystack.includes(term)) return true;
+  matchedExample: string,
+): string {
+  const examples = interaction.foodExamples.join(", ");
+  const source = interaction.source;
+  if (interaction.severity === "high") {
+    return `Avoid foods like ${examples} (matched "${matchedExample}"; ${source})`;
   }
-  const nutrient = normalize(interaction.nutrient);
-  if (nutrient && foodHaystack.includes(nutrient)) return true;
-  return false;
+  if (interaction.severity === "moderate") {
+    return `Advisory: monitor intake of foods like ${examples} (matched "${matchedExample}"; ${source})`;
+  }
+  return `Note: possible interaction with foods like ${examples} (matched "${matchedExample}"; ${source})`;
 }
 
-function normalize(value: string): string {
-  return value.trim().toLowerCase();
+/**
+ * Word-boundary phrase match (same idea as gate containsAnyTerm):
+ * "ham" must not match "graham crackers".
+ */
+function matchingFoodExample(
+  foodText: string,
+  interaction: DrugNutrientInteraction,
+): string | null {
+  for (const example of interaction.foodExamples) {
+    if (containsPhrase(foodText, example)) return example;
+  }
+  if (containsPhrase(foodText, interaction.nutrient)) {
+    return interaction.nutrient;
+  }
+  return null;
+}
+
+function containsPhrase(text: string, phrase: string): boolean {
+  const term = phrase.trim();
+  if (!term) return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`\\b${escaped}\\b`, "i");
+  return regex.test(text);
 }

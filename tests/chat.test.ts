@@ -256,23 +256,35 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
   it("surfaces match quality and safety notices on the proposal card before confirm (RFC 0004 §6)", () => {
     const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
     expect(source).toContain("matchQualityLabel");
-    expect(source).toContain("projectProposalSafetyNotices");
     expect(source).toContain("data-match-quality");
     expect(source).toContain("data-safety-notices");
     expect(source).toContain("Review before confirm");
+    expect(source).toContain("safetyNotices");
     expect(source).toMatch(/proposal\.matchType|matchType/);
-    expect(source).toMatch(/allergenTags|safetyNotices/);
   });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {
-  it("loads safety context via fail-closed helper and returns 503 on load failure", () => {
+  it("loads safety context via fail-closed helper and returns stable 503 without leaking errors", () => {
     const source = fs.readFileSync("app/api/chat/route.ts", "utf-8");
     expect(source).toContain("loadUserSafetyContext");
     expect(source).toContain("safety_context_unavailable");
     expect(source).toContain("503");
+    expect(source).toContain("console.error");
     // Must not swallow profile errors into empty context
     expect(source).not.toMatch(/catch\s*\{\s*return undefined\s*;\s*\}/);
+    // Must not interpolate err.message into the client body
+    expect(source).not.toMatch(
+      /safety_context_unavailable:.*\$\{.*message/,
+    );
+  });
+});
+
+describe("turn seam projects proposal safetyNotices (RFC 0004 §6.4)", () => {
+  it("imports projectProposalSafetyNotices in the turn layer", () => {
+    const source = fs.readFileSync("src/harness/turn.ts", "utf-8");
+    expect(source).toContain("projectProposalSafetyNotices");
+    expect(source).toContain("safetyNotices");
   });
 });
 

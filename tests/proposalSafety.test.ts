@@ -98,6 +98,36 @@ describe("projectProposalSafetyNotices", () => {
       title: "warfarin × vitamin K",
     });
     expect(drugs[0]?.detail.toLowerCase()).toContain("spinach");
+    expect(drugs[0]?.detail.startsWith("Avoid ")).toBe(true);
+  });
+
+  it("uses advisory wording for moderate interactions (not unqualified Avoid)", () => {
+    const notices = projectProposalSafetyNotices(
+      baseProposal({ foodName: "beer battered fish" }),
+      [metforminGrapefruit],
+    );
+    const drugs = notices.filter((n) => n.kind === "drug_interaction");
+    expect(drugs).toHaveLength(1);
+    expect(drugs[0]?.severity).toBe("moderate");
+    expect(drugs[0]?.detail.startsWith("Advisory:")).toBe(true);
+    expect(drugs[0]?.detail.startsWith("Avoid ")).toBe(false);
+  });
+
+  it("does not match interaction food examples as substrings (ham ≠ graham)", () => {
+    const hamRule: DrugNutrientInteraction = {
+      drugName: "maoie",
+      nutrient: "tyramine",
+      foodExamples: ["ham"],
+      severity: "high",
+      source: "NIH",
+    };
+    const notices = projectProposalSafetyNotices(
+      baseProposal({ foodName: "graham crackers" }),
+      [hamRule],
+    );
+    expect(notices.filter((n) => n.kind === "drug_interaction")).toHaveLength(
+      0,
+    );
   });
 
   it("does not dump unrelated medication rules onto every meal", () => {

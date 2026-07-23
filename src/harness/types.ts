@@ -202,6 +202,12 @@ export interface TerminalResult {
    * lexical backstop without re-querying (issue #47).
    */
   readonly interactions?: readonly import("../lib/drugInteractions").DrugNutrientInteraction[];
+  /**
+   * Proposal-relevant safety notices projected at the turn seam
+   * (RFC 0004 §6.4). Present on write_proposal terminals so every surface
+   * renders the same typed notices without re-deriving relevance in the UI.
+   */
+  readonly safetyNotices?: readonly import("../lib/proposalSafety").ProposalSafetyNotice[];
 }
 
 /**
