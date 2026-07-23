@@ -396,12 +396,8 @@ export const LOG_MEAL_SCHEMA = {
           description:
             "Food name in English, e.g. 'chicken breast', 'rice', 'apple'.",
         },
-        food_id: {
-          type: "string",
-          description:
-            "Optional catalog food id for deterministic resolution " +
-            "(candidate picker). When set, name resolution is skipped.",
-        },
+        // food_id is intentionally NOT in the model schema — IDs are only
+        // accepted via the candidate_log short-circuit (resolver remains mint authority).
         portion_g: {
           type: "number",
           description: "Portion size in grams, must be > 0. E.g. 200 for 200g.",
@@ -412,7 +408,7 @@ export const LOG_MEAL_SCHEMA = {
           description: "Meal type. Defaults to 'snack' if omitted.",
         },
       },
-      required: ["portion_g"],
+      required: ["food_name", "portion_g"],
     },
   },
 };

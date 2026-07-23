@@ -92,6 +92,13 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
   } catch (err) {
     console.error("[today] daily_totals failed", err);
+    return new Response(
+      JSON.stringify({ error: "daily_totals_unavailable", date }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   const store = createMemoryStore({

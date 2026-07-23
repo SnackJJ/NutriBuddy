@@ -222,9 +222,9 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   let userContext: UserContext | undefined;
   let interactionStore: InteractionStore | undefined;
-  // Confirm path only needs proposalStore + session user — do not block confirm
-  // on an unrelated profile/interaction outage (Codex review).
-  if (turnInput.tag === "utterance") {
+  // Utterance + candidate_log need safety context for proposal-relevant notices.
+  // Confirm path only needs proposalStore + session user.
+  if (turnInput.tag === "utterance" || turnInput.tag === "candidate_log") {
     try {
       const ctx = await loadUserContext(userClient, session.userId);
       if (ctx) {

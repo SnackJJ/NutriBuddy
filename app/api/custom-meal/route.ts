@@ -46,12 +46,21 @@ export async function POST(request: NextRequest): Promise<Response> {
   const proteinG = body.proteinG;
   const fatG = body.fatG;
   const carbsG = body.carbsG;
+  const validMeals = new Set(["breakfast", "lunch", "dinner", "snack"]);
 
   if (typeof foodName !== "string" || foodName.trim().length === 0) {
     return new Response(JSON.stringify({ error: "foodName required" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+  if (typeof mealType !== "string" || !validMeals.has(mealType)) {
+    return new Response(
+      JSON.stringify({
+        error: "mealType must be breakfast|lunch|dinner|snack",
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
   for (const [k, v] of [
     ["portionG", portionG],

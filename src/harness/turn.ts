@@ -818,35 +818,42 @@ interface UtteranceTurnOutput {
   readonly resolverMiss?: ResolverMissProjection;
 }
 
-async function* runCandidateLogTurn(
+/** Candidate short-circuit: return result only — outer turn emits the sole terminal. */
+async function runCandidateLogTurn(
   input: CandidateLogInput,
   ports: TurnPorts,
-  nextMetadata: NextEventMetadata,
-): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
+): Promise<TurnResult> {
   if (!ports.catalog || !ports.proposalStore || !ports.sessionUserId) {
-    const result: TurnResult = {
+    return {
       reply: "Candidate log requires catalog and proposal store.",
       steps: 0,
       stopReason: "crash",
     };
-    yield createTurnEndEvent(result, nextMetadata);
-    return result;
   }
 
-  const outcome = await storeProposalFromParsed(
-    ports.catalog,
-    ports.proposalStore,
-    ports.sessionUserId,
-    {
-      foodId: input.foodId,
-      foodName: input.foodName,
-      portionG: input.portionG,
-      mealType: input.mealType,
-    },
-  );
+  let outcome;
+  try {
+    outcome = await storeProposalFromParsed(
+      ports.catalog,
+      ports.proposalStore,
+      ports.sessionUserId,
+      {
+        foodId: input.foodId,
+        foodName: input.foodName,
+        portionG: input.portionG,
+        mealType: input.mealType,
+      },
+    );
+  } catch (err) {
+    return {
+      reply: "Something went wrong while storing the selected food.",
+      steps: 0,
+      stopReason: "crash",
+    };
+  }
 
   if (outcome.kind !== "ok") {
-    const result: TurnResult = {
+    return {
       reply:
         outcome.kind === "typed_error" || outcome.kind === "typed_miss"
           ? outcome.message
@@ -854,31 +861,30 @@ async function* runCandidateLogTurn(
       steps: 0,
       stopReason: "end_turn",
     };
-    yield createTurnEndEvent(result, nextMetadata);
-    return result;
   }
 
   const proposal = parseWriteProposalData(outcome.data);
   if (!proposal) {
-    const result: TurnResult = {
+    return {
       reply: "Could not build proposal from selected food.",
       steps: 0,
       stopReason: "crash",
     };
-    yield createTurnEndEvent(result, nextMetadata);
-    return result;
   }
 
-  const safetyNotices = projectProposalSafetyNotices(proposal, []);
-  const result: TurnResult = {
+  // Use pre-gate interactions when loaded (fail-closed path on chat route).
+  const interactions = ports.interactionStore
+    ? await ports.interactionStore.all().catch(() => [])
+    : [];
+  const safetyNotices = projectProposalSafetyNotices(proposal, interactions);
+  return {
     reply: `Log ${proposal.portionG}g ${proposal.foodName} for ${proposal.mealType}?`,
     steps: 0,
     stopReason: "write_proposal",
     proposal,
     safetyNotices,
+    interactions,
   };
-  yield createTurnEndEvent(result, nextMetadata);
-  return result;
 }
 
 async function* runUtteranceTurn(
@@ -1324,18 +1330,18 @@ export async function* turn(
     }
     case "candidate_log": {
       // RFC 0004 §6.1: bind pick to catalog food_id — no free-text model path.
-      result = yield* runCandidateLogTurn(input, ports, nextMetadata);
+      result = await runCandidateLogTurn(input, ports);
       writeProposal = result.proposal;
       break;
     }
   }
 
   // RFC 0002: crash must not be overridden by a captured write proposal
-  // (candidate_log already returns write_proposal when successful)
   if (
     writeProposal &&
     result.stopReason !== "gate_blocked" &&
     result.stopReason !== "crash" &&
+    // candidate_log already set write_proposal + safetyNotices
     result.stopReason !== "write_proposal"
   ) {
     // RFC 0004 §6.4: project confirm-card safety at the turn seam

@@ -89,6 +89,8 @@ function parseUtteranceBody(body: Record<string, unknown>): TurnInput {
   return { tag: "utterance", content: message.trim() };
 }
 
+const VALID_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
+
 function parseCandidateLogBody(body: Record<string, unknown>): TurnInput {
   const foodId = body.foodId;
   const foodName = body.foodName;
@@ -104,8 +106,10 @@ function parseCandidateLogBody(body: Record<string, unknown>): TurnInput {
   if (typeof portionG !== "number" || !Number.isFinite(portionG) || portionG <= 0) {
     throw new Error("portionG must be a positive number for candidate_log turns");
   }
-  if (typeof mealType !== "string" || mealType.length === 0) {
-    throw new Error("mealType is required for candidate_log turns");
+  if (typeof mealType !== "string" || !VALID_MEAL_TYPES.has(mealType)) {
+    throw new Error(
+      `mealType must be one of ${[...VALID_MEAL_TYPES].join(", ")}`,
+    );
   }
 
   return {
