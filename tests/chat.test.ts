@@ -252,6 +252,28 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("min-h-[44px]");
     expect(source).toMatch(/optional note|feedback/i);
   });
+
+  it("surfaces match quality and safety notices on the proposal card before confirm (RFC 0004 §6)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("matchQualityLabel");
+    expect(source).toContain("projectProposalSafetyNotices");
+    expect(source).toContain("data-match-quality");
+    expect(source).toContain("data-safety-notices");
+    expect(source).toContain("Review before confirm");
+    expect(source).toMatch(/proposal\.matchType|matchType/);
+    expect(source).toMatch(/allergenTags|safetyNotices/);
+  });
+});
+
+describe("chat route safety context loading (RFC 0004 §6.4)", () => {
+  it("loads safety context via fail-closed helper and returns 503 on load failure", () => {
+    const source = fs.readFileSync("app/api/chat/route.ts", "utf-8");
+    expect(source).toContain("loadUserSafetyContext");
+    expect(source).toContain("safety_context_unavailable");
+    expect(source).toContain("503");
+    // Must not swallow profile errors into empty context
+    expect(source).not.toMatch(/catch\s*\{\s*return undefined\s*;\s*\}/);
+  });
 });
 
 // ── Turn Seam body parsing (issue #39) ─────────────────────────────────

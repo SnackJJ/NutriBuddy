@@ -49,7 +49,7 @@ npm run eval
 | Path | Role |
 |------|------|
 | `docs/PRD-v2.md` | Product goals / old milestone color |
-| `docs/rfc/*` | Historical design for landed structural work (all **Implemented**) |
+| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; later product RFCs may still be open. |
 | `docs/agents/*` | Tracker / triage / domain-doc **how-to** for Matt skills |
 
 **Do not load unless the task explicitly needs them:**

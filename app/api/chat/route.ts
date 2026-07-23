@@ -12,6 +12,7 @@ import {
 import { supabaseInteractionStore } from "@/lib/drugInteractions";
 import type { UserContext } from "@/harness/gate";
 import type { InteractionStore } from "@/lib/drugInteractions";
+import { loadUserSafetyContext } from "@/lib/userSafetyContext";
 import {
   parseChatBody,
   assembleChatTurnPorts,
@@ -95,32 +96,19 @@ function getRequestHistory(
 
 // ─── User context loading ──────────────────────────────────────────────
 
+/** Fail closed: profile/interaction load errors propagate (RFC 0004 §6.4). */
 async function loadUserContext(
   client: SupabaseClient,
   userId: string,
 ): Promise<
   { userContext: UserContext; interactionStore: InteractionStore } | undefined
 > {
-  try {
-    const gateway = createSupabaseProfileGateway(client);
-    const store = createMemoryStore({ gateway });
-    const profile = await store.getProfile(userId);
-    if (
-      !profile ||
-      (profile.allergies.length === 0 && profile.medications.length === 0)
-    ) {
-      return undefined;
-    }
-    return {
-      userContext: {
-        allergies: profile.allergies,
-        medications: profile.medications,
-      },
-      interactionStore: supabaseInteractionStore(client),
-    };
-  } catch {
-    return undefined;
-  }
+  return loadUserSafetyContext({
+    userId,
+    createMemoryStore: () =>
+      createMemoryStore({ gateway: createSupabaseProfileGateway(client) }),
+    createInteractionStore: () => supabaseInteractionStore(client),
+  });
 }
 
 /** Fail-soft meal loading: a ledger read failure degrades queries to empty
@@ -233,10 +221,22 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   let userContext: UserContext | undefined;
   let interactionStore: InteractionStore | undefined;
-  const ctx = await loadUserContext(userClient, session.userId);
-  if (ctx) {
-    userContext = ctx.userContext;
-    interactionStore = ctx.interactionStore;
+  try {
+    const ctx = await loadUserContext(userClient, session.userId);
+    if (ctx) {
+      userContext = ctx.userContext;
+      interactionStore = ctx.interactionStore;
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to load safety profile";
+    return new Response(
+      JSON.stringify({ error: `safety_context_unavailable: ${message}` }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)
