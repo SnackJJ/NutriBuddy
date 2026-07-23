@@ -895,6 +895,11 @@ describe("createLogMealHandler", () => {
       expect(params.properties.food_name).toBeDefined();
       expect(params.properties.food_name.type).toBe("string");
       expect(params.required).toContain("food_name");
+      expect(params.required).toContain("portion_g");
+      // Model schema must not expose food_id (mint authority stays on resolver).
+      expect(
+        Object.prototype.hasOwnProperty.call(params.properties, "food_id"),
+      ).toBe(false);
     });
 
     it("declares portion_g as a required number parameter", () => {

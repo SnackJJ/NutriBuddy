@@ -9,7 +9,26 @@ import {
   projectProposalSafetyNotices,
   type ProposalSafetyNotice,
 } from "@/lib/proposalSafety";
+import {
+  utteranceForCandidatePick,
+  type ResolverCandidate,
+  type ResolverMissProjection,
+} from "@/lib/resolverMiss";
+import {
+  isRetryableStopReason,
+  retryableMessage,
+  retryableTitle,
+  type RetryableTurnState,
+} from "@/lib/retryableTurn";
+import {
+  isProposalStale,
+  type ProposalUiStatus,
+} from "@/lib/proposalLifecycle";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
+import {
+  CustomMealForm,
+  type CustomMealFormValues,
+} from "@/components/CustomMealForm";
 import type { Session } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -31,6 +50,10 @@ interface DisplayMessage {
   readonly stopReason?: string;
   /** Write-proposal payload (when stopReason is "write_proposal"). */
   readonly proposal?: WriteProposalData;
+  /** Resolver miss projection (RFC 0004 §6.1). */
+  readonly resolverMiss?: ResolverMissProjection;
+  /** Proposal lifecycle status for retained cards (RFC 0004 §6.3). */
+  readonly proposalStatus?: ProposalUiStatus;
 }
 
 interface ToolCallEntry {
@@ -64,6 +87,7 @@ interface StreamTerminalResult {
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
   readonly safetyNotices?: readonly ProposalSafetyNotice[];
+  readonly resolverMiss?: ResolverMissProjection;
 }
 
 /** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
@@ -81,6 +105,7 @@ interface StreamEvent {
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
   readonly safetyNotices?: readonly ProposalSafetyNotice[];
+  readonly resolverMiss?: ResolverMissProjection;
   readonly checkpoint?: string;
   readonly verdict?: string;
   readonly checkName?: string;
@@ -97,6 +122,7 @@ interface AssistantStreamState {
   writeProposal?: WriteProposalData;
   interactions: DrugNutrientInteraction[];
   safetyNotices: ProposalSafetyNotice[];
+  resolverMiss?: ResolverMissProjection;
 }
 
 interface AssistantStreamHandlers {
@@ -112,6 +138,7 @@ function createAssistantStreamState(): AssistantStreamState {
     gateReasons: [],
     interactions: [],
     safetyNotices: [],
+    resolverMiss: undefined,
   };
 }
 
@@ -277,6 +304,10 @@ function applyTerminalResult(
   if (result.safetyNotices) {
     state.safetyNotices = [...result.safetyNotices];
   }
+
+  if (result.resolverMiss) {
+    state.resolverMiss = result.resolverMiss;
+  }
 }
 
 function applyAssistantStreamEvent(
@@ -440,6 +471,20 @@ function MessageBubble({
           )}
         </div>
 
+        {/* Retained proposal lifecycle card (committed / voided / stale) */}
+        {message.proposal && message.proposalStatus && (
+          <div className="mt-2">
+            <ProposalCard
+              proposal={message.proposal}
+              safetyNotices={[]}
+              status={message.proposalStatus}
+              onConfirm={() => undefined}
+              onReject={() => undefined}
+              confirming={false}
+            />
+          </div>
+        )}
+
         {/* Citation sources */}
         {message.sources && message.sources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -528,33 +573,155 @@ function MessageBubble({
   );
 }
 
+/** Retry affordance that preserves the original utterance (RFC 0004 §6.2). */
+function RetryableError({
+  state,
+  onRetry,
+  disabled,
+}: {
+  state: RetryableTurnState;
+  onRetry: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 shadow-sm"
+      data-retryable-reason={state.reason}
+      role="alert"
+    >
+      <p className="font-semibold">{retryableTitle(state.reason)}</p>
+      <p className="mt-1 text-xs text-red-800/90">{retryableMessage(state)}</p>
+      <p className="mt-2 truncate text-xs text-red-700/80">
+        Input kept: “{state.utterance}”
+      </p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRetry}
+        className="mt-3 min-h-[44px] w-full rounded-xl bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 sm:w-auto"
+        data-retry-button="true"
+      >
+        Retry same input
+      </button>
+    </div>
+  );
+}
+
+/** Clickable resolver candidates (RFC 0004 §6.1) — no free-form retype. */
+function CandidatePicker({
+  miss,
+  onPick,
+  disabled,
+}: {
+  miss: ResolverMissProjection;
+  onPick: (candidate: ResolverCandidate) => void;
+  disabled?: boolean;
+}) {
+  const quality = matchQualityLabel(miss.matchType);
+  return (
+    <div
+      className="rounded-xl border border-status-warning/40 bg-status-warning/10 p-4 shadow-sm"
+      data-resolver-miss={miss.matchType}
+    >
+      <p className="text-sm font-semibold text-amber-950">
+        {miss.matchType === "miss_ambiguous"
+          ? "Multiple matches — pick one"
+          : miss.matchType === "miss_unknown"
+            ? "No catalog match"
+            : "Uncertain match"}
+      </p>
+      <p className="mt-1 text-xs text-amber-900/90">{miss.message}</p>
+      {quality && (
+        <p
+          className="mt-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-900"
+          data-match-quality={quality.kind}
+        >
+          {quality.label} ({miss.matchType})
+        </p>
+      )}
+      {miss.candidates.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {miss.candidates.map((c) => (
+            <li key={c.foodId}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(c)}
+                className="min-h-[44px] w-full rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-left text-sm font-medium text-amber-950 transition hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+                data-candidate-id={c.foodId}
+              >
+                <span className="font-semibold">{c.foodName}</span>
+                {c.matchScore !== undefined && (
+                  <span className="ml-2 text-xs text-amber-700">
+                    score {c.matchScore}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-amber-900">
+          Try another name, or use a custom / recipe path when available. No web
+          search.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Write-proposal confirmation card (issue #39 / mobile thumb targets #83).
- *  RFC 0004 §6.1 / §6.4: match quality + safety notices before confirm. */
+ *  RFC 0004 §6.1 / §6.3 / §6.4: match quality, lifecycle, safety before confirm. */
 function ProposalCard({
   proposal,
   safetyNotices,
+  status = "pending",
   onConfirm,
   onReject,
+  onEditPortion,
   confirming,
 }: {
   proposal: WriteProposalData;
   safetyNotices: readonly ProposalSafetyNotice[];
+  status?: ProposalUiStatus;
   onConfirm: (feedback?: string) => void;
   onReject: () => void;
+  /** True edit: supersede with a new proposal (not optional note). */
+  onEditPortion?: (portionG: number) => void;
   confirming: boolean;
 }) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [editPortion, setEditPortion] = useState(String(proposal.portionG));
   const quality = matchQualityLabel(proposal.matchType);
   const hasSafety = safetyNotices.length > 0;
+  const stale =
+    status === "stale" ||
+    (status === "pending" && isProposalStale(proposal.createdAt));
+  const interactive = status === "pending" && !stale;
+  const statusLabel = stale
+    ? "stale"
+    : status === "committed"
+      ? "committed"
+      : status === "voided"
+        ? "voided"
+        : "pending";
 
   return (
     <div
       className={`rounded-xl border p-4 shadow-sm ${
-        hasSafety
-          ? "border-amber-300 bg-amber-50"
-          : "border-blue-200 bg-blue-50"
+        stale
+          ? "border-gray-300 bg-gray-50 opacity-90"
+          : status === "committed"
+            ? "border-green-200 bg-green-50"
+            : status === "voided"
+              ? "border-gray-200 bg-gray-50 opacity-80"
+              : hasSafety
+                ? "border-amber-300 bg-amber-50"
+                : "border-blue-200 bg-blue-50"
       }`}
+      data-proposal-status={statusLabel}
     >
       <div className="mb-3 flex items-center gap-2">
         <svg
@@ -572,11 +739,32 @@ function ProposalCard({
           />
         </svg>
         <span
-          className={`text-sm font-semibold ${hasSafety ? "text-amber-900" : "text-blue-800"}`}
+          className={`text-sm font-semibold ${
+            stale
+              ? "text-gray-700"
+              : status === "committed"
+                ? "text-green-900"
+                : hasSafety
+                  ? "text-amber-900"
+                  : "text-blue-800"
+          }`}
         >
-          Confirm Meal Log
+          {stale
+            ? "Proposal expired"
+            : status === "committed"
+              ? "Meal logged"
+              : status === "voided"
+                ? "Proposal cancelled"
+                : "Confirm Meal Log"}
         </span>
       </div>
+
+      {stale && (
+        <p className="mb-2 text-xs text-gray-600" data-stale-notice="true">
+          This proposal is older than 30 minutes or no longer committable.
+          Generate a new proposal to continue.
+        </p>
+      )}
 
       <div
         className={`mb-4 space-y-1 text-sm ${hasSafety ? "text-amber-950" : "text-blue-900"}`}
@@ -655,56 +843,183 @@ function ProposalCard({
         )}
       </div>
 
-      {/* Thumb-reach: stacked full-width actions on phone, row on sm+ */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <button
-          type="button"
-          onClick={() => onConfirm(showFeedback ? feedback : undefined)}
-          disabled={confirming}
-          className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
-        >
-          {confirming ? "Confirming…" : "✓ Confirm"}
-        </button>
-        <button
-          type="button"
-          onClick={onReject}
-          disabled={confirming}
-          className="min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
-        >
-          ✗ Reject
-        </button>
-        {!showFeedback && (
-          <button
-            type="button"
-            onClick={() => setShowFeedback(true)}
-            disabled={confirming}
-            className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
-          >
-            + Add optional note
-          </button>
-        )}
-      </div>
+      {interactive && (
+        <>
+          {/* Thumb-reach: stacked full-width actions on phone, row on sm+ */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <button
+              type="button"
+              onClick={() => onConfirm(showFeedback ? feedback : undefined)}
+              disabled={confirming}
+              className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
+            >
+              {confirming ? "Confirming…" : "✓ Confirm"}
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              disabled={confirming}
+              className="min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-h-0 sm:rounded-lg sm:py-2 sm:text-sm"
+            >
+              ✗ Reject
+            </button>
+            {!showFeedback && (
+              <button
+                type="button"
+                onClick={() => setShowFeedback(true)}
+                disabled={confirming}
+                className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
+              >
+                + Add optional note
+              </button>
+            )}
+            {onEditPortion && !showEdit && (
+              <button
+                type="button"
+                onClick={() => setShowEdit(true)}
+                disabled={confirming || !proposal.foodId}
+                className="min-h-[44px] w-full rounded-xl px-2 py-2 text-sm font-medium text-blue-700 hover:text-blue-900 disabled:opacity-50 sm:min-h-0 sm:w-auto sm:text-xs"
+                data-edit-portion="true"
+              >
+                Edit portion (new proposal)
+              </button>
+            )}
+          </div>
 
-      {showFeedback && (
-        <div className="mt-3 space-y-2">
-          <label className="block text-xs font-medium text-blue-800">
-            Optional note (does not change logged fields)
-          </label>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. felt full, rough estimate…"
-            rows={2}
-            disabled={confirming}
-            className="min-h-[44px] w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
-          />
-        </div>
+          {showFeedback && (
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-medium text-blue-800">
+                Optional note (does not change logged fields)
+              </label>
+              <textarea
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="e.g. felt full, rough estimate…"
+                rows={2}
+                disabled={confirming}
+                className="min-h-[44px] w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
+              />
+            </div>
+          )}
+
+          {showEdit && onEditPortion && (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="block flex-1 text-xs font-medium text-blue-800">
+                New portion (g)
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={editPortion}
+                  onChange={(e) => setEditPortion(e.target.value)}
+                  disabled={confirming}
+                  className="mt-1 min-h-[44px] w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  data-edit-portion-input="true"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={() => {
+                  const n = Number(editPortion);
+                  if (!Number.isFinite(n) || n <= 0) return;
+                  onEditPortion(n);
+                }}
+                className="min-h-[44px] rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                Apply as new proposal
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
 
 // ─── Page ──────────────────────────────────────────────────────────────
+
+interface TodaySnapshot {
+  readonly date: string;
+  readonly consumed: {
+    readonly kcal: number;
+    readonly proteinG: number;
+    readonly fatG: number;
+    readonly carbsG: number;
+  };
+  readonly remaining: {
+    readonly kcal: number | null;
+    readonly proteinG: number | null;
+    readonly fatG: number | null;
+    readonly carbsG: number | null;
+  };
+  readonly mealCount: number;
+}
+
+function TodayBar({
+  data,
+  expanded,
+  onToggle,
+}: {
+  data: TodaySnapshot | null;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className="shrink-0 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur"
+      data-today-bar="true"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="mx-auto flex w-full max-w-3xl items-center justify-between gap-2 text-left text-xs text-gray-700"
+      >
+        <span className="font-semibold text-gray-900">Today</span>
+        {data ? (
+          <span className="truncate">
+            {Math.round(data.consumed.kcal)} kcal
+            {data.remaining.kcal !== null &&
+              ` · ${Math.round(data.remaining.kcal)} left`}
+            {" · "}
+            P {Math.round(data.consumed.proteinG)}g
+            {data.remaining.proteinG !== null &&
+              ` (${Math.round(data.remaining.proteinG)} left)`}
+          </span>
+        ) : (
+          <span className="text-gray-400">Loading…</span>
+        )}
+        <span className="text-gray-400">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && data && (
+        <div className="mx-auto mt-2 grid max-w-3xl grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {(
+            [
+              ["kcal", data.consumed.kcal, data.remaining.kcal],
+              ["protein", data.consumed.proteinG, data.remaining.proteinG],
+              ["fat", data.consumed.fatG, data.remaining.fatG],
+              ["carbs", data.consumed.carbsG, data.remaining.carbsG],
+            ] as const
+          ).map(([label, c, r]) => (
+            <div
+              key={label}
+              className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5"
+            >
+              <div className="font-medium capitalize text-gray-800">{label}</div>
+              <div>
+                {Math.round(c)}
+                {r !== null ? ` / rem ${Math.round(r)}` : ""}
+              </div>
+            </div>
+          ))}
+          <div className="col-span-2 text-gray-500 sm:col-span-4">
+            {data.mealCount} meals · {data.date}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const { session, loading: sessionLoading, configured } = useSupabaseSession();
@@ -714,11 +1029,16 @@ export default function ChatPage() {
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [partialResponse, setPartialResponse] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [today, setToday] = useState<TodaySnapshot | null>(null);
+  const [todayExpanded, setTodayExpanded] = useState(false);
   const [pendingProposal, setPendingProposal] =
     useState<WriteProposalData | null>(null);
   const [pendingSafetyNotices, setPendingSafetyNotices] = useState<
     readonly ProposalSafetyNotice[]
   >([]);
+  const [pendingResolverMiss, setPendingResolverMiss] =
+    useState<ResolverMissProjection | null>(null);
+  const [retryable, setRetryable] = useState<RetryableTurnState | null>(null);
   const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -727,6 +1047,27 @@ export default function ChatPage() {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  const refreshToday = useCallback(async () => {
+    if (!session) {
+      setToday(null);
+      return;
+    }
+    try {
+      const res = await fetch("/api/today", {
+        headers: authHeader(session),
+      });
+      if (!res.ok) return;
+      const body = (await res.json()) as TodaySnapshot;
+      setToday(body);
+    } catch {
+      // TodayBar is best-effort; chat still works.
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void refreshToday();
+  }, [refreshToday]);
 
   useEffect(() => {
     scrollToBottom();
@@ -750,89 +1091,263 @@ export default function ChatPage() {
     [],
   );
 
+  /** Drive one free-text turn (also used by candidate pick — no retype). */
+  const runUtteranceTurn = useCallback(
+    async (trimmed: string, priorMessages: readonly DisplayMessage[]) => {
+      if (!session || streaming || sessionLoading) return;
+
+      setInput("");
+      setStreaming(true);
+      setError(null);
+      setCurrentTool(null);
+      setPartialResponse("");
+      setPendingProposal(null);
+      setPendingResolverMiss(null);
+      setRetryable(null);
+
+      const userMsg: DisplayMessage = {
+        role: "user",
+        content: trimmed,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      try {
+        const history = buildHistory(priorMessages);
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({ message: trimmed, history }),
+        });
+
+        if (!response.ok) {
+          const fallback =
+            response.status === 401
+              ? "Session expired or missing. Sign in via Profile and try again."
+              : "Failed to get a response. Please try again.";
+          const detail = await responseErrorMessage(response, fallback);
+          setError(detail);
+          // RFC 0004 §6.2: keep input — offer retry instead of blank box.
+          setInput(trimmed);
+          setRetryable({
+            utterance: trimmed,
+            reason: "http_error",
+            detail,
+          });
+          return;
+        }
+
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "An unexpected error occurred.");
+          }
+
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
+        });
+
+        if (
+          streamState.content ||
+          streamState.stopReason === "gate_blocked" ||
+          streamState.stopReason === "write_proposal" ||
+          streamState.resolverMiss ||
+          isRetryableStopReason(streamState.stopReason)
+        ) {
+          const { cleanText, sources } = extractSources(streamState.content);
+
+          const assistantMsg: DisplayMessage = {
+            role: "assistant",
+            content:
+              cleanText ||
+              streamState.content ||
+              (streamState.resolverMiss
+                ? streamState.resolverMiss.message
+                : isRetryableStopReason(streamState.stopReason)
+                  ? retryableMessage({
+                      utterance: trimmed,
+                      reason: streamState.stopReason,
+                    })
+                  : "Write proposal awaiting confirmation."),
+            sources: sources.length > 0 ? sources : undefined,
+            toolCalls:
+              streamState.toolCalls.length > 0
+                ? streamState.toolCalls
+                : undefined,
+            gateBlocked: streamState.stopReason === "gate_blocked",
+            gateReasons:
+              streamState.gateReasons.length > 0
+                ? streamState.gateReasons
+                : undefined,
+            stopReason: streamState.stopReason || undefined,
+            proposal: streamState.writeProposal,
+            resolverMiss: streamState.resolverMiss,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+
+          if (streamState.writeProposal) {
+            setPendingProposal(streamState.writeProposal);
+            setPendingSafetyNotices(
+              streamState.safetyNotices.length > 0
+                ? streamState.safetyNotices
+                : projectProposalSafetyNotices(
+                    streamState.writeProposal,
+                    streamState.interactions,
+                  ),
+            );
+          }
+
+          if (streamState.resolverMiss) {
+            setPendingResolverMiss(streamState.resolverMiss);
+          }
+
+          if (isRetryableStopReason(streamState.stopReason)) {
+            setInput(trimmed);
+            setRetryable({
+              utterance: trimmed,
+              reason: streamState.stopReason,
+            });
+          }
+        }
+
+        setPartialResponse("");
+        setCurrentTool(null);
+      } catch (err) {
+        const detail =
+          err instanceof Error
+            ? err.message
+            : "Network error. Please try again.";
+        setError(detail);
+        setInput(trimmed);
+        setRetryable({
+          utterance: trimmed,
+          reason: "network",
+          detail,
+        });
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [session, streaming, sessionLoading, buildHistory],
+  );
+
   const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || streaming || sessionLoading) return;
 
-    // Issue #82: /api/chat is auth-only — block before the network call.
     if (!session) {
       setError("Sign in required. Open Profile to sign in, then return here.");
       return;
     }
 
-    setInput("");
-    setStreaming(true);
+    await runUtteranceTurn(trimmed, messages);
+  }, [
+    input,
+    streaming,
+    sessionLoading,
+    session,
+    messages,
+    runUtteranceTurn,
+  ]);
+
+  const handleRetry = useCallback(async () => {
+    if (!retryable || streaming) return;
+    const text = retryable.utterance;
+    setRetryable(null);
     setError(null);
-    setCurrentTool(null);
-    setPartialResponse("");
-    setPendingProposal(null);
+    // Drop the failed user (and trailing assistant) bubble so retry does not
+    // duplicate history for the model or the UI (Codex T04 review).
+    setMessages((prev) => {
+      const next = [...prev];
+      while (
+        next.length > 0 &&
+        next[next.length - 1]?.role === "assistant" &&
+        isRetryableStopReason(next[next.length - 1]?.stopReason)
+      ) {
+        next.pop();
+      }
+      if (
+        next.length > 0 &&
+        next[next.length - 1]?.role === "user" &&
+        next[next.length - 1]?.content === text
+      ) {
+        next.pop();
+      }
+      void runUtteranceTurn(text, next);
+      return next;
+    });
+  }, [retryable, streaming, runUtteranceTurn]);
 
-    const userMsg: DisplayMessage = {
-      role: "user",
-      content: trimmed,
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    try {
-      const history = buildHistory(messages);
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: chatHeaders(session),
-        body: JSON.stringify({ message: trimmed, history }),
-      });
-
-      if (!response.ok) {
-        const fallback =
-          response.status === 401
-            ? "Session expired or missing. Sign in via Profile and try again."
-            : "Failed to get a response. Please try again.";
-        setError(await responseErrorMessage(response, fallback));
+  const handlePickCandidate = useCallback(
+    async (candidate: ResolverCandidate) => {
+      if (!pendingResolverMiss || streaming || !session || sessionLoading) {
         return;
       }
 
-      const streamState = createAssistantStreamState();
-      await readChatStream(response, (event) => {
-        if (event.type === "error") {
-          throw new Error(event.error ?? "An unexpected error occurred.");
+      const priorMiss = pendingResolverMiss;
+      const portionG = priorMiss.portionG ?? 100;
+      const mealType = priorMiss.mealType ?? "snack";
+      // Keep picker visible until the structured turn succeeds (Codex review).
+      setStreaming(true);
+      setError(null);
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "candidate_log",
+            foodId: candidate.foodId,
+            foodName: candidate.foodName,
+            portionG,
+            mealType,
+          }),
+        });
+
+        if (!response.ok) {
+          const fallback =
+            response.status === 401
+              ? "Session expired or missing. Sign in via Profile and try again."
+              : "Failed to log selected food. Please try again.";
+          setError(await responseErrorMessage(response, fallback));
+          return;
         }
 
-        applyAssistantStreamEvent(event, streamState, {
-          setCurrentTool,
-          setPartialResponse,
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "Candidate log failed.");
+          }
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
         });
-      });
 
-      if (
-        streamState.content ||
-        streamState.stopReason === "gate_blocked" ||
-        streamState.stopReason === "write_proposal"
-      ) {
-        const { cleanText, sources } = extractSources(streamState.content);
-
-        const assistantMsg: DisplayMessage = {
-          role: "assistant",
-          content:
-            cleanText ||
-            streamState.content ||
-            "Write proposal awaiting confirmation.",
-          sources: sources.length > 0 ? sources : undefined,
-          toolCalls:
-            streamState.toolCalls.length > 0
-              ? streamState.toolCalls
-              : undefined,
-          gateBlocked: streamState.stopReason === "gate_blocked",
-          gateReasons:
-            streamState.gateReasons.length > 0
-              ? streamState.gateReasons
-              : undefined,
-          stopReason: streamState.stopReason || undefined,
-          proposal: streamState.writeProposal,
+        const pickMsg: DisplayMessage = {
+          role: "user",
+          content: utteranceForCandidatePick(candidate, priorMiss),
         };
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [...prev, pickMsg]);
 
         if (streamState.writeProposal) {
+          setPendingResolverMiss(null);
+          const { cleanText, sources } = extractSources(streamState.content);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                cleanText ||
+                streamState.content ||
+                "Write proposal awaiting confirmation.",
+              sources: sources.length > 0 ? sources : undefined,
+              stopReason: streamState.stopReason || undefined,
+              proposal: streamState.writeProposal,
+            },
+          ]);
           setPendingProposal(streamState.writeProposal);
-          // Prefer turn-seam projection; fall back only if terminal omitted notices.
           setPendingSafetyNotices(
             streamState.safetyNotices.length > 0
               ? streamState.safetyNotices
@@ -842,18 +1357,145 @@ export default function ChatPage() {
                 ),
           );
         }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Network error during candidate pick.",
+        );
+      } finally {
+        setStreaming(false);
+        setPartialResponse("");
+        setCurrentTool(null);
       }
+    },
+    [pendingResolverMiss, streaming, session, sessionLoading],
+  );
 
-      setPartialResponse("");
-      setCurrentTool(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Network error. Please try again.",
-      );
-    } finally {
-      setStreaming(false);
-    }
-  }, [input, streaming, sessionLoading, messages, session, buildHistory]);
+  /** Hand-entry custom meal → proposal (RFC 0005 packaging escape hatch). */
+  const handleCustomMeal = useCallback(
+    async (values: CustomMealFormValues) => {
+      if (!session || streaming || sessionLoading) return;
+      setConfirming(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/custom-meal", {
+          method: "POST",
+          headers: {
+            ...chatHeaders(session),
+          },
+          body: JSON.stringify(values),
+        });
+        if (!res.ok) {
+          setError(await responseErrorMessage(res, "Custom meal failed."));
+          return;
+        }
+        const body = (await res.json()) as {
+          proposal: WriteProposalData;
+        };
+        setPendingResolverMiss(null);
+        setPendingProposal(body.proposal);
+        setPendingSafetyNotices(
+          projectProposalSafetyNotices(body.proposal, []),
+        );
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Custom meal proposal for ${body.proposal.foodName}.`,
+            stopReason: "write_proposal",
+            proposal: body.proposal,
+          },
+        ]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Custom meal failed.");
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [session, streaming, sessionLoading],
+  );
+
+  /** Edit portion: void current proposal, open a new one bound to foodId. */
+  const handleEditPortion = useCallback(
+    async (portionG: number) => {
+      if (!pendingProposal?.foodId || confirming || !session || sessionLoading) {
+        return;
+      }
+      setConfirming(true);
+      setError(null);
+      const old = pendingProposal;
+      try {
+        // Void old proposal (best-effort) — immutable bytes never mutated.
+        await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "proposal_confirm",
+            proposalId: old.proposalId,
+            confirmed: false,
+          }),
+        });
+
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "candidate_log",
+            foodId: old.foodId,
+            foodName: old.canonicalName ?? old.foodName,
+            portionG,
+            mealType: old.mealType,
+          }),
+        });
+        if (!response.ok) {
+          setError(await responseErrorMessage(response, "Edit failed."));
+          return;
+        }
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "Edit failed.");
+          }
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
+        });
+        if (streamState.writeProposal) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `Superseded with ${portionG}g ${old.foodName}.`,
+              proposal: old,
+              proposalStatus: "voided",
+            },
+            {
+              role: "assistant",
+              content: "New proposal awaiting confirmation.",
+              stopReason: "write_proposal",
+              proposal: streamState.writeProposal,
+            },
+          ]);
+          setPendingProposal(streamState.writeProposal);
+          setPendingSafetyNotices(
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
+          );
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Edit failed.");
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [pendingProposal, confirming, session, sessionLoading],
+  );
 
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
@@ -890,6 +1532,7 @@ export default function ChatPage() {
         }
 
         let reply = "";
+        let notCommittable = false;
         await readChatStream(response, (event) => {
           if (event.type === "error") {
             throw new Error(event.error ?? "Confirmation failed.");
@@ -899,16 +1542,38 @@ export default function ChatPage() {
           if (result?.reply) {
             reply = result.reply;
           }
+          if (
+            typeof result?.reply === "string" &&
+            /not_committable|expired|cannot be processed/i.test(result.reply)
+          ) {
+            notCommittable = true;
+          }
         });
 
+        const nextStatus: ProposalUiStatus = notCommittable
+          ? "stale"
+          : confirmed
+            ? "committed"
+            : "voided";
+
+        // Retain proposal card in history with lifecycle status (RFC 0004 §6.3).
         const confirmMsg: DisplayMessage = {
           role: "assistant",
-          content: reply || `Proposal ${confirmed ? "confirmed" : "rejected"}.`,
+          content:
+            reply ||
+            (nextStatus === "stale"
+              ? "Proposal is no longer committable (expired or already handled)."
+              : `Proposal ${confirmed ? "confirmed" : "rejected"}.`),
           stopReason: "end_turn",
+          proposal: pendingProposal,
+          proposalStatus: nextStatus,
         };
         setMessages((prev) => [...prev, confirmMsg]);
         setPendingProposal(null);
         setPendingSafetyNotices([]);
+        if (nextStatus === "committed") {
+          void refreshToday();
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -919,7 +1584,7 @@ export default function ChatPage() {
         setConfirming(false);
       }
     },
-    [pendingProposal, confirming, sessionLoading, session],
+    [pendingProposal, confirming, sessionLoading, session, refreshToday],
   );
 
   /** Send on Enter (no Shift), newline on Shift+Enter. */
@@ -976,6 +1641,14 @@ export default function ChatPage() {
         </div>
       )}
 
+      {!signedOut && (
+        <TodayBar
+          data={today}
+          expanded={todayExpanded}
+          onToggle={() => setTodayExpanded((v) => !v)}
+        />
+      )}
+
       {/* ── Messages ──────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-6">
@@ -1009,14 +1682,48 @@ export default function ChatPage() {
                     safetyNotices={pendingSafetyNotices}
                     onConfirm={(fb) => handleConfirmProposal(true, fb)}
                     onReject={() => handleConfirmProposal(false)}
+                    onEditPortion={handleEditPortion}
                     confirming={confirming}
                   />
                 </div>
               </div>
             )}
 
-            {/* Error banner */}
-            {error && (
+            {/* Resolver miss candidates (RFC 0004 §6.1) */}
+            {pendingResolverMiss && !streaming && !pendingProposal && (
+              <div className="flex justify-start">
+                <div className="w-full max-w-full space-y-3 sm:max-w-[75%]">
+                  <CandidatePicker
+                    miss={pendingResolverMiss}
+                    onPick={handlePickCandidate}
+                    disabled={streaming}
+                  />
+                  {pendingResolverMiss.matchType === "miss_unknown" && (
+                    <CustomMealForm
+                      initialName={pendingResolverMiss.input}
+                      disabled={streaming || confirming}
+                      onSubmit={handleCustomMeal}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Retryable failures keep input (RFC 0004 §6.2) */}
+            {retryable && !streaming && (
+              <div className="flex justify-start">
+                <div className="w-full max-w-full sm:max-w-[75%]">
+                  <RetryableError
+                    state={retryable}
+                    onRetry={handleRetry}
+                    disabled={streaming}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Non-retryable error banner */}
+            {error && !retryable && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 <p className="font-medium">Error</p>
                 <p className="mt-0.5">{error}</p>

@@ -12,6 +12,7 @@ import type {
   ProposalStore,
   VoidResult,
 } from "../../src/harness/logMeal";
+import { isProposalStale } from "../../src/lib/proposalLifecycle";
 
 /** Test-only. In-memory ProposalStore must implement this; Supabase adapter must not. */
 export interface FaultInjectable {
@@ -118,6 +119,11 @@ export function createInMemoryProposalStore(
       }
 
       const proposal = proposals[index];
+      // Mirror SQL TTL (RFC 0004 §6.3) — expire instead of commit.
+      if (isProposalStale(proposal.createdAt, Date.parse(now()))) {
+        proposals[index] = { ...proposal, status: "expired" };
+        return { kind: "not_committable" };
+      }
       const committed: Proposal = { ...proposal, status: "committed" };
       proposals[index] = committed;
 

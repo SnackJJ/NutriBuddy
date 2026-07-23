@@ -210,6 +210,11 @@ export interface TerminalResult {
    * renders the same typed notices without re-deriving relevance in the UI.
    */
   readonly safetyNotices?: readonly import("../lib/proposalSafety").ProposalSafetyNotice[];
+  /**
+   * Resolver miss projection when log_meal returned typed_miss (RFC 0004 §6.1).
+   * Carries clickable candidates so the UI never parses toolResult prose.
+   */
+  readonly resolverMiss?: import("../lib/resolverMiss").ResolverMissProjection;
 }
 
 /**

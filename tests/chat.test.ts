@@ -262,6 +262,49 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("safetyNotices");
     expect(source).toMatch(/proposal\.matchType|matchType/);
   });
+
+  it("renders clickable resolver candidates without requiring free-form retype (RFC 0004 §6.1)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("CandidatePicker");
+    expect(source).toContain("utteranceForCandidatePick");
+    expect(source).toContain("data-resolver-miss");
+    expect(source).toContain("data-candidate-id");
+    expect(source).toContain("pendingResolverMiss");
+  });
+
+  it("keeps input and offers retry for max_steps/crash/aborted (RFC 0004 §6.2)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("RetryableError");
+    expect(source).toContain("isRetryableStopReason");
+    expect(source).toContain("data-retryable-reason");
+    expect(source).toContain("data-retry-button");
+    expect(source).toContain("Retry same input");
+    expect(source).toContain("setInput(trimmed)");
+    // Retry must strip failed bubbles before re-submit (no duplicate history).
+    expect(source).toMatch(/next\.pop\(\)/);
+  });
+
+  it("renders proposal lifecycle statuses including stale (RFC 0004 §6.3)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-proposal-status");
+    expect(source).toContain("isProposalStale");
+    expect(source).toContain("data-stale-notice");
+    expect(source).toContain("proposalStatus");
+  });
+
+  it("supports portion edit as superseding proposal (RFC 0004 §6.3 edit)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-edit-portion");
+    expect(source).toContain("handleEditPortion");
+    expect(source).toContain("Apply as new proposal");
+  });
+
+  it("shows TodayBar fed by /api/today (RFC 0004 §2/§5)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("data-today-bar");
+    expect(source).toContain("/api/today");
+    expect(source).toContain("TodayBar");
+  });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {
@@ -285,6 +328,15 @@ describe("turn seam projects proposal safetyNotices (RFC 0004 §6.4)", () => {
     const source = fs.readFileSync("src/harness/turn.ts", "utf-8");
     expect(source).toContain("projectProposalSafetyNotices");
     expect(source).toContain("safetyNotices");
+  });
+});
+
+describe("turn seam projects resolverMiss (RFC 0004 §6.1)", () => {
+  it("projects typed_miss log_meal outcomes at the turn layer", () => {
+    const source = fs.readFileSync("src/harness/turn.ts", "utf-8");
+    expect(source).toContain("projectResolverMiss");
+    expect(source).toContain("resolverMiss");
+    expect(source).toContain("typed_miss");
   });
 });
 

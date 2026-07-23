@@ -32,7 +32,18 @@ export interface ProposalConfirmChatBody {
   readonly feedback?: string;
 }
 
-export type ChatRequestBody = UtteranceChatBody | ProposalConfirmChatBody;
+export interface CandidateLogChatBody {
+  readonly tag: "candidate_log";
+  readonly foodId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
+}
+
+export type ChatRequestBody =
+  | UtteranceChatBody
+  | ProposalConfirmChatBody
+  | CandidateLogChatBody;
 
 // ─── Body parsing ─────────────────────────────────────────────────────
 
@@ -78,6 +89,38 @@ function parseUtteranceBody(body: Record<string, unknown>): TurnInput {
   return { tag: "utterance", content: message.trim() };
 }
 
+const VALID_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner", "snack"]);
+
+function parseCandidateLogBody(body: Record<string, unknown>): TurnInput {
+  const foodId = body.foodId;
+  const foodName = body.foodName;
+  const portionG = body.portionG;
+  const mealType = body.mealType;
+
+  if (typeof foodId !== "string" || foodId.length === 0) {
+    throw new Error("foodId is required for candidate_log turns");
+  }
+  if (typeof foodName !== "string" || foodName.trim().length === 0) {
+    throw new Error("foodName is required for candidate_log turns");
+  }
+  if (typeof portionG !== "number" || !Number.isFinite(portionG) || portionG <= 0) {
+    throw new Error("portionG must be a positive number for candidate_log turns");
+  }
+  if (typeof mealType !== "string" || !VALID_MEAL_TYPES.has(mealType)) {
+    throw new Error(
+      `mealType must be one of ${[...VALID_MEAL_TYPES].join(", ")}`,
+    );
+  }
+
+  return {
+    tag: "candidate_log",
+    foodId,
+    foodName: foodName.trim(),
+    portionG,
+    mealType,
+  };
+}
+
 export function parseChatBody(body: unknown): TurnInput {
   if (!isRecord(body)) {
     throw new Error("request body must be a JSON object");
@@ -89,9 +132,13 @@ export function parseChatBody(body: unknown): TurnInput {
     return parseProposalConfirmBody(body);
   }
 
+  if (tag === "candidate_log") {
+    return parseCandidateLogBody(body);
+  }
+
   if (tag !== undefined && tag !== "utterance") {
     throw new Error(
-      `Unknown turn tag: "${String(tag)}". Expected "utterance" or "proposal_confirm".`,
+      `Unknown turn tag: "${String(tag)}". Expected "utterance", "proposal_confirm", or "candidate_log".`,
     );
   }
 

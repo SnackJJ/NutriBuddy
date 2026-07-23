@@ -1,6 +1,6 @@
 # RFC 0004 — Frontend UX Contract（前端 UX 契约）
 
-> Status: **Accepted** (2026-07-23) — Grok × Codex 联合决议后接受。实现完成前保持 Accepted，**不是** Implemented。
+> Status: **Accepted** (2026-07-23) — Grok × Codex 联合决议后接受。Tickets 01–07 landed toward Implemented; mark Implemented when §9 checklist is fully green.
 > **Not always-on agent context** — 只在做前端 UX / 组件 / design token 时打开。
 > Architecture source of truth: `docs/ADD.md`。本文不改任何架构决策。
 > Scope: **UX 契约层** — 用户、任务、流程、状态覆盖、指标。**不含**实现（token 值、组件代码、页面布局），那些是下游 tickets。

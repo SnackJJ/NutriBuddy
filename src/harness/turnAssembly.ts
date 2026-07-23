@@ -15,7 +15,10 @@ import type {
 import type { TurnPorts, TurnResult } from "./turn";
 import { resolveConfirmPorts } from "./turn";
 
-export type TurnAssemblyKind = "utterance" | "proposal_confirm";
+export type TurnAssemblyKind =
+  | "utterance"
+  | "proposal_confirm"
+  | "candidate_log";
 
 export const ASSEMBLY_INCOMPLETE = "assembly_incomplete";
 export const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
@@ -86,6 +89,17 @@ export function createTurnAssembly(
         checkName: CONFIRM_PORTS_INCOMPLETE,
         reason:
           "ConfirmPorts incomplete: proposalStore and sessionUserId are required",
+      };
+    }
+  }
+
+  if (input.kind === "candidate_log") {
+    if (!input.catalog || !input.proposalStore || !input.sessionUserId) {
+      return {
+        ok: false,
+        checkName: ASSEMBLY_INCOMPLETE,
+        reason:
+          "candidate_log requires catalog, proposalStore, and sessionUserId",
       };
     }
   }

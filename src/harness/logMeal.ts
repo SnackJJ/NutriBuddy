@@ -194,17 +194,31 @@ export interface LogMealDeps {
 
 // ─── 参数校验 ─────────────────────────────────────────────────────────────
 
-interface ParsedArgs {
+// ParsedLogMealArgs exported above for candidate_log short-circuit.
+
+export interface ParsedLogMealArgs {
   readonly foodName: string;
   readonly portionG: number;
   readonly mealType: string;
+  /** When set, resolve by catalog id (deterministic candidate pick). */
+  readonly foodId?: string;
 }
 
 function parseArgs(
   args: Readonly<Record<string, unknown>>,
-): ParsedArgs | string {
+): ParsedLogMealArgs | string {
+  const foodIdRaw = args.food_id;
+  const foodId =
+    typeof foodIdRaw === "string" && foodIdRaw.trim().length > 0
+      ? foodIdRaw.trim()
+      : undefined;
+
   const foodName = args.food_name;
-  if (typeof foodName !== "string" || foodName.trim().length === 0) {
+  // food_id alone is enough for deterministic candidate pick; name still preferred.
+  if (
+    !foodId &&
+    (typeof foodName !== "string" || foodName.trim().length === 0)
+  ) {
     return "missing or invalid food_name: must be a non-empty string";
   }
 
@@ -231,7 +245,15 @@ function parseArgs(
     mealType = args.meal_type;
   }
 
-  return { foodName: foodName.trim(), portionG, mealType };
+  return {
+    foodName:
+      typeof foodName === "string" && foodName.trim().length > 0
+        ? foodName.trim()
+        : foodId!,
+    portionG,
+    mealType,
+    ...(foodId ? { foodId } : {}),
+  };
 }
 
 // ─── 营养缩放 ─────────────────────────────────────────────────────────────
@@ -374,6 +396,8 @@ export const LOG_MEAL_SCHEMA = {
           description:
             "Food name in English, e.g. 'chicken breast', 'rice', 'apple'.",
         },
+        // food_id is intentionally NOT in the model schema — IDs are only
+        // accepted via the candidate_log short-circuit (resolver remains mint authority).
         portion_g: {
           type: "number",
           description: "Portion size in grams, must be > 0. E.g. 200 for 200g.",
@@ -414,36 +438,65 @@ export function createLogMealHandler(deps: LogMealDeps): ToolHandler {
       return errorResponse(parsed);
     }
 
-    const resolved = resolveFood(catalog, parsed.foodName);
+    return storeProposalFromParsed(catalog, proposalStore, userId, parsed);
+  };
+}
 
-    // ── Resolver miss → clarification ──────────────────────────────────
+/**
+ * Deterministic proposal store from already-parsed log_meal args.
+ * Used by the handler and by candidate_log short-circuit (no model).
+ */
+export async function storeProposalFromParsed(
+  catalog: Catalog,
+  proposalStore: ProposalStore,
+  userId: string,
+  parsed: ParsedLogMealArgs,
+): Promise<HandlerOutcome> {
+  let foodRef;
+  let catalogSnapshotId: string;
+
+  if (parsed.foodId) {
+    const food = catalog.allFoods.find((f) => f.id === parsed.foodId);
+    if (!food) {
+      return errorResponse(`food_id not found in catalog: "${parsed.foodId}"`);
+    }
+    foodRef = {
+      foodId: food.id,
+      canonicalName: food.canonicalName,
+      per100g: food.per100g,
+      allergenTags: food.allergenTags,
+      matchType: "exact" as const,
+      matchScore: 1,
+    };
+    catalogSnapshotId = catalog.snapshot.version;
+  } else {
+    const resolved = resolveFood(catalog, parsed.foodName);
     if (isResolverMiss(resolved)) {
       return resolverMissResponse(resolved);
     }
+    foodRef = resolved.foodRef;
+    catalogSnapshotId = resolved.catalogSnapshotId;
+  }
 
-    const foodRef = resolved.foodRef;
-    const scaled = scaleNutrition(foodRef.per100g, parsed.portionG);
+  const scaled = scaleNutrition(foodRef.per100g, parsed.portionG);
 
-    // ProposalStore / unexpected throws propagate → dispatch maps to infra_error
-    const proposal = await proposalStore.store({
-      userId,
-      foodId: foodRef.foodId,
-      foodName: parsed.foodName,
-      canonicalName: foodRef.canonicalName,
-      portionG: parsed.portionG,
-      mealType: parsed.mealType,
-      kcal: scaled.kcal,
-      proteinG: scaled.proteinG,
-      fatG: scaled.fatG,
-      carbsG: scaled.carbsG,
-      nutritionSource: resolved.catalogSnapshotId,
-      matchType: foodRef.matchType,
-      // DB column is NOT NULL text[]; preserve unreviewed via allergenCoverage.
-      allergenTags: foodRef.allergenTags ?? [],
-      allergenCoverage:
-        foodRef.allergenTags === undefined ? "unreviewed" : "reviewed",
-    });
+  const proposal = await proposalStore.store({
+    userId,
+    foodId: foodRef.foodId,
+    foodName: parsed.foodName,
+    canonicalName: foodRef.canonicalName,
+    portionG: parsed.portionG,
+    mealType: parsed.mealType,
+    kcal: scaled.kcal,
+    proteinG: scaled.proteinG,
+    fatG: scaled.fatG,
+    carbsG: scaled.carbsG,
+    nutritionSource: catalogSnapshotId,
+    matchType: foodRef.matchType,
+    allergenTags: foodRef.allergenTags ?? [],
+    allergenCoverage:
+      foodRef.allergenTags === undefined ? "unreviewed" : "reviewed",
+  });
 
-    return proposalResponse(proposal);
-  };
+  return proposalResponse(proposal);
 }
