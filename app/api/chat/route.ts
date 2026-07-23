@@ -87,11 +87,12 @@ function getRequestHistory(
   body: ChatRequestBody,
   turnInput: TurnInput,
 ): readonly ChatMessage[] | undefined {
-  if (turnInput.tag !== "utterance" || body.tag === "proposal_confirm") {
+  if (turnInput.tag !== "utterance") {
     return undefined;
   }
-
-  return body.history;
+  return body.tag === "utterance" || body.tag === undefined
+    ? body.history
+    : undefined;
 }
 
 // ─── User context loading ──────────────────────────────────────────────

@@ -28,7 +28,11 @@ import {
 } from "../lib/resolverMiss";
 import type { Observation } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
-import type { MealLogStore, ProposalStore } from "./logMeal";
+import {
+  storeProposalFromParsed,
+  type MealLogStore,
+  type ProposalStore,
+} from "./logMeal";
 import {
   handleProposalConfirm,
   type ProposalConfirmOutcome,
@@ -45,7 +49,10 @@ export const SCHEMA_VERSION = "1.9.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
-export type TurnInput = UtteranceInput | ProposalConfirmInput;
+export type TurnInput =
+  | UtteranceInput
+  | ProposalConfirmInput
+  | CandidateLogInput;
 
 export interface UtteranceInput {
   readonly tag: "utterance";
@@ -57,6 +64,15 @@ export interface ProposalConfirmInput {
   readonly proposalId: string;
   readonly confirmed: boolean;
   readonly feedback?: string;
+}
+
+/** Deterministic log from a resolver candidate pick (RFC 0004 §6.1). No model. */
+export interface CandidateLogInput {
+  readonly tag: "candidate_log";
+  readonly foodId: string;
+  readonly foodName: string;
+  readonly portionG: number;
+  readonly mealType: string;
 }
 
 type Clock = () => Date;
@@ -802,6 +818,69 @@ interface UtteranceTurnOutput {
   readonly resolverMiss?: ResolverMissProjection;
 }
 
+async function* runCandidateLogTurn(
+  input: CandidateLogInput,
+  ports: TurnPorts,
+  nextMetadata: NextEventMetadata,
+): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
+  if (!ports.catalog || !ports.proposalStore || !ports.sessionUserId) {
+    const result: TurnResult = {
+      reply: "Candidate log requires catalog and proposal store.",
+      steps: 0,
+      stopReason: "crash",
+    };
+    yield createTurnEndEvent(result, nextMetadata);
+    return result;
+  }
+
+  const outcome = await storeProposalFromParsed(
+    ports.catalog,
+    ports.proposalStore,
+    ports.sessionUserId,
+    {
+      foodId: input.foodId,
+      foodName: input.foodName,
+      portionG: input.portionG,
+      mealType: input.mealType,
+    },
+  );
+
+  if (outcome.kind !== "ok") {
+    const result: TurnResult = {
+      reply:
+        outcome.kind === "typed_error" || outcome.kind === "typed_miss"
+          ? outcome.message
+          : "Could not log selected food.",
+      steps: 0,
+      stopReason: "end_turn",
+    };
+    yield createTurnEndEvent(result, nextMetadata);
+    return result;
+  }
+
+  const proposal = parseWriteProposalData(outcome.data);
+  if (!proposal) {
+    const result: TurnResult = {
+      reply: "Could not build proposal from selected food.",
+      steps: 0,
+      stopReason: "crash",
+    };
+    yield createTurnEndEvent(result, nextMetadata);
+    return result;
+  }
+
+  const safetyNotices = projectProposalSafetyNotices(proposal, []);
+  const result: TurnResult = {
+    reply: `Log ${proposal.portionG}g ${proposal.foodName} for ${proposal.mealType}?`,
+    steps: 0,
+    stopReason: "write_proposal",
+    proposal,
+    safetyNotices,
+  };
+  yield createTurnEndEvent(result, nextMetadata);
+  return result;
+}
+
 async function* runUtteranceTurn(
   input: UtteranceInput,
   ports: TurnPorts,
@@ -817,6 +896,11 @@ async function* runUtteranceTurn(
   let outputGateFailReasons: readonly string[] = [];
 
   for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
+    // RFC 0004: do not leak resolver miss from a blocked attempt into a later retry.
+    lastResolverMiss = undefined;
+    lastWriteProposalData = undefined;
+    lastLogMealActArgs = undefined;
+
     const history: ChatMessage[] = [...(ports.history ?? [])];
 
     // On retry, inject the blocked response and combined feedback as history
@@ -1238,13 +1322,21 @@ export async function* turn(
       confirmCommitVerdict = outcome.commitVerdict;
       break;
     }
+    case "candidate_log": {
+      // RFC 0004 §6.1: bind pick to catalog food_id — no free-text model path.
+      result = yield* runCandidateLogTurn(input, ports, nextMetadata);
+      writeProposal = result.proposal;
+      break;
+    }
   }
 
   // RFC 0002: crash must not be overridden by a captured write proposal
+  // (candidate_log already returns write_proposal when successful)
   if (
     writeProposal &&
     result.stopReason !== "gate_blocked" &&
-    result.stopReason !== "crash"
+    result.stopReason !== "crash" &&
+    result.stopReason !== "write_proposal"
   ) {
     // RFC 0004 §6.4: project confirm-card safety at the turn seam
     const safetyNotices = projectProposalSafetyNotices(

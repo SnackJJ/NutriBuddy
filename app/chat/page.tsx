@@ -963,12 +963,95 @@ export default function ChatPage() {
 
   const handlePickCandidate = useCallback(
     async (candidate: ResolverCandidate) => {
-      if (!pendingResolverMiss || streaming) return;
-      const next = utteranceForCandidatePick(candidate, pendingResolverMiss);
-      setPendingResolverMiss(null);
-      await runUtteranceTurn(next, messages);
+      if (!pendingResolverMiss || streaming || !session || sessionLoading) {
+        return;
+      }
+
+      const priorMiss = pendingResolverMiss;
+      const portionG = priorMiss.portionG ?? 100;
+      const mealType = priorMiss.mealType ?? "snack";
+      // Keep picker visible until the structured turn succeeds (Codex review).
+      setStreaming(true);
+      setError(null);
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({
+            tag: "candidate_log",
+            foodId: candidate.foodId,
+            foodName: candidate.foodName,
+            portionG,
+            mealType,
+          }),
+        });
+
+        if (!response.ok) {
+          const fallback =
+            response.status === 401
+              ? "Session expired or missing. Sign in via Profile and try again."
+              : "Failed to log selected food. Please try again.";
+          setError(await responseErrorMessage(response, fallback));
+          return;
+        }
+
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "Candidate log failed.");
+          }
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
+        });
+
+        const pickMsg: DisplayMessage = {
+          role: "user",
+          content: utteranceForCandidatePick(candidate, priorMiss),
+        };
+        setMessages((prev) => [...prev, pickMsg]);
+
+        if (streamState.writeProposal) {
+          setPendingResolverMiss(null);
+          const { cleanText, sources } = extractSources(streamState.content);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                cleanText ||
+                streamState.content ||
+                "Write proposal awaiting confirmation.",
+              sources: sources.length > 0 ? sources : undefined,
+              stopReason: streamState.stopReason || undefined,
+              proposal: streamState.writeProposal,
+            },
+          ]);
+          setPendingProposal(streamState.writeProposal);
+          setPendingSafetyNotices(
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
+          );
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Network error during candidate pick.",
+        );
+      } finally {
+        setStreaming(false);
+        setPartialResponse("");
+        setCurrentTool(null);
+      }
     },
-    [pendingResolverMiss, streaming, messages, runUtteranceTurn],
+    [pendingResolverMiss, streaming, session, sessionLoading],
   );
 
   /** Confirm a write proposal through a structured turn input. */
