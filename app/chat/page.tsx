@@ -14,6 +14,12 @@ import {
   type ResolverCandidate,
   type ResolverMissProjection,
 } from "@/lib/resolverMiss";
+import {
+  isRetryableStopReason,
+  retryableMessage,
+  retryableTitle,
+  type RetryableTurnState,
+} from "@/lib/retryableTurn";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 import type { Session } from "@supabase/supabase-js";
 
@@ -543,6 +549,40 @@ function MessageBubble({
   );
 }
 
+/** Retry affordance that preserves the original utterance (RFC 0004 §6.2). */
+function RetryableError({
+  state,
+  onRetry,
+  disabled,
+}: {
+  state: RetryableTurnState;
+  onRetry: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 shadow-sm"
+      data-retryable-reason={state.reason}
+      role="alert"
+    >
+      <p className="font-semibold">{retryableTitle(state.reason)}</p>
+      <p className="mt-1 text-xs text-red-800/90">{retryableMessage(state)}</p>
+      <p className="mt-2 truncate text-xs text-red-700/80">
+        Input kept: “{state.utterance}”
+      </p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRetry}
+        className="mt-3 min-h-[44px] w-full rounded-xl bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 sm:w-auto"
+        data-retry-button="true"
+      >
+        Retry same input
+      </button>
+    </div>
+  );
+}
+
 /** Clickable resolver candidates (RFC 0004 §6.1) — no free-form retype. */
 function CandidatePicker({
   miss,
@@ -799,6 +839,7 @@ export default function ChatPage() {
   >([]);
   const [pendingResolverMiss, setPendingResolverMiss] =
     useState<ResolverMissProjection | null>(null);
+  const [retryable, setRetryable] = useState<RetryableTurnState | null>(null);
   const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -842,6 +883,7 @@ export default function ChatPage() {
       setPartialResponse("");
       setPendingProposal(null);
       setPendingResolverMiss(null);
+      setRetryable(null);
 
       const userMsg: DisplayMessage = {
         role: "user",
@@ -862,7 +904,15 @@ export default function ChatPage() {
             response.status === 401
               ? "Session expired or missing. Sign in via Profile and try again."
               : "Failed to get a response. Please try again.";
-          setError(await responseErrorMessage(response, fallback));
+          const detail = await responseErrorMessage(response, fallback);
+          setError(detail);
+          // RFC 0004 §6.2: keep input — offer retry instead of blank box.
+          setInput(trimmed);
+          setRetryable({
+            utterance: trimmed,
+            reason: "http_error",
+            detail,
+          });
           return;
         }
 
@@ -882,7 +932,8 @@ export default function ChatPage() {
           streamState.content ||
           streamState.stopReason === "gate_blocked" ||
           streamState.stopReason === "write_proposal" ||
-          streamState.resolverMiss
+          streamState.resolverMiss ||
+          isRetryableStopReason(streamState.stopReason)
         ) {
           const { cleanText, sources } = extractSources(streamState.content);
 
@@ -893,7 +944,12 @@ export default function ChatPage() {
               streamState.content ||
               (streamState.resolverMiss
                 ? streamState.resolverMiss.message
-                : "Write proposal awaiting confirmation."),
+                : isRetryableStopReason(streamState.stopReason)
+                  ? retryableMessage({
+                      utterance: trimmed,
+                      reason: streamState.stopReason,
+                    })
+                  : "Write proposal awaiting confirmation."),
             sources: sources.length > 0 ? sources : undefined,
             toolCalls:
               streamState.toolCalls.length > 0
@@ -925,16 +981,30 @@ export default function ChatPage() {
           if (streamState.resolverMiss) {
             setPendingResolverMiss(streamState.resolverMiss);
           }
+
+          if (isRetryableStopReason(streamState.stopReason)) {
+            setInput(trimmed);
+            setRetryable({
+              utterance: trimmed,
+              reason: streamState.stopReason,
+            });
+          }
         }
 
         setPartialResponse("");
         setCurrentTool(null);
       } catch (err) {
-        setError(
+        const detail =
           err instanceof Error
             ? err.message
-            : "Network error. Please try again.",
-        );
+            : "Network error. Please try again.";
+        setError(detail);
+        setInput(trimmed);
+        setRetryable({
+          utterance: trimmed,
+          reason: "network",
+          detail,
+        });
       } finally {
         setStreaming(false);
       }
@@ -960,6 +1030,14 @@ export default function ChatPage() {
     messages,
     runUtteranceTurn,
   ]);
+
+  const handleRetry = useCallback(async () => {
+    if (!retryable || streaming) return;
+    const text = retryable.utterance;
+    setRetryable(null);
+    setError(null);
+    await runUtteranceTurn(text, messages);
+  }, [retryable, streaming, messages, runUtteranceTurn]);
 
   const handlePickCandidate = useCallback(
     async (candidate: ResolverCandidate) => {
@@ -1227,8 +1305,21 @@ export default function ChatPage() {
               </div>
             )}
 
-            {/* Error banner */}
-            {error && (
+            {/* Retryable failures keep input (RFC 0004 §6.2) */}
+            {retryable && !streaming && (
+              <div className="flex justify-start">
+                <div className="w-full max-w-full sm:max-w-[75%]">
+                  <RetryableError
+                    state={retryable}
+                    onRetry={handleRetry}
+                    disabled={streaming}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Non-retryable error banner */}
+            {error && !retryable && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 <p className="font-medium">Error</p>
                 <p className="mt-0.5">{error}</p>

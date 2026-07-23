@@ -271,6 +271,16 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("data-candidate-id");
     expect(source).toContain("pendingResolverMiss");
   });
+
+  it("keeps input and offers retry for max_steps/crash/aborted (RFC 0004 §6.2)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("RetryableError");
+    expect(source).toContain("isRetryableStopReason");
+    expect(source).toContain("data-retryable-reason");
+    expect(source).toContain("data-retry-button");
+    expect(source).toContain("Retry same input");
+    expect(source).toContain("setInput(trimmed)");
+  });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {
