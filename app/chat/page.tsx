@@ -1256,8 +1256,28 @@ export default function ChatPage() {
     const text = retryable.utterance;
     setRetryable(null);
     setError(null);
-    await runUtteranceTurn(text, messages);
-  }, [retryable, streaming, messages, runUtteranceTurn]);
+    // Drop the failed user (and trailing assistant) bubble so retry does not
+    // duplicate history for the model or the UI (Codex T04 review).
+    setMessages((prev) => {
+      const next = [...prev];
+      while (
+        next.length > 0 &&
+        next[next.length - 1]?.role === "assistant" &&
+        isRetryableStopReason(next[next.length - 1]?.stopReason)
+      ) {
+        next.pop();
+      }
+      if (
+        next.length > 0 &&
+        next[next.length - 1]?.role === "user" &&
+        next[next.length - 1]?.content === text
+      ) {
+        next.pop();
+      }
+      void runUtteranceTurn(text, next);
+      return next;
+    });
+  }, [retryable, streaming, runUtteranceTurn]);
 
   const handlePickCandidate = useCallback(
     async (candidate: ResolverCandidate) => {

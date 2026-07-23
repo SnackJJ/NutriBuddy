@@ -280,6 +280,8 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("data-retry-button");
     expect(source).toContain("Retry same input");
     expect(source).toContain("setInput(trimmed)");
+    // Retry must strip failed bubbles before re-submit (no duplicate history).
+    expect(source).toMatch(/next\.pop\(\)/);
   });
 
   it("renders proposal lifecycle statuses including stale (RFC 0004 §6.3)", () => {
