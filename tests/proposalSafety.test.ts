@@ -85,18 +85,18 @@ describe("projectProposalSafetyNotices", () => {
     ]);
   });
 
-  it("emits unreviewed allergen notice when allergenTags is undefined", () => {
+  it("emits unreviewed allergen notice when allergenCoverage is unreviewed", () => {
     const notices = projectProposalSafetyNotices(
-      baseProposal({ allergenTags: undefined }),
+      baseProposal({ allergenTags: [], allergenCoverage: "unreviewed" }),
       [],
     );
     expect(notices.some((n) => n.title === "Allergen coverage")).toBe(true);
     expect(notices[0]?.detail.toLowerCase()).toContain("not reviewed");
   });
 
-  it("does not emit allergen notices when allergenTags is reviewed empty", () => {
+  it("does not emit allergen notices when coverage is reviewed empty", () => {
     const notices = projectProposalSafetyNotices(
-      baseProposal({ allergenTags: [] }),
+      baseProposal({ allergenTags: [], allergenCoverage: "reviewed" }),
       [],
     );
     expect(notices.filter((n) => n.kind === "allergen")).toHaveLength(0);

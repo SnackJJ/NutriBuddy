@@ -53,14 +53,14 @@ export function matchQualityLabel(
 export function projectProposalSafetyNotices(
   proposal: Pick<
     WriteProposalData,
-    "foodName" | "canonicalName" | "allergenTags"
+    "foodName" | "canonicalName" | "allergenTags" | "allergenCoverage"
   >,
   interactions: readonly DrugNutrientInteraction[],
 ): readonly ProposalSafetyNotice[] {
   const notices: ProposalSafetyNotice[] = [];
 
-  // Tri-state: undefined = unreviewed; [] = reviewed empty; non-empty = known tags.
-  if (proposal.allergenTags === undefined) {
+  // Unreviewed coverage is explicit — do not treat stored [] as "safe".
+  if (proposal.allergenCoverage === "unreviewed") {
     notices.push({
       kind: "allergen",
       severity: "high",
@@ -68,7 +68,7 @@ export function projectProposalSafetyNotices(
       detail: "Not reviewed for allergens — treat as unknown before confirming",
     });
   } else {
-    for (const tag of proposal.allergenTags) {
+    for (const tag of proposal.allergenTags ?? []) {
       const trimmed = tag.trim();
       if (!trimmed) continue;
       notices.push({

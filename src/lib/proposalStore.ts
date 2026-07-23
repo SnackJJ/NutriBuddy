@@ -31,12 +31,15 @@ interface ProposalDbRow {
   readonly carbs_g: number;
   readonly nutrition_source: string;
   readonly match_type: string;
-  readonly allergen_tags: string[] | null;
+  readonly allergen_tags: string[];
   readonly status: string;
   readonly created_at: string;
 }
 
-function rowToProposal(row: ProposalDbRow): Proposal {
+function rowToProposal(
+  row: ProposalDbRow,
+  allergenCoverage: Proposal["allergenCoverage"] = "reviewed",
+): Proposal {
   return {
     id: row.id,
     userId: row.user_id,
@@ -51,11 +54,10 @@ function rowToProposal(row: ProposalDbRow): Proposal {
     carbsG: row.carbs_g,
     nutritionSource: row.nutrition_source,
     matchType: row.match_type as Proposal["matchType"],
-    // null/missing column → unreviewed (undefined); [] stays reviewed-empty
-    allergenTags:
-      row.allergen_tags === null || row.allergen_tags === undefined
-        ? undefined
-        : row.allergen_tags,
+    allergenTags: row.allergen_tags ?? [],
+    // Not persisted yet (no migration): callers pass through from ProposalInput
+    // on store(); get()/legacy rows default to reviewed.
+    allergenCoverage,
     status: row.status as ProposalStatus,
     createdAt: row.created_at,
   };
@@ -80,8 +82,8 @@ function inputToRow(
     carbs_g: params.carbsG,
     nutrition_source: params.nutritionSource,
     match_type: params.matchType,
-    allergen_tags:
-      params.allergenTags === undefined ? null : [...params.allergenTags],
+    // Keep NOT NULL text[] contract; coverage lives on the tool/terminal payload.
+    allergen_tags: [...params.allergenTags],
     created_at: now,
   };
 }
@@ -204,7 +206,11 @@ export function createSupabaseProposalStore(
         throw new Error(`Failed to store proposal: ${error.message}`);
       }
 
-      return rowToProposal(data as ProposalDbRow);
+      // Pass coverage through from input — not a DB column yet (no migration).
+      return rowToProposal(
+        data as ProposalDbRow,
+        params.allergenCoverage ?? "reviewed",
+      );
     },
 
     async get(id: string): Promise<Proposal | undefined> {

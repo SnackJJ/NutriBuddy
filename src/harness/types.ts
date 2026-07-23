@@ -167,6 +167,8 @@ export interface WriteProposalData {
   readonly nutritionSource: string;
   readonly matchType?: string;
   readonly allergenTags?: readonly string[];
+  /** When "unreviewed", tags are not authoritative (confirm card must warn). */
+  readonly allergenCoverage?: "reviewed" | "unreviewed";
   readonly createdAt: string;
 }
 

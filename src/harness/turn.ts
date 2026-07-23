@@ -778,8 +778,18 @@ export function parseWriteProposalData(
     nutritionSource,
     matchType: readString(proposal, "match_type"),
     allergenTags: readStringArray(proposal, "allergen_tags"),
+    allergenCoverage: readAllergenCoverage(proposal, "allergen_coverage"),
     createdAt,
   };
+}
+
+function readAllergenCoverage(
+  record: Record<string, unknown>,
+  key: string,
+): "reviewed" | "unreviewed" | undefined {
+  const value = record[key];
+  if (value === "reviewed" || value === "unreviewed") return value;
+  return undefined;
 }
 
 interface UtteranceTurnOutput {
