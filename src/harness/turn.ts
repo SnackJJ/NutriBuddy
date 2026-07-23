@@ -22,6 +22,10 @@ import {
 } from "./gate";
 import type { DrugNutrientInteraction } from "../lib/drugInteractions";
 import { projectProposalSafetyNotices } from "../lib/proposalSafety";
+import {
+  projectResolverMiss,
+  type ResolverMissProjection,
+} from "../lib/resolverMiss";
 import type { Observation } from "../catalog/queryCatalog";
 import type { Catalog } from "../catalog/catalog";
 import type { MealLogStore, ProposalStore } from "./logMeal";
@@ -37,7 +41,7 @@ import {
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
 /** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.8.0";
+export const SCHEMA_VERSION = "1.9.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -795,6 +799,7 @@ function readAllergenCoverage(
 interface UtteranceTurnOutput {
   readonly result: TurnResult;
   readonly writeProposal?: WriteProposalData;
+  readonly resolverMiss?: ResolverMissProjection;
 }
 
 async function* runUtteranceTurn(
@@ -807,6 +812,8 @@ async function* runUtteranceTurn(
   const conflicts = ports.conflicts ?? [];
   let result: TurnResult | undefined;
   let lastWriteProposalData: WriteProposalData | undefined;
+  let lastResolverMiss: ResolverMissProjection | undefined;
+  let lastLogMealActArgs: Readonly<Record<string, unknown>> | undefined;
   let outputGateFailReasons: readonly string[] = [];
 
   for (let attempt = 0; attempt <= MAX_OUTPUT_GATE_RETRIES; attempt++) {
@@ -849,6 +856,15 @@ async function* runUtteranceTurn(
         yield mcEvent;
       }
 
+      // Capture log_meal act args so typed_miss can reattach portion/mealType
+      if (
+        next.value.type === "act" &&
+        next.value.toolCall?.name === "log_meal" &&
+        next.value.toolCall.args
+      ) {
+        lastLogMealActArgs = next.value.toolCall.args;
+      }
+
       // Emit tool gate verdict after each tool observation (RFC 0002)
       if (next.value.type === "observe" && next.value.toolOutcome) {
         const outcome = next.value.toolOutcome;
@@ -867,6 +883,15 @@ async function* runUtteranceTurn(
 
         if (outcome.kind === "ok" && outcome.name === "log_meal") {
           lastWriteProposalData = parseWriteProposalData(outcome.data);
+          lastResolverMiss = undefined;
+        }
+
+        if (outcome.kind === "typed_miss" && outcome.name === "log_meal") {
+          lastResolverMiss = projectResolverMiss(
+            outcome.data,
+            lastLogMealActArgs,
+          );
+          lastWriteProposalData = undefined;
         }
 
         // infra_error: stop consuming further loop events; crash terminal
@@ -883,7 +908,11 @@ async function* runUtteranceTurn(
           while (!drain.done) {
             drain = await gen.next();
           }
-          return { result, writeProposal: lastWriteProposalData };
+          return {
+            result,
+            writeProposal: lastWriteProposalData,
+            resolverMiss: lastResolverMiss,
+          };
         }
       }
 
@@ -936,7 +965,11 @@ async function* runUtteranceTurn(
     break;
   }
 
-  return { result: result!, writeProposal: lastWriteProposalData };
+  return {
+    result: result!,
+    writeProposal: lastWriteProposalData,
+    resolverMiss: lastResolverMiss,
+  };
 }
 
 function createRunTurnInput(
@@ -1186,6 +1219,12 @@ export async function* turn(
       );
       result = utteranceOutput.result;
       writeProposal = utteranceOutput.writeProposal;
+      if (utteranceOutput.resolverMiss) {
+        result = {
+          ...result,
+          resolverMiss: utteranceOutput.resolverMiss,
+        };
+      }
       break;
     }
     case "proposal_confirm": {
@@ -1217,6 +1256,7 @@ export async function* turn(
       stopReason: "write_proposal",
       proposal: writeProposal,
       safetyNotices,
+      resolverMiss: undefined,
     };
   }
 

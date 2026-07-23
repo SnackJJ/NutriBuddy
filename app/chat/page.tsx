@@ -9,6 +9,11 @@ import {
   projectProposalSafetyNotices,
   type ProposalSafetyNotice,
 } from "@/lib/proposalSafety";
+import {
+  utteranceForCandidatePick,
+  type ResolverCandidate,
+  type ResolverMissProjection,
+} from "@/lib/resolverMiss";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 import type { Session } from "@supabase/supabase-js";
 
@@ -31,6 +36,8 @@ interface DisplayMessage {
   readonly stopReason?: string;
   /** Write-proposal payload (when stopReason is "write_proposal"). */
   readonly proposal?: WriteProposalData;
+  /** Resolver miss projection (RFC 0004 §6.1). */
+  readonly resolverMiss?: ResolverMissProjection;
 }
 
 interface ToolCallEntry {
@@ -64,6 +71,7 @@ interface StreamTerminalResult {
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
   readonly safetyNotices?: readonly ProposalSafetyNotice[];
+  readonly resolverMiss?: ResolverMissProjection;
 }
 
 /** A streaming event from the /api/chat NDJSON stream (Turn Seam enriched). */
@@ -81,6 +89,7 @@ interface StreamEvent {
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
   readonly safetyNotices?: readonly ProposalSafetyNotice[];
+  readonly resolverMiss?: ResolverMissProjection;
   readonly checkpoint?: string;
   readonly verdict?: string;
   readonly checkName?: string;
@@ -97,6 +106,7 @@ interface AssistantStreamState {
   writeProposal?: WriteProposalData;
   interactions: DrugNutrientInteraction[];
   safetyNotices: ProposalSafetyNotice[];
+  resolverMiss?: ResolverMissProjection;
 }
 
 interface AssistantStreamHandlers {
@@ -112,6 +122,7 @@ function createAssistantStreamState(): AssistantStreamState {
     gateReasons: [],
     interactions: [],
     safetyNotices: [],
+    resolverMiss: undefined,
   };
 }
 
@@ -276,6 +287,10 @@ function applyTerminalResult(
 
   if (result.safetyNotices) {
     state.safetyNotices = [...result.safetyNotices];
+  }
+
+  if (result.resolverMiss) {
+    state.resolverMiss = result.resolverMiss;
   }
 }
 
@@ -528,6 +543,69 @@ function MessageBubble({
   );
 }
 
+/** Clickable resolver candidates (RFC 0004 §6.1) — no free-form retype. */
+function CandidatePicker({
+  miss,
+  onPick,
+  disabled,
+}: {
+  miss: ResolverMissProjection;
+  onPick: (candidate: ResolverCandidate) => void;
+  disabled?: boolean;
+}) {
+  const quality = matchQualityLabel(miss.matchType);
+  return (
+    <div
+      className="rounded-xl border border-status-warning/40 bg-status-warning/10 p-4 shadow-sm"
+      data-resolver-miss={miss.matchType}
+    >
+      <p className="text-sm font-semibold text-amber-950">
+        {miss.matchType === "miss_ambiguous"
+          ? "Multiple matches — pick one"
+          : miss.matchType === "miss_unknown"
+            ? "No catalog match"
+            : "Uncertain match"}
+      </p>
+      <p className="mt-1 text-xs text-amber-900/90">{miss.message}</p>
+      {quality && (
+        <p
+          className="mt-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-900"
+          data-match-quality={quality.kind}
+        >
+          {quality.label} ({miss.matchType})
+        </p>
+      )}
+      {miss.candidates.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {miss.candidates.map((c) => (
+            <li key={c.foodId}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(c)}
+                className="min-h-[44px] w-full rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-left text-sm font-medium text-amber-950 transition hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+                data-candidate-id={c.foodId}
+              >
+                <span className="font-semibold">{c.foodName}</span>
+                {c.matchScore !== undefined && (
+                  <span className="ml-2 text-xs text-amber-700">
+                    score {c.matchScore}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-amber-900">
+          Try another name, or use a custom / recipe path when available. No web
+          search.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Write-proposal confirmation card (issue #39 / mobile thumb targets #83).
  *  RFC 0004 §6.1 / §6.4: match quality + safety notices before confirm. */
 function ProposalCard({
@@ -719,6 +797,8 @@ export default function ChatPage() {
   const [pendingSafetyNotices, setPendingSafetyNotices] = useState<
     readonly ProposalSafetyNotice[]
   >([]);
+  const [pendingResolverMiss, setPendingResolverMiss] =
+    useState<ResolverMissProjection | null>(null);
   const [confirming, setConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -750,110 +830,146 @@ export default function ChatPage() {
     [],
   );
 
+  /** Drive one free-text turn (also used by candidate pick — no retype). */
+  const runUtteranceTurn = useCallback(
+    async (trimmed: string, priorMessages: readonly DisplayMessage[]) => {
+      if (!session || streaming || sessionLoading) return;
+
+      setInput("");
+      setStreaming(true);
+      setError(null);
+      setCurrentTool(null);
+      setPartialResponse("");
+      setPendingProposal(null);
+      setPendingResolverMiss(null);
+
+      const userMsg: DisplayMessage = {
+        role: "user",
+        content: trimmed,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      try {
+        const history = buildHistory(priorMessages);
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: chatHeaders(session),
+          body: JSON.stringify({ message: trimmed, history }),
+        });
+
+        if (!response.ok) {
+          const fallback =
+            response.status === 401
+              ? "Session expired or missing. Sign in via Profile and try again."
+              : "Failed to get a response. Please try again.";
+          setError(await responseErrorMessage(response, fallback));
+          return;
+        }
+
+        const streamState = createAssistantStreamState();
+        await readChatStream(response, (event) => {
+          if (event.type === "error") {
+            throw new Error(event.error ?? "An unexpected error occurred.");
+          }
+
+          applyAssistantStreamEvent(event, streamState, {
+            setCurrentTool,
+            setPartialResponse,
+          });
+        });
+
+        if (
+          streamState.content ||
+          streamState.stopReason === "gate_blocked" ||
+          streamState.stopReason === "write_proposal" ||
+          streamState.resolverMiss
+        ) {
+          const { cleanText, sources } = extractSources(streamState.content);
+
+          const assistantMsg: DisplayMessage = {
+            role: "assistant",
+            content:
+              cleanText ||
+              streamState.content ||
+              (streamState.resolverMiss
+                ? streamState.resolverMiss.message
+                : "Write proposal awaiting confirmation."),
+            sources: sources.length > 0 ? sources : undefined,
+            toolCalls:
+              streamState.toolCalls.length > 0
+                ? streamState.toolCalls
+                : undefined,
+            gateBlocked: streamState.stopReason === "gate_blocked",
+            gateReasons:
+              streamState.gateReasons.length > 0
+                ? streamState.gateReasons
+                : undefined,
+            stopReason: streamState.stopReason || undefined,
+            proposal: streamState.writeProposal,
+            resolverMiss: streamState.resolverMiss,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+
+          if (streamState.writeProposal) {
+            setPendingProposal(streamState.writeProposal);
+            setPendingSafetyNotices(
+              streamState.safetyNotices.length > 0
+                ? streamState.safetyNotices
+                : projectProposalSafetyNotices(
+                    streamState.writeProposal,
+                    streamState.interactions,
+                  ),
+            );
+          }
+
+          if (streamState.resolverMiss) {
+            setPendingResolverMiss(streamState.resolverMiss);
+          }
+        }
+
+        setPartialResponse("");
+        setCurrentTool(null);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Network error. Please try again.",
+        );
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [session, streaming, sessionLoading, buildHistory],
+  );
+
   const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || streaming || sessionLoading) return;
 
-    // Issue #82: /api/chat is auth-only — block before the network call.
     if (!session) {
       setError("Sign in required. Open Profile to sign in, then return here.");
       return;
     }
 
-    setInput("");
-    setStreaming(true);
-    setError(null);
-    setCurrentTool(null);
-    setPartialResponse("");
-    setPendingProposal(null);
+    await runUtteranceTurn(trimmed, messages);
+  }, [
+    input,
+    streaming,
+    sessionLoading,
+    session,
+    messages,
+    runUtteranceTurn,
+  ]);
 
-    const userMsg: DisplayMessage = {
-      role: "user",
-      content: trimmed,
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    try {
-      const history = buildHistory(messages);
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: chatHeaders(session),
-        body: JSON.stringify({ message: trimmed, history }),
-      });
-
-      if (!response.ok) {
-        const fallback =
-          response.status === 401
-            ? "Session expired or missing. Sign in via Profile and try again."
-            : "Failed to get a response. Please try again.";
-        setError(await responseErrorMessage(response, fallback));
-        return;
-      }
-
-      const streamState = createAssistantStreamState();
-      await readChatStream(response, (event) => {
-        if (event.type === "error") {
-          throw new Error(event.error ?? "An unexpected error occurred.");
-        }
-
-        applyAssistantStreamEvent(event, streamState, {
-          setCurrentTool,
-          setPartialResponse,
-        });
-      });
-
-      if (
-        streamState.content ||
-        streamState.stopReason === "gate_blocked" ||
-        streamState.stopReason === "write_proposal"
-      ) {
-        const { cleanText, sources } = extractSources(streamState.content);
-
-        const assistantMsg: DisplayMessage = {
-          role: "assistant",
-          content:
-            cleanText ||
-            streamState.content ||
-            "Write proposal awaiting confirmation.",
-          sources: sources.length > 0 ? sources : undefined,
-          toolCalls:
-            streamState.toolCalls.length > 0
-              ? streamState.toolCalls
-              : undefined,
-          gateBlocked: streamState.stopReason === "gate_blocked",
-          gateReasons:
-            streamState.gateReasons.length > 0
-              ? streamState.gateReasons
-              : undefined,
-          stopReason: streamState.stopReason || undefined,
-          proposal: streamState.writeProposal,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-
-        if (streamState.writeProposal) {
-          setPendingProposal(streamState.writeProposal);
-          // Prefer turn-seam projection; fall back only if terminal omitted notices.
-          setPendingSafetyNotices(
-            streamState.safetyNotices.length > 0
-              ? streamState.safetyNotices
-              : projectProposalSafetyNotices(
-                  streamState.writeProposal,
-                  streamState.interactions,
-                ),
-          );
-        }
-      }
-
-      setPartialResponse("");
-      setCurrentTool(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Network error. Please try again.",
-      );
-    } finally {
-      setStreaming(false);
-    }
-  }, [input, streaming, sessionLoading, messages, session, buildHistory]);
+  const handlePickCandidate = useCallback(
+    async (candidate: ResolverCandidate) => {
+      if (!pendingResolverMiss || streaming) return;
+      const next = utteranceForCandidatePick(candidate, pendingResolverMiss);
+      setPendingResolverMiss(null);
+      await runUtteranceTurn(next, messages);
+    },
+    [pendingResolverMiss, streaming, messages, runUtteranceTurn],
+  );
 
   /** Confirm a write proposal through a structured turn input. */
   const handleConfirmProposal = useCallback(
@@ -1010,6 +1126,19 @@ export default function ChatPage() {
                     onConfirm={(fb) => handleConfirmProposal(true, fb)}
                     onReject={() => handleConfirmProposal(false)}
                     confirming={confirming}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Resolver miss candidates (RFC 0004 §6.1) */}
+            {pendingResolverMiss && !streaming && !pendingProposal && (
+              <div className="flex justify-start">
+                <div className="w-full max-w-full sm:max-w-[75%]">
+                  <CandidatePicker
+                    miss={pendingResolverMiss}
+                    onPick={handlePickCandidate}
+                    disabled={streaming}
                   />
                 </div>
               </div>

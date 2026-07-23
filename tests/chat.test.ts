@@ -262,6 +262,15 @@ describe("PWA shell + mobile chat surface (issue #83)", () => {
     expect(source).toContain("safetyNotices");
     expect(source).toMatch(/proposal\.matchType|matchType/);
   });
+
+  it("renders clickable resolver candidates without requiring free-form retype (RFC 0004 §6.1)", () => {
+    const source = fs.readFileSync("app/chat/page.tsx", "utf-8");
+    expect(source).toContain("CandidatePicker");
+    expect(source).toContain("utteranceForCandidatePick");
+    expect(source).toContain("data-resolver-miss");
+    expect(source).toContain("data-candidate-id");
+    expect(source).toContain("pendingResolverMiss");
+  });
 });
 
 describe("chat route safety context loading (RFC 0004 §6.4)", () => {
@@ -285,6 +294,15 @@ describe("turn seam projects proposal safetyNotices (RFC 0004 §6.4)", () => {
     const source = fs.readFileSync("src/harness/turn.ts", "utf-8");
     expect(source).toContain("projectProposalSafetyNotices");
     expect(source).toContain("safetyNotices");
+  });
+});
+
+describe("turn seam projects resolverMiss (RFC 0004 §6.1)", () => {
+  it("projects typed_miss log_meal outcomes at the turn layer", () => {
+    const source = fs.readFileSync("src/harness/turn.ts", "utf-8");
+    expect(source).toContain("projectResolverMiss");
+    expect(source).toContain("resolverMiss");
+    expect(source).toContain("typed_miss");
   });
 });
 
