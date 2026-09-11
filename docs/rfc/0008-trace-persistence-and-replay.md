@@ -44,7 +44,8 @@ export interface TraceStore {
   /** turn_start 建 turns 行、turn_end 收尾，都在这一次写内完成（§3.4）。 */
   append(event: AnyTurnEvent): Promise<void>;
   listByTurn(turnId: string, sinceSeq?: number): Promise<AnyTurnEvent[]>;
-  listTurns(userId: string, limit: number): Promise<TurnSummary[]>;
+  /** 只列自己的 turn —— store 已经绑定用户，调用方无从指名他人（与 RLS 同一条规则）。 */
+  listTurns(limit: number): Promise<TurnSummary[]>;
 }
 ```
 
@@ -230,7 +231,7 @@ create index turns_user_time_idx on public.turns (user_id, started_at desc);
 ### 12.1 已决定
 
 - 保留策略：全保真 + 90 天 + 导出脱敏（§3.8）。
-- `session_id`：**V1.0 不建会话概念**，该列保持 null；`listTurns(userId)` 按 `started_at` 排序即可；IM bot 接入时再定。原"目前随请求携带"的说法不成立（请求体里没有 sessionId）。
+- `session_id`：**V1.0 不建会话概念**，该列保持 null；`listTurns(limit)` 按 `started_at` 排序即可；IM bot 接入时再定。原"目前随请求携带"的说法不成立（请求体里没有 sessionId）。
 
 ### 12.2 未决
 
