@@ -24,7 +24,14 @@
 
 -- ── read-only executor role ────────────────────────────────────────────────
 
-create role nutribuddy_query_ro nologin;
+-- Idempotent: roles are cluster-level, so they survive `supabase db reset`
+-- and a replay would otherwise fail here (issue #123 / RFC 0008 §4).
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'nutribuddy_query_ro') then
+    create role nutribuddy_query_ro nologin;
+  end if;
+end $$;
 grant usage on schema public to nutribuddy_query_ro;
 grant select on public.meal_logs to nutribuddy_query_ro;
 

@@ -151,7 +151,7 @@ harness、四道闸、catalog 与模型调用全部留在服务端；客户端�
 | "should-be-blocked 用例 100% 出现 blocking verdict" | `checkShouldBeBlocked` + turn 事件流 | `npm run eval` |
 | "检索：引用正确率 __%、Recall@5 __、MRR __"（RAG 落地后） | 需新增检索评测集 | 新脚本，格式对齐 `src/eval/` |
 | "每轮 P95 __s、$__/turn、前缀缓存命中 __%" | `model_call_usage` 事件已带 `latencyMs / usage.cacheHitTokens / costUsd`（`src/harness/loop.ts`） | 聚合脚本读事件流（**只差聚合，不差埋点**） |
-| "工程规模：__ 个测试文件 / __ 条断言 / CI 零网络零 LLM 成本" | 实测 **51 个测试文件、973 条断言** | `npm test` |
+| "工程规模：__ 个测试文件 / __ 条断言 / CI 零网络零 LLM 成本" | 实测 **51 个测试文件、984 条断言**（`npm test` 的 runner 输出为准） | `npm test` |
 | "架构规模：4 道闸 × 全部产出 typed verdict、8 步预算、__ 张查询模板" | `docs/ADD.md` | — |
 | "并发 __ 下 P95 __ms"（压测） | 真跑才有 | k6 / autocannon 打 `/api/chat`，1 → N 并发 |
 | "策略迭代消融：某轮检索改造贡献 +__pt、某轮场景策略贡献 +__pt" | 需要 §3.7 的版本记账 | 有了版本记账与报告历史后自然得出 |
