@@ -1,6 +1,8 @@
 # 交付形态：云端托管 PWA，单一 harness 服务多 surface
 
 > 状态：Accepted（2026-07-23）。本 ADR 在 `docs/ADD.md` Phase 4「Surfaces and tenancy」的框架内做具体选择，不推翻 ADD。ADD 仍是架构 source of truth。
+>
+> 2026-07-26 事实更新：下方「Vercel Hobby 的两个边界」记录的 **60 秒函数上限已放宽**——现行上限为 Hobby 300s / Pro 800s，Fluid Compute 默认 300s（依据见 `docs/rfc/0006-cloud-runtime-architecture.md` §12 与 `docs/research/agent-harness-production-architecture.md` §1）。**本节结论不变**（仍不提前迁长驻容器），仅边界值更新。
 
 NutriBuddy 的用户可达形态是**部署在 Vercel 上的 PWA**。harness 全部在服务端执行，客户端只做 UI 与事件渲染。CLI 不是产品形态，保持为开发与 eval 工具。
 
@@ -71,6 +73,8 @@ PWA 通常的短板是拿不到原生能力，而 photo logging 已是 `AGENTS.m
 ### 运维侧（人工执行，不进 issue tracker）
 
 这三条是部署决定的边界条件，不是一次性任务——更换托管方后依然适用。
+
+> 2026-07-26 澄清（建立 V1.0 backlog 时）：允许把这三条作为**一次性上线检查项**登记为 issue（例如消费上限、部署时的环境变量与密钥检查）。但**issue 关闭 ≠ 措施失效** —— 上线后它们必须回到常驻运维清单，并在更换托管方或新增 surface 时重新执行。原文的"不是一次性任务"指的是不能做完就忘，不是"不许登记"。
 
 1. **模型账号设消费上限。** 唯一能限制损失上界的措施；密钥管理只降低概率，不封顶损失。
 2. **敏感变量只勾 Production，不给 Preview。** Vercel 的 Preview 部署默认继承环境变量，而 preview URL 格式可推测且不受主域名保护。`DEEPSEEK_API_KEY` 与 `SUPABASE_SERVICE_ROLE_KEY` 只给 Production。

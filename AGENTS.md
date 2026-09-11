@@ -19,15 +19,18 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 - **Topology**: single agent. Model chooses and narrates; facts / numbers / entities / writes are defined and checked by deterministic code.
 - **Test seam**: one `turn` boundary — tagged input + injected ports → schema-versioned event stream → exactly one terminal event.
 - **Loop**: ReAct + typed query catalog (template id + typed params). No free-form SQL; no mental nutrition arithmetic.
-- **Data**: USDA FoodData Central as **snapshot ingestion**; runtime reads local catalog. Knowledge RAG deferred (metric-gated).
+- **Data**: USDA FoodData Central as **snapshot ingestion**; runtime reads local catalog. Knowledge RAG: `docs/adr/0004` (Proposed) brings it **into scope as an evidence layer only** — it never supplies numbers, entities, or writes; retrieval itself lands in V1.1.
 
-## Next (product surface)
+## Next (V1.0 — plan in `docs/rfc/0007`)
 
-Keep this list short. Prefer GitHub issues as the live backlog.
+Keep this list short. Prefer GitHub issues as the live backlog. (#82 / #83 landed; the previous list here was stale.)
 
-1. 交付形态与上线（`docs/adr/0002`）：#82 关闭匿名通道、#83 PWA + confirm/edit UX  
-2. Nightly live eval thickening  
-3. Remaining debt: drop derived `toolResult` after UI migration (RFC 0002 §2.6); TraceEvent debug-only  
+1. **S1 — 轨迹持久化与 turn 重放**（`docs/rfc/0008`）：路径上的头号阻塞项 —— 审计 / 回放 / 归因 / RL 资产全挂在它上面
+2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：产出可复现的数字与回归基线
+3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
+4. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
+
+Nightly live eval thickening and dropping derived `toolResult` after the UI migration (RFC 0002 §2.6) stay open; TraceEvent stays debug-only.
 
 Do **not** confuse ADD product Phase 0–4 with structural RFC phases (already landed).
 
@@ -49,13 +52,14 @@ npm run eval
 | Path | Role |
 |------|------|
 | `docs/PRD-v2.md` | Product goals / old milestone color |
-| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; later product RFCs may still be open. |
+| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; product RFCs 0006–0012 are `Proposed` (0012 is V1.1) |
 | `docs/agents/*` | Tracker / triage / domain-doc **how-to** for Matt skills |
 
 **Do not load unless the task explicitly needs them:**
 
 - `docs/archive/**` (including old PRD v1, briefings)
 - `docs/research/**`
+- `docs/resume/**` (career / outward-facing narrative — never project context)
 - `docs/reviews/**`
 - Full text of Implemented RFCs “just in case”
 
