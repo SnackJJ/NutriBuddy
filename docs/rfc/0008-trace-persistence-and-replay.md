@@ -74,8 +74,11 @@ append_turn_event(p_turn_id uuid, p_user_id uuid, p_event jsonb, p_meta jsonb de
 ```
 
 - **`p_meta` 参数是必需的**：`app_version` / `source_version` / `skill_id` / `skill_version` 都不在事件里，只靠 `p_event` 取不到 —— 否则 #114 之后 `app_version` 仍然是 null。由 `SupabaseTraceStore` 构造时绑定。
-- **非 `turn_start` 分支的 `user_id` 从 `turns` 行读，不用 `p_user_id`**：否则一处装配 bug 就能造出"事件对 A 可见、turn 属于 B"的行。
-- **函数权限必须显式收口**（`docs/reviews/2026-07-26-v1-specs-review-opus-verify.md` A1）：写成 **`security invoker`**（写入靠 service role 自身的表权限，不需要 definer），并且 Postgres 默认把 `EXECUTE` 授予 `PUBLIC` —— 必须显式 `revoke execute on function public.append_turn_event(uuid, uuid, jsonb, jsonb) from public, anon, authenticated;` 再 `grant execute ... to service_role;`。否则阻断 #1 关上的门会从函数口子重新打开。
+- **owner 只有一个来源：`turns` 行**，所有分支都是。`turn_start` 重试时行已存在，函数**读回行**而不是信 `p_user_id`；若两者不一致 → `23514`。这样"事件对 A 可见、turn 属于 B"在 DDL 级不可能，而不是靠调用方守约。`turn_start` 还必须 `seq = 0`、必须带 `input.tag`。
+- **不做静默兜底**：`schema` 与 `timestamp` 缺失一律 `22P02`。`coalesce(schema,'unknown')` 会污染重放与 golden 对比且永不被错误分类捕获；用 `now()` 兜时间戳会算出看似合法的错 latency。
+- **同一 `(turn_id, seq)` 携带不同 payload → `23514`**：相同字节的重发是"响应丢失后的重试"（幂等忽略），不同字节意味着装配层复用了 seq/turnId —— 静默保留第一份是最难排查的形态。
+- **对 `service_role` 显式 grant**（不依赖 Supabase 挂在新表上的 default privileges）：那些默认权限在 `drop schema ... cascade` 重建的 scratch 库里不存在，会让 RPC 在那里 `42501`、在生产正常 —— 测试结果误导。RPC（`security invoker`）与 `persist_error` 的 update 都以 service_role 运行。
+- **函数权限必须显式收口**（评审 A1）：写成 **`security invoker`**（写入靠 service role 自身的表权限，不需要 definer），并且 Postgres 默认把 `EXECUTE` 授予 `PUBLIC` —— 必须显式 `revoke execute on function public.append_turn_event(uuid, uuid, jsonb, jsonb) from public, anon, authenticated;` 再 `grant execute ... to service_role;`。否则阻断 #1 关上的门会从函数口子重新打开。
 
 - `cost_usd` 由 SQL 从 `turn_events` 聚合（`type='model_call'` 的 `costUsd` 求和，含 regenerate 的多次尝试）；`latency_ms` 由 `turn_end.timestamp - turn_start.timestamp` 计算。**TS 侧不维护第二份聚合** —— 单一真源，S2/S3 直接读列。
 - `append` 因此是"一次 RPC 调用"，天然原子。
@@ -100,9 +103,11 @@ append_turn_event(p_turn_id uuid, p_user_id uuid, p_event jsonb, p_meta jsonb de
 | 项 | 决定 |
 | --- | --- |
 | 超时 | 每次写入带 `AbortSignal.timeout(5000)`（supabase-js 的 fetch 默认无超时，DB 半死会挂到函数上限） |
-| 幂等 | `insert ... on conflict (turn_id, seq) do nothing` —— 服务端是唯一写者，冲突只可能来自自己的重试 |
-| `23505`（唯一冲突） | **视为成功**（首次其实写成功但响应丢失） |
-| `23503` / `42501` / `22P02` | **立刻 crash**：分别是 turns 行不存在（顺序 bug）、权限（配置 bug）、payload 非法 |
+| 幂等 | `insert ... on conflict (turn_id, seq) do nothing` —— 服务端是唯一写者，冲突只可能来自自己的重试；**同 seq 不同 payload → `23514`**（见 §3.4） |
+| 分类方式 | **按错误码类分，不枚举具体码**：`22*` / `23*`（除 `23505`）/ `42*` → 立刻 crash；`08*` / `57014` / 网络错误 / `502-504` → 重试一次；**未知码 → 立刻 crash**（宁可停下，也不重试一个没见过的状态） |
+| `23505`（唯一冲突） | 理论上是成功的信号（首次写成功、响应丢失），但本 RPC 的两处 insert 都是 `on conflict do nothing`，**它不会出现** —— 分类保留，但不要指望在测试里打中它 |
+| `23514` | 完整性冲突：`turn_start` 属于他人，或同一 seq 携带不同 payload。不可重试 |
+| `23503` / `42501` / `22P02` | **立刻 crash**：turns 行不存在（顺序 bug）、权限（配置 bug）、payload 非法。同一类里还会出现 `22007`（timestamp 串非法）与 `23502`（`p_user_id` 为 null） |
 | 网络错误 / `502/503/504` / `57014` | 重试一次；仍失败 → `turn_end{crash}` |
 
 不再声称"写入失败频率极低"：Supabase Free 计划 7 天不活动暂停后有约 30s 唤醒窗口，期间每次写都会超时。今天这次失败会先发生在 `loadUserContext`（503），属于被读路径挡住的巧合；写路径要靠上面的超时保护。这条"唤醒后首个请求慢一次"也应写进 #115 的用户说明。

@@ -65,13 +65,16 @@ export function runTraceStoreContract(
       expect(beyondEnd).toEqual([]);
     });
 
-    it("ignores a repeated (turnId, seq) so retries are idempotent", async () => {
+    it("ignores a repeated (turnId, seq) with the same bytes, so retries are idempotent", async () => {
       const { store } = createFixture();
 
-      await store.append(turnStart(0));
-      await store.append(turnStart(0));
-      await store.append(modelCall(1, { costUsd: 0.002, seconds: 1 }));
-      await store.append(modelCall(1, { costUsd: 9.99, seconds: 1 }));
+      const start = turnStart(0);
+      const call = modelCall(1, { costUsd: 0.002, seconds: 1 });
+
+      await store.append(start);
+      await store.append(start); // retry after a lost response
+      await store.append(call);
+      await store.append(call);
       await store.append(turnEnd(2, { seconds: 1 }));
 
       const events = await store.listByTurn(store.turnId);
@@ -79,6 +82,35 @@ export function runTraceStoreContract(
 
       const summary = (await store.listTurns(10))[0];
       expect(summary.costUsd).toBeCloseTo(0.002, 6);
+    });
+
+    it("refuses a repeated (turnId, seq) carrying different bytes with 23514", async () => {
+      const { store } = createFixture();
+
+      await store.append(turnStart(0));
+      await store.append(modelCall(1, { costUsd: 0.002, seconds: 1 }));
+
+      await expect(
+        store.append(modelCall(1, { costUsd: 9.99, seconds: 1 })),
+      ).rejects.toMatchObject({ code: "23514" });
+    });
+
+    it("refuses a turn_start whose turn already belongs to another user with 23514", async () => {
+      const { otherUser, turnId } = createFixture();
+
+      const owner = otherUser("user-A", turnId);
+      await owner.append(turnStart(0));
+
+      const intruder = otherUser("user-B", turnId);
+      await expect(intruder.append(turnStart(0))).rejects.toMatchObject({
+        code: "23514",
+      });
+    });
+
+    it("refuses a turn_start that is not seq 0 with 22P02", async () => {
+      const { store } = createFixture();
+
+      await expect(store.append(turnStart(1))).rejects.toMatchObject({ code: "22P02" });
     });
 
     it("rejects a non-start event for an unknown turn with 23503", async () => {

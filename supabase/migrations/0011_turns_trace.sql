@@ -94,6 +94,15 @@ create policy "Users can read their own turn events"
 revoke all on public.turns, public.turn_events from anon, authenticated;
 grant select on public.turns, public.turn_events to authenticated;
 
+-- service_role's write access is made explicit here instead of relying on the
+-- default privileges Supabase attaches when a table is created: those defaults
+-- are absent in a scratch database rebuilt from `drop schema ... cascade`, which
+-- would make the RPC fail there and pass in production (a misleading test).
+-- Both the RPC (security invoker) and the best-effort `persist_error` update run
+-- as service_role.
+grant select, insert, update, delete on public.turns, public.turn_events
+  to service_role;
+
 -- ── write path: one RPC, three branches ───────────────────────────────────
 
 create or replace function public.append_turn_event(
@@ -110,17 +119,34 @@ as $$
 declare
   v_type   text := p_event->>'type';
   v_seq    int  := nullif(p_event->>'seq', '')::int;
-  v_schema text := coalesce(p_event->>'schema', 'unknown');
-  v_ts     timestamptz := coalesce(nullif(p_event->>'timestamp', '')::timestamptz, now());
+  -- No silent fallbacks here: every AnyTurnEvent carries schema and timestamp
+  -- (they are required in turn.ts), so a missing one is a bug and must surface
+  -- as 22P02 — the same classification the store applies to malformed payloads
+  -- (RFC 0008 §3.7). A fabricated 'unknown' schema would also poison replay and
+  -- golden comparison, and `now()` would produce a plausible-but-wrong latency.
+  v_schema text := nullif(p_event->>'schema', '');
+  v_ts     timestamptz := nullif(p_event->>'timestamp', '')::timestamptz;
   v_owner  uuid;
   v_result jsonb;
 begin
-  if v_type is null or v_seq is null then
-    raise exception 'append_turn_event: event lacks type or seq'
+  if v_type is null or v_seq is null or v_schema is null or v_ts is null then
+    raise exception 'append_turn_event: event lacks type/seq/schema/timestamp'
       using errcode = '22P02';
   end if;
 
   if v_type = 'turn_start' then
+    -- seq 0 is the stream's first event by construction; anything else means the
+    -- caller is assembling a turn wrongly.
+    if v_seq <> 0 then
+      raise exception 'append_turn_event: turn_start must have seq 0, got %', v_seq
+        using errcode = '22P02';
+    end if;
+
+    if p_event->'input'->>'tag' is null then
+      raise exception 'append_turn_event: turn_start lacks input.tag'
+        using errcode = '22P02';
+    end if;
+
     -- Metadata that is not part of the event travels in p_meta; without it
     -- app_version / source_version / skill_* could never be filled.
     insert into public.turns (
@@ -130,7 +156,7 @@ begin
       p_turn_id,
       p_user_id,
       null,
-      coalesce(p_event->'input'->>'tag', 'utterance'),
+      p_event->'input'->>'tag',
       p_meta->>'appVersion',
       p_event->>'catalogVersion',
       p_meta->>'sourceVersion',
@@ -140,23 +166,39 @@ begin
       v_ts
     )
     on conflict (id) do nothing;
+  end if;
 
-    v_owner := p_user_id;
-  else
-    -- Never trust a caller-supplied user_id for a non-start event: a single
-    -- assembly bug would otherwise create rows visible to A inside a turn that
-    -- belongs to B.
-    select t.user_id into v_owner from public.turns t where t.id = p_turn_id;
+  -- The turn row is the ONLY source of the owner, for every branch. On a
+  -- turn_start retry the row already exists, so reading it back (rather than
+  -- trusting p_user_id) is what makes "an event visible to A inside a turn that
+  -- belongs to B" impossible at the DDL level instead of by caller convention.
+  select t.user_id into v_owner from public.turns t where t.id = p_turn_id;
 
-    if v_owner is null then
-      raise exception 'append_turn_event: unknown turn %', p_turn_id
-        using errcode = '23503';
-    end if;
+  if v_owner is null then
+    raise exception 'append_turn_event: unknown turn %', p_turn_id
+      using errcode = '23503';
+  end if;
+
+  if v_type = 'turn_start' and v_owner <> p_user_id then
+    raise exception 'append_turn_event: turn % belongs to another user', p_turn_id
+      using errcode = '23514';
   end if;
 
   insert into public.turn_events (turn_id, user_id, seq, schema_version, type, payload)
   values (p_turn_id, v_owner, v_seq, v_schema, v_type, p_event)
   on conflict (turn_id, seq) do nothing;
+
+  -- A retry after a lost response re-sends the same bytes and lands here as a
+  -- no-op. The same seq carrying DIFFERENT bytes is not a retry — it means the
+  -- assembly layer reused a turn id or a seq — and silently keeping the first
+  -- copy is the hardest version of that bug to diagnose.
+  if not found and exists (
+    select 1 from public.turn_events e
+     where e.turn_id = p_turn_id and e.seq = v_seq and e.payload <> p_event
+  ) then
+    raise exception 'append_turn_event: seq % already stored with a different payload', v_seq
+      using errcode = '23514';
+  end if;
 
   if v_type = 'turn_end' then
     v_result := p_event->'result';
@@ -170,7 +212,6 @@ begin
                from public.turn_events e
               where e.turn_id = p_turn_id
                 and e.type = 'model_call'
-                and e.payload ? 'costUsd'
                 and e.payload->>'costUsd' is not null
            ),
            latency_ms  = (
@@ -182,7 +223,6 @@ begin
                from public.turn_events e
               where e.turn_id = p_turn_id
                 and e.type = 'turn_start'
-                and e.payload ? 'timestamp'
            )
      where t.id = p_turn_id;
   end if;

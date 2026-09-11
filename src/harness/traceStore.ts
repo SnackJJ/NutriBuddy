@@ -56,7 +56,13 @@ export type TraceErrorCode =
   /** Missing/invalid payload shape. Do not retry. */
   | "22P02"
   /** Permission denied. Do not retry. */
-  | "42501";
+  | "42501"
+  /**
+   * Integrity conflict: a turn_start that belongs to another user, or a seq
+   * already stored with different bytes. Not retryable — retrying cannot make
+   * either go away.
+   */
+  | "23514";
 
 export class TraceStoreError extends Error {
   readonly code: TraceErrorCode;

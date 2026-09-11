@@ -76,35 +76,60 @@ export class InMemoryTraceStore implements TraceStore {
   }
 
   async append(event: AnyTurnEvent): Promise<void> {
-    if (typeof event?.type !== "string" || typeof event?.seq !== "number") {
+    const raw = event as {
+      readonly type?: unknown;
+      readonly seq?: unknown;
+      readonly schema?: unknown;
+      readonly timestamp?: unknown;
+      readonly input?: { readonly tag?: unknown };
+    };
+
+    // No silent defaults: the RPC raises 22P02 for the same malformed payloads
+    // (RFC 0008 §3.7), and both implementations must agree.
+    if (
+      typeof raw.type !== "string" ||
+      typeof raw.seq !== "number" ||
+      typeof raw.schema !== "string" ||
+      typeof raw.timestamp !== "string"
+    ) {
       throw new TraceStoreError(
         "22P02",
-        "append: event lacks a type or seq — malformed payload",
+        "append: event lacks type/seq/schema/timestamp — malformed payload",
       );
     }
 
-    if (this.failAtSeq !== undefined && event.seq === this.failAtSeq) {
-      if (this.failuresLeft > 0) {
-        this.failuresLeft -= 1;
-        throw new Error(`injected trace write failure at seq ${event.seq}`);
+    if (raw.type === "turn_start") {
+      if (raw.seq !== 0) {
+        throw new TraceStoreError(
+          "22P02",
+          `append: turn_start must have seq 0, got ${raw.seq}`,
+        );
+      }
+      if (typeof raw.input?.tag !== "string") {
+        throw new TraceStoreError("22P02", "append: turn_start lacks input.tag");
       }
     }
 
-    if (event.type === "turn_start") {
-      const existing = this.db.rows.get(this.turnId);
-      if (!existing) {
-        // appVersion is not part of the event stream — it arrives via TurnMeta,
-        // exactly like the RPC's `p_meta` parameter (RFC 0008 §3.4).
-        this.db.rows.set(this.turnId, {
-          turnId: this.turnId,
-          userId: this.userId,
-          inputKind: event.input.tag,
-          schemaVersion: event.schema,
-          startedAt: event.timestamp,
-          appVersion: this.appVersion,
-          events: [],
-        });
+    if (this.failAtSeq !== undefined && raw.seq === this.failAtSeq) {
+      if (this.failuresLeft > 0) {
+        this.failuresLeft -= 1;
+        throw new Error(`injected trace write failure at seq ${raw.seq}`);
       }
+    }
+
+    if (raw.type === "turn_start" && !this.db.rows.has(this.turnId)) {
+      // appVersion is not part of the event stream — it arrives via TurnMeta,
+      // exactly like the RPC's `p_meta` parameter (RFC 0008 §3.4).
+      const start = event as Extract<AnyTurnEvent, { type: "turn_start" }>;
+      this.db.rows.set(this.turnId, {
+        turnId: this.turnId,
+        userId: this.userId,
+        inputKind: start.input.tag,
+        schemaVersion: start.schema,
+        startedAt: start.timestamp,
+        appVersion: this.appVersion,
+        events: [],
+      });
     }
 
     const row = this.db.rows.get(this.turnId);
@@ -115,8 +140,24 @@ export class InMemoryTraceStore implements TraceStore {
       );
     }
 
-    // First write wins for a given (turnId, seq) — same as `do nothing`.
-    if (row.events.some((e) => e.seq === event.seq)) {
+    // A turn_start retry must not be able to hand this turn to another user.
+    if (raw.type === "turn_start" && row.userId !== this.userId) {
+      throw new TraceStoreError(
+        "23514",
+        `append: turn ${this.turnId} belongs to another user`,
+      );
+    }
+
+    const stored = row.events.find((e) => e.seq === raw.seq);
+    if (stored) {
+      // Same bytes = a retry after a lost response: a no-op, like `do nothing`.
+      // Different bytes = the assembly layer reused a seq: never silent.
+      if (JSON.stringify(stored) !== JSON.stringify(event)) {
+        throw new TraceStoreError(
+          "23514",
+          `append: seq ${raw.seq} already stored with a different payload`,
+        );
+      }
       return;
     }
 
