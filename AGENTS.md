@@ -25,7 +25,7 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 
 Keep this list short. Prefer GitHub issues as the live backlog. (#82 / #83 landed; the previous list here was stale.)
 
-1. **S1 — 轨迹持久化与 turn 重放**（`docs/rfc/0008`）：路径上的头号阻塞项 —— 审计 / 回放 / 归因 / RL 资产全挂在它上面。**T1–T5 已落地**（迁移 0011、TraceStore 端口、`turn()` 接线与终态语义、`SupabaseTraceStore`、失败语义测试）；剩余 #89（`turn_meta` + 客户端 `lastSeq` + 重放接口）、#91（查询面）、#120（迁移 0014）、#122（90 天保留）、#124（D9 越权 smoke）
+1. **S1 — 轨迹持久化与 turn 重放**（`docs/rfc/0008`）：路径上的头号阻塞项 —— 审计 / 回放 / 归因 / RL 资产全挂在它上面。**T1–T5 已落地**（迁移 0011、TraceStore 端口、`turn()` 接线与终态语义、`SupabaseTraceStore`、失败语义测试）；剩余 #91（查询面）、#120（迁移 0014）、#122（90 天保留）、#124（D9 越权 smoke）
 2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：产出可复现的数字与回归基线
 3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
 4. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
