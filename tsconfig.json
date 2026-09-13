@@ -23,6 +23,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "tests", "app", "next-env.d.ts", ".next/types/**/*.ts"],
+  "include": ["src", "tests", "app", "scripts", "next-env.d.ts", ".next/types/**/*.ts"],
   "exclude": ["node_modules", ".sandcastle"]
 }

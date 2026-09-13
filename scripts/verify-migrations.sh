@@ -76,6 +76,12 @@ if [ -z "$DB_URL" ]; then
   exit 1
 fi
 
+# Reset recreates the schema while PostgREST keeps its own cache, so anything
+# that talks to the local API right afterwards — a smoke run, the app — sees
+# PGRST202 "could not find the function" for objects that plainly exist. Tell
+# PostgREST to reload; harmless when it is not running.
+psql "$DB_URL" -q -c "notify pgrst, 'reload schema';" >/dev/null
+
 # Reset exiting 0 would also be true if it applied nothing, and the CLI only
 # warns about a file it skips for not matching `^[0-9]+_.*\.sql$`. So the end
 # state is asserted against the files on disk, not just against "no error".
