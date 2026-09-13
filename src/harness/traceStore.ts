@@ -45,24 +45,14 @@ export interface TurnSummary {
 }
 
 /**
- * Error codes a TraceStore may surface. They mirror the Postgres codes the
- * Supabase implementation reads out of PostgREST so both implementations (and
- * the tests that drive them) can agree on how a failure is classified
- * (RFC 0008 §3.7).
+ * SQLSTATE a TraceStore surfaces, mirroring what PostgREST reports from the
+ * RPC. The codes either implementation is known to raise are 23503 (unknown
+ * turn), 22P02 (malformed payload), 42501 (permission), 23514 (integrity
+ * conflict), 22007 (bad timestamp) and 23502 (null user), plus class 08 for
+ * transport faults — but classification is by code *class*, never an
+ * enumerated list (RFC 0008 §3.7, #88), so this stays an open string.
  */
-export type TraceErrorCode =
-  /** Unknown turn — an assembly/ordering bug. Do not retry. */
-  | "23503"
-  /** Missing/invalid payload shape. Do not retry. */
-  | "22P02"
-  /** Permission denied. Do not retry. */
-  | "42501"
-  /**
-   * Integrity conflict: a turn_start that belongs to another user, or a seq
-   * already stored with different bytes. Not retryable — retrying cannot make
-   * either go away.
-   */
-  | "23514";
+export type TraceErrorCode = string;
 
 export class TraceStoreError extends Error {
   readonly code: TraceErrorCode;
@@ -77,6 +67,13 @@ export class TraceStoreError extends Error {
 export interface TraceStore {
   /** Bound at construction; turn() never holds it. */
   readonly turnId: string;
+  /**
+   * True once an append has been given up on, so the event is not in the
+   * database. The turn still finishes with a terminal event (RFC 0008 §3.6),
+   * which is why this flag — and not the event schema — is how the route
+   * learns to mark its terminal frame `trace_persist_failed`.
+   */
+  readonly persistFailed: boolean;
   /** turn_start creates the row, turn_end finalizes it, everything else appends. */
   append(event: AnyTurnEvent): Promise<void>;
   listByTurn(turnId: string, sinceSeq?: number): Promise<AnyTurnEvent[]>;

@@ -199,6 +199,14 @@ export async function main(
     tools,
     toolSchemas,
     requireTools: turnInput.tag === "utterance",
+    // turn() reports a fatal error as a crash terminal rather than throwing
+    // (RFC 0008 §3.6), so the CLI keeps its diagnosis by naming the cause here.
+    // The user-facing wording is the harness's, so it is null rather than a
+    // second copy of the same sentence.
+    crashReply: (err) => {
+      stderr(`错误: ${err instanceof Error ? err.message : String(err)}\n`);
+      return undefined;
+    },
   });
 
   if (!assembly.ok) {
@@ -234,7 +242,9 @@ export async function main(
     stderr("\n--- trace ---\n");
     stderr(`${tracer.render()}\n`);
   }
-  return 0;
+  // A crash terminal is a failed run: it used to be an exception, so the exit
+  // code has to keep saying so after RFC 0008 §3.6 turned it into an event.
+  return result.stopReason === "crash" ? 1 : 0;
 }
 
 // 仅在被直接执行时跑，import 时不触发（便于测试）。

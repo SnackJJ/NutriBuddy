@@ -65,6 +65,12 @@ export class InMemoryTraceStore implements TraceStore {
   private readonly appVersion: string | undefined;
   private readonly failAtSeq: number | undefined;
   private failuresLeft: number;
+  private failed = false;
+
+  /** Set by every append that throws: the event is not stored (RFC 0008 §3.6). */
+  get persistFailed(): boolean {
+    return this.failed;
+  }
 
   constructor(opts: InMemoryTraceStoreOptions) {
     this.turnId = opts.turnId;
@@ -76,6 +82,18 @@ export class InMemoryTraceStore implements TraceStore {
   }
 
   async append(event: AnyTurnEvent): Promise<void> {
+    try {
+      await this.write(event);
+    } catch (err) {
+      // An append that throws is an event that is not stored — that is exactly
+      // what `persistFailed` reports. The error still propagates so turn() can
+      // turn it into a crash terminal (RFC 0008 §3.6).
+      this.failed = true;
+      throw err;
+    }
+  }
+
+  private async write(event: AnyTurnEvent): Promise<void> {
     const raw = event as {
       readonly type?: unknown;
       readonly seq?: unknown;

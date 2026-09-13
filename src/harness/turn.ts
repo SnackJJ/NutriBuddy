@@ -41,6 +41,7 @@ import {
   toolGateFromOutcome,
   type ToolOutcome,
 } from "./toolOutcome";
+import type { TraceStore } from "./traceStore";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -119,6 +120,21 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly catalogVersion?: string;
   /** Version of the user profile constraints used in this turn (issue #51). */
   readonly profileVersion?: string;
+  /**
+   * Trace port (RFC 0008 §3.2). turn() appends every event before yielding it,
+   * which is the only place the stream can be persisted in seq order: seq is
+   * allocated inside the generator and the terminal event must carry a legal
+   * one. Absent for CLI/tests.
+   */
+  readonly trace?: TraceStore;
+  /**
+   * Fatal-error policy (RFC 0008 §3.6): the reply a crash terminal shows, and
+   * — because the assembly layer owns this callback — the place the cause gets
+   * reported. The harness itself stays free of logging and of transport
+   * vocabulary; returning undefined falls back to a generic sentence, since a
+   * crash reply is never the place to leak adapter or database internals.
+   */
+  readonly crashReply?: (error: unknown) => string | undefined;
 }
 
 /**
@@ -936,14 +952,21 @@ async function* runUtteranceTurn(
       // adapter (between thought and act/observe). We emit the event on
       // the NEXT iteration after the thought, when the usage data is
       // available. Deduped by step number so each model call appears once.
-      const mcEvent = createTurnModelCallEvent(
-        next.value.step,
-        ports.tracer,
-        nextMetadata,
-      );
-      if (mcEvent && !emittedModelCallSteps.has(mcEvent.step)) {
-        emittedModelCallSteps.add(mcEvent.step);
-        yield mcEvent;
+      //
+      // The dedup check comes first on purpose: building the event allocates a
+      // seq, and an allocated seq that is never yielded leaves a hole in the
+      // stream — which the trace's D3 assertion (`min(seq)=0`,
+      // `max(seq)+1=count(*)`) rejects outright (#88).
+      if (!emittedModelCallSteps.has(next.value.step)) {
+        const mcEvent = createTurnModelCallEvent(
+          next.value.step,
+          ports.tracer,
+          nextMetadata,
+        );
+        if (mcEvent) {
+          emittedModelCallSteps.add(mcEvent.step);
+          yield mcEvent;
+        }
       }
 
       // Capture log_meal act args so typed_miss can reattach portion/mealType
@@ -1265,17 +1288,12 @@ function createOutputGateSummaryDetails(
 }
 
 /**
- * The single harness entry point for running one turn.
- *
- * Takes tagged input (utterance or proposal confirmation) and injected
- * ports, and yields a schema-versioned typed event stream that ALWAYS
- * ends with exactly one {@link TurnEndEvent}.
- *
- * The returned async generator also returns a {@link TurnResult} as its
- * final value; consumers can use either the terminal event or the
- * generator return value.
+ * The turn body: allocates seq, runs the input gate, the loop, the output and
+ * commit gates, and decides the terminal result. It persists nothing and guards
+ * nothing — {@link turn} owns both, because only the caller of this generator
+ * sees every event exactly once and survives its exceptions.
  */
-export async function* turn(
+async function* runTurn(
   input: TurnInput,
   ports: TurnPorts,
 ): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
@@ -1395,6 +1413,139 @@ export async function* turn(
 
   return result;
 }
+
+/**
+ * The single harness entry point for running one turn.
+ *
+ * Takes tagged input (utterance or proposal confirmation) and injected
+ * ports, and yields a schema-versioned typed event stream that ALWAYS
+ * ends with exactly one {@link TurnEndEvent}.
+ *
+ * The returned async generator also returns a {@link TurnResult} as its
+ * final value; consumers can use either the terminal event or the
+ * generator return value.
+ *
+ * This wrapper is the trace port's host (RFC 0008 §3.2/§3.6). It sits outside
+ * the body so that it sees every event exactly once — including the ones the
+ * nested generators yield — which is what lets it append to the store before
+ * handing the event to the client, and what lets it turn any exception into a
+ * terminal event instead of a half-finished stream.
+ */
+export async function* turn(
+  input: TurnInput,
+  ports: TurnPorts,
+): AsyncGenerator<AnyTurnEvent, TurnResult, undefined> {
+  const trace = ports.trace;
+  const clock = ports.clock ?? (() => new Date());
+  const body = runTurn(input, ports);
+  /** The seq the next event must carry — and the one a crash terminal takes. */
+  let nextSeq = 0;
+  /**
+   * Highest step the body reached. A crash terminal reports it the way the loop
+   * reports its own crashes (`steps: step`), so an eval can still tell "died at
+   * step 2" from "never started" (#21).
+   */
+  let lastStep = 0;
+  /**
+   * Nothing is persisted before a turn_start lands, and the RPC refuses a
+   * non-start event for an unknown turn (23503). A body that throws before its
+   * first event therefore has no row to finalize: there is nothing to write, so
+   * a lone turn_end is not attempted.
+   */
+  let turnRowExists = false;
+
+  try {
+    let next = await body.next();
+    while (!next.done) {
+      const event = next.value;
+      // The contract suite and D3 both require gapless seq, and the body
+      // guarantees it structurally: every `nextMetadata()` call in this file is
+      // followed directly by the `yield` of the event it built (the model_call
+      // dedup used to allocate before deciding, which is what made this
+      // assertion fire). A gap therefore means an event was allocated and
+      // dropped — never something a store should have to guess about.
+      if (event.seq !== nextSeq) {
+        throw new Error(
+          `turn event seq out of order: expected ${nextSeq}, got ${event.seq}`,
+        );
+      }
+
+      if (event.type === "step") {
+        lastStep = Math.max(lastStep, event.agentEvent.step);
+      }
+
+      if (trace) {
+        await trace.append(event);
+        if (event.type === "turn_start") turnRowExists = true;
+      }
+      // Advanced only once the event is on its way out: an event whose write
+      // failed never happened, so the terminal takes its seq rather than
+      // leaving a hole in the trace.
+      nextSeq = event.seq + 1;
+
+      yield event;
+      next = await body.next();
+    }
+
+    return next.value;
+  } catch (err) {
+    const result: TurnResult = {
+      reply: crashReplyFor(ports, err),
+      steps: lastStep,
+      stopReason: "crash",
+    };
+    const terminal: TurnEndEvent = {
+      ...createEventMetadataFor(clock, nextSeq),
+      type: "turn_end",
+      result,
+    };
+
+    if (trace && turnRowExists) {
+      try {
+        await trace.append(terminal);
+      } catch {
+        // Swallowed on purpose: throwing from inside this catch would recurse,
+        // and a terminal that cannot be stored still has to reach the client.
+        // The store records the loss itself (`persistFailed`, §3.6).
+      }
+    }
+
+    yield terminal;
+    return result;
+  }
+}
+
+/** Metadata for an event built outside the body's own seq counter. */
+function createEventMetadataFor(
+  clock: Clock,
+  seq: number,
+): Pick<TurnEvent, "schema" | "seq" | "timestamp"> {
+  // The clock is an injected port, and this runs while handling a failure: a
+  // broken clock must not be able to leave the turn without a terminal event.
+  let timestamp: string;
+  try {
+    timestamp = clock().toISOString();
+  } catch {
+    timestamp = new Date().toISOString();
+  }
+  return { schema: SCHEMA_VERSION, seq, timestamp };
+}
+
+/**
+ * The reply policy is an injected port too, so it gets the same treatment: the
+ * invariant is "every exception still produces a terminal event", and a mapping
+ * that throws is still an exception.
+ */
+function crashReplyFor(ports: TurnPorts, error: unknown): string {
+  try {
+    return ports.crashReply?.(error) ?? DEFAULT_CRASH_REPLY;
+  } catch {
+    return DEFAULT_CRASH_REPLY;
+  }
+}
+
+/** Shown when the assembly layer offers no reply for a fatal error (§3.6). */
+const DEFAULT_CRASH_REPLY = "Something went wrong while answering. Please try again.";
 
 export async function consumeTurn(
   stream: AsyncGenerator<AnyTurnEvent, TurnResult, undefined>,

@@ -227,6 +227,10 @@ export async function runLiveComplianceEval(
             catalog,
             userContext: shouldRunGate ? c.userContext : undefined,
             interactionStore: shouldRunGate ? interactionStore : undefined,
+            // turn() reports a fatal error as a crash terminal rather than an
+            // exception (RFC 0008 §3.6); the prefix this runner scores on has to
+            // ride the port.
+            crashReply: (err) => `${EVAL_ERROR_PREFIX}${String(err)}`,
           },
         ),
         (event: AnyTurnEvent) => {
@@ -240,6 +244,8 @@ export async function runLiveComplianceEval(
       stopReason = result.stopReason;
       typedOutput = buildTypedOutputSignal(result.output);
     } catch (err) {
+      // Safety net only: the seam turns its own fatal errors into a crash
+      // terminal (RFC 0008 §3.6) and `crashReply` above carries this text.
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
       steps = eventSignals.steps;

@@ -127,6 +127,24 @@ describe("cli main", () => {
     expect(code).toBe(2);
     expect(err.join("")).toContain("用法");
   });
+
+  it("exits non-zero and names the cause when the turn crashes", async () => {
+    // A crash used to be an exception and now arrives as a terminal event
+    // (RFC 0008 §3.6), so the exit code is what has to keep saying the run
+    // failed — otherwise a scripted caller reads it as success.
+    const err: string[] = [];
+    const code = await main(["hi"], {
+      adapter: {
+        generate: async () => {
+          throw new Error("adapter exploded");
+        },
+      },
+      stderr: (s) => err.push(s),
+    });
+
+    expect(code).toBe(1);
+    expect(err.join("")).toContain("adapter exploded");
+  });
 });
 
 describe("cli tool path (issue #61)", () => {

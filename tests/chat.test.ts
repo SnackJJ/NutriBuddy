@@ -185,11 +185,29 @@ describe("chat route request shape", () => {
 // ── Turn path least privilege (issue #62 / ADD §Multi-User) ─────────────
 
 describe("chat route uses the session-scoped client", () => {
-  it("never constructs the service-role client on the turn path", () => {
+  it("keeps identity and user data on the session client, with one server-side trace door", () => {
     const routeSource = fs.readFileSync("app/api/chat/route.ts", "utf-8");
-    expect(routeSource).not.toContain("createServerSupabase");
+
+    // Issue #62 stands: identity and every user-data store read through the
+    // session-scoped client.
     expect(routeSource).toContain("createUserSupabase");
     expect(routeSource).toContain("getSessionFromHeader");
+
+    // RFC 0008 §3.3 narrows that rule for exactly one path: the trace write.
+    // Migration 0011 grants `append_turn_event`'s EXECUTE to service_role alone,
+    // because the audit surface must not be writable by the subject it audits —
+    // the same door 0007 opened for the profile API. The assertion is therefore
+    // "the service role appears once, inside the trace store factory" rather
+    // than "never".
+    const serviceRoleUses = routeSource.match(/createServerSupabase\(\)/g) ?? [];
+    expect(serviceRoleUses).toHaveLength(1);
+
+    const traceFactory = routeSource.slice(
+      routeSource.indexOf("function createTraceStore"),
+      routeSource.indexOf("function crashReply"),
+    );
+    expect(traceFactory).toContain("createServerSupabase()");
+    expect(traceFactory).toContain("createSupabaseTraceStore");
   });
 });
 

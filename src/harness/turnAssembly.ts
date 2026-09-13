@@ -12,6 +12,7 @@ import type {
   MealLogStore,
   ProposalStore,
 } from "./logMeal";
+import type { TraceStore } from "./traceStore";
 import type { TurnPorts, TurnResult } from "./turn";
 import { resolveConfirmPorts } from "./turn";
 
@@ -47,6 +48,13 @@ export interface CreateTurnAssemblyInput {
   readonly toolSchemas?: readonly ToolSchema[];
   readonly userContext?: UserContext;
   readonly interactionStore?: InteractionStore;
+  /**
+   * Trace port (RFC 0008 §3.2). Optional because the CLI and scripted tests run
+   * without a database; the chat route always supplies one.
+   */
+  readonly trace?: TraceStore;
+  /** Fatal-error reply policy (§3.6) — see {@link TurnPorts.crashReply}. */
+  readonly crashReply?: (error: unknown) => string | undefined;
   /**
    * When true (default for utterance with tools intent), require tools + toolSchemas
    * together. Anonymous utterance without tools is allowed.
@@ -150,6 +158,8 @@ export function createTurnAssembly(
     toolSchemas: input.toolSchemas,
     userContext: input.userContext,
     interactionStore: input.interactionStore,
+    trace: input.trace,
+    crashReply: input.crashReply,
   };
 
   // Double-check confirm resolution matches RFC 0001 ConfirmPorts

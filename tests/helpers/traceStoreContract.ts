@@ -127,6 +127,21 @@ export function runTraceStoreContract(
       ).rejects.toMatchObject({ code: "22P02" });
     });
 
+    it("reports persistFailed only once an append has been given up on", async () => {
+      const { store } = createFixture();
+
+      expect(store.persistFailed).toBe(false);
+      await store.append(turnStart(0));
+      expect(store.persistFailed).toBe(false);
+
+      // 22P02 is a give-up rather than a retry, so the flag is what tells the
+      // route the record is incomplete (RFC 0008 §3.6).
+      await expect(
+        store.append({ type: "step" } as never),
+      ).rejects.toMatchObject({ code: "22P02" });
+      expect(store.persistFailed).toBe(true);
+    });
+
     it("hides another user's turn from listByTurn and listTurns", async () => {
       const { store, otherUser, turnId } = createFixture();
 

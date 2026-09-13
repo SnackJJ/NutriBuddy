@@ -189,6 +189,8 @@ export function assembleChatTurnPorts(
         | "toolSchemas"
         | "userContext"
         | "interactionStore"
+        | "trace"
+        | "crashReply"
         | "requireTools"
       >
     >,
@@ -210,6 +212,8 @@ export function assembleChatTurnPorts(
     toolSchemas: input.toolSchemas,
     userContext: input.userContext,
     interactionStore: input.interactionStore,
+    trace: input.trace,
+    crashReply: input.crashReply,
     requireTools: input.requireTools,
   });
 }

@@ -55,6 +55,10 @@ export async function runHarnessEval(
             catalog,
             userContext: shouldRunGate ? c.userContext : undefined,
             interactionStore: shouldRunGate ? interactionStore : undefined,
+            // turn() turns a fatal error into a crash terminal instead of
+            // throwing (RFC 0008 §3.6), so the runner's own error text has to
+            // ride the port: scoring keys off EVAL_ERROR_PREFIX.
+            crashReply: (err) => `${EVAL_ERROR_PREFIX}${String(err)}`,
           },
         ),
         (event) => {
@@ -80,6 +84,9 @@ export async function runHarnessEval(
       steps = result.steps;
       stopReason = result.stopReason;
     } catch (err) {
+      // Safety net only: turn() reports its own fatal errors as a crash terminal
+      // (RFC 0008 §3.6), and `crashReply` above already put this text in the
+      // reply. Reaching here means the failure was outside the seam.
       reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
       stopReason = "crash";
     }

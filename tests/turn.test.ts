@@ -534,7 +534,13 @@ describe("turn ports injection", () => {
       createPorts(undefined, { signal: controller.signal }),
     );
 
-    await expect(gen.next()).rejects.toThrow(/abort/i);
+    // RFC 0008 §3.6: an abort is one of the causes that has to leave a terminal
+    // event rather than an exception, so the seam's "exactly one terminal"
+    // invariant survives it. Nothing ran, so nothing is persisted either.
+    const { events, result } = await collect(gen);
+    expect(result.stopReason).toBe("crash");
+    expect(events.map((event) => event.seq)).toEqual([0]);
+    expect(events[0]?.type).toBe("turn_end");
   });
 
   it("passes userContext through ports to enable the gate", async () => {
