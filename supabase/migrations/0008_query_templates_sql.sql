@@ -32,6 +32,33 @@ begin
     create role nutribuddy_query_ro nologin;
   end if;
 end $$;
+
+-- The runner has to be able to SET ROLE to the new owner: `alter function ...
+-- owner to ...` below fails with 42501 without this membership, and the
+-- migration runs as `postgres`, which is not a superuser in Supabase (locally
+-- or in the cloud). Found by replaying the migrations on a scratch stack
+-- (issue #123); `grant` on an existing membership is a no-op, so replay stays
+-- idempotent here exactly like the block above.
+--
+-- The grant is also what lets the running role manage these functions
+-- afterwards (`create or replace`, `revoke`, `grant execute`): ownership is
+-- transferred, so those statements need membership rather than ownership.
+-- `current_user` rather than a literal `postgres`, because the same SQL has to
+-- work under `db reset`, `db push` and the Dashboard editor.
+--
+-- PG16+ caveat: this works because the migration role is the role's creator and
+-- therefore holds ADMIN OPTION implicitly. A cluster where the role already
+-- exists but was created by someone else (e.g. `supabase_admin` by hand) needs
+-- `supabase stop --no-backup` rather than a fix in this file.
+grant nutribuddy_query_ro to current_user;
+
+-- Ownership transfer additionally requires the *new* owner to hold CREATE on
+-- the function's schema — a separate 42501 from the one above. That is a
+-- transfer-time requirement only: a SECURITY DEFINER function needs USAGE and
+-- SELECT to run, never CREATE. So it is revoked again once the transfers below
+-- are done, and anyone adding templates later repeats grant → transfer → revoke.
+grant create on schema public to nutribuddy_query_ro;
+
 grant usage on schema public to nutribuddy_query_ro;
 grant select on public.meal_logs to nutribuddy_query_ro;
 
@@ -243,6 +270,12 @@ alter function public.query_weekly_totals(date, date) owner to nutribuddy_query_
 alter function public.query_daily_average(date, date) owner to nutribuddy_query_ro;
 alter function public.query_range_comparison(date, date, date, date) owner to nutribuddy_query_ro;
 alter function public.query_top_k_by_nutrient(date, date, text, integer) owner to nutribuddy_query_ro;
+
+-- Transfer-time privilege only (see the note at the role block): the executor
+-- role is SELECT-only, and CREATE on public would make it something else.
+-- Replay-safe: a later `alter owner` to the current owner is a no-op and does
+-- not re-check CREATE, so a migration for a new template grants it again.
+revoke create on schema public from nutribuddy_query_ro;
 
 revoke all on function public.query_meal_summary(date, date) from public, anon;
 revoke all on function public.query_daily_totals(date, date) from public, anon;

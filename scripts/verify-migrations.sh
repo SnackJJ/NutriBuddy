@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# D2: prove the migrations replay from an empty database (RFC 0007 §2 D2,
+# RFC 0008 §4, issue #123).
+#
+# Why the Supabase local stack and not plain Postgres: 0005's policies call
+# auth.uid() and 0011's foreign key references auth.users, so a vanilla Postgres
+# would fail at 0005 and tell us nothing about the real environment.
+#
+# Why a reset rather than idempotency guards: 0005's `create policy` and 0011's
+# `create table` are only replayable on an *empty* database. `supabase db reset`
+# recreates the database and re-applies `supabase/migrations/*.sql` in filename
+# order, stopping at the first failure — which is the property under test.
+#
+# Deliberately NOT used: `drop schema public cascade`. It would take Supabase's
+# default privileges on the schema with it, turning the `revoke` statements in
+# 0005/0011 into no-ops and letting the grant assertions below pass vacuously —
+# in an environment that no longer resembles production.
+#
+# Prerequisites: Docker, the pinned Supabase CLI (fetched by npx), and `psql`
+# on PATH. `--local` is passed to the reset so an exported SUPABASE_DB_URL or a
+# linked project cannot redirect it at a hosted database.
+#
+# Usage: bash scripts/verify-migrations.sh
+#   SUPABASE_CLI  override the CLI command (default: a pinned npx invocation)
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+SUPABASE_CLI="${SUPABASE_CLI:-npx --yes supabase@2.117.0}"
+
+command -v psql >/dev/null 2>&1 || {
+  echo "missing prerequisite: psql (postgresql-client)" >&2
+  exit 2
+}
+
+# A scratch replay is local by definition. SCRATCH_DB is the name issue #123
+# gives the target; SUPABASE_DB_URL is the one the CLI actually reads. Any other
+# value is refused rather than silently ignored, so a stray export cannot turn
+# this into a production reset.
+for var in SCRATCH_DB SUPABASE_DB_URL; do
+  value="${!var:-}"
+  if [ -n "$value" ]; then
+    case "$value" in
+      *127.0.0.1*|*localhost*) ;;
+      *)
+        echo "refusing to run: \$$var does not point at the local stack" >&2
+        echo "  \$$var=$value" >&2
+        exit 2
+        ;;
+    esac
+  fi
+done
+
+if [ ! -f supabase/config.toml ]; then
+  echo "missing supabase/config.toml — run: supabase init" >&2
+  exit 2
+fi
+
+# A stack that is already running is reset in place; otherwise it is started
+# first (which also applies the migrations to a fresh database).
+if ! $SUPABASE_CLI status >/dev/null 2>&1; then
+  echo "==> starting the local stack"
+  $SUPABASE_CLI start
+else
+  echo "==> local stack already running"
+fi
+
+echo "==> replaying supabase/migrations/*.sql on an empty database"
+$SUPABASE_CLI db reset --local --no-seed
+
+DB_URL="$($SUPABASE_CLI status -o env 2>/dev/null | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
+if [ -z "$DB_URL" ]; then
+  echo "could not read DB_URL from \`supabase status\`" >&2
+  exit 1
+fi
+
+# Reset exiting 0 would also be true if it applied nothing, and the CLI only
+# warns about a file it skips for not matching `^[0-9]+_.*\.sql$`. So the end
+# state is asserted against the files on disk, not just against "no error".
+FILES=(supabase/migrations/*.sql)
+EXPECTED_COUNT="${#FILES[@]}"
+VERSIONS="$(printf '%s\n' "${FILES[@]}" | sed -E 's#.*/([0-9]+)_.*#\1#' | sort)"
+VERSION_LIST="$(printf "'%s'," $VERSIONS | sed 's/,$//')"
+
+# The stack's major version is part of the claim "local replay ≈ production"
+# (config.toml says so itself), so it is asserted rather than assumed.
+CONFIG_MAJOR_VERSION="$(sed -n 's/^major_version = \([0-9][0-9]*\)$/\1/p' supabase/config.toml | head -1)"
+if [ -z "$CONFIG_MAJOR_VERSION" ]; then
+  echo "could not read major_version from supabase/config.toml" >&2
+  exit 1
+fi
+
+echo "==> asserting the migrated schema (${EXPECTED_COUNT} migrations)"
+psql "$DB_URL" -v ON_ERROR_STOP=1 -qtA <<SQL
+do \$\$
+declare
+  applied  int;
+  missing  text;
+  unowned  text;
+begin
+  select count(*) into applied from supabase_migrations.schema_migrations;
+  if applied <> ${EXPECTED_COUNT} then
+    raise exception 'reset recorded % applied migrations, % files are on disk',
+      applied, ${EXPECTED_COUNT};
+  end if;
+
+  select string_agg(v, ', ') into missing
+    from unnest(array[${VERSION_LIST}]) as v
+   where not exists (
+     select 1 from supabase_migrations.schema_migrations m where m.version = v
+   );
+  if missing is not null then
+    raise exception 'migrations on disk but never applied: %', missing;
+  end if;
+
+  select string_agg(name, ', ') into missing
+    from (values ('user_profile'), ('meal_logs'), ('proposals'),
+                 ('turns'), ('turn_events')) as expected(name)
+   where not exists (
+     select 1 from pg_tables
+      where schemaname = 'public' and tablename = expected.name
+   );
+  if missing is not null then
+    raise exception 'migrations did not create: %', missing;
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'append_turn_event'
+  ) then
+    raise exception 'migration 0011 did not create append_turn_event';
+  end if;
+
+  -- 0008's premise: the SELECT-only executor actually owns the templates.
+  select string_agg(p.proname, ', ') into unowned
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.proname like 'query\_%'
+     and p.proowner <> (select oid from pg_roles where rolname = 'nutribuddy_query_ro');
+  if unowned is not null then
+    raise exception '0008: not owned by nutribuddy_query_ro: %', unowned;
+  end if;
+  if has_schema_privilege('nutribuddy_query_ro', 'public', 'create') then
+    raise exception '0008: nutribuddy_query_ro still holds CREATE on public';
+  end if;
+
+  -- 0011's premise: the trace surface is unreachable for a user-facing role.
+  -- has_*_privilege, not information_schema: the latter only shows grants the
+  -- querying role can see, so it can pass vacuously. update/delete matter as
+  -- much as insert — they would let the subject of the audit rewrite it.
+  if has_table_privilege('authenticated', 'public.turn_events',
+                         'insert, update, delete, truncate, references, trigger')
+     or has_table_privilege('authenticated', 'public.turns',
+                            'insert, update, delete, truncate, references, trigger')
+     or has_table_privilege('anon', 'public.turn_events',
+                            'select, insert, update, delete')
+     or has_function_privilege(
+          'authenticated',
+          'public.append_turn_event(uuid, uuid, jsonb, jsonb)',
+          'execute'
+        )
+  then
+    raise exception '0011: the trace surface is reachable by a user-facing role';
+  end if;
+
+  -- The local stack's own version is the premise of everything above, and it is
+  -- the one part of "local replay ≈ production" that config.toml states.
+  if current_setting('server_version_num')::int / 10000
+     <> ${CONFIG_MAJOR_VERSION}
+  then
+    raise exception 'local Postgres is %, but supabase/config.toml pins major version %',
+      current_setting('server_version'), ${CONFIG_MAJOR_VERSION};
+  end if;
+end \$\$;
+SQL
+
+echo "==> ok: ${EXPECTED_COUNT} migrations replay from empty on Postgres $(psql "$DB_URL" -tAc 'show server_version')"

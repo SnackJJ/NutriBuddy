@@ -94,11 +94,27 @@ async function main(): Promise<void> {
 
   if (!commitFn.exists || !voidFn.exists) {
     console.log(`
-BLOCKED: migration 0009 not applied.
+BLOCKED: migration 0009 is not applied to this project.
 
-Apply once in Supabase Dashboard → SQL Editor → paste and run:
+Apply migrations the way the repository builds them — supabase/migrations is the
+single source of truth, so nothing should be pasted into the Dashboard:
 
-  supabase/migrations/0009_commit_proposal_and_void.sql
+  supabase link --project-ref <ref>
+  supabase db push
+
+If this project was ever set up by pasting files by hand, its
+supabase_migrations.schema_migrations history is empty, so \`db push\` would start
+at 0001 and collide with the existing tables. Record the hand-applied ones once —
+0001 through 0008 only: this branch only runs because 0009 is missing, and 0010
+replaces the same function 0009 creates, so both are certainly absent and must
+not be marked applied:
+
+  supabase migration repair --status applied 0001 0002 0003 0004 0005 \\
+    0006 0007 0008
+
+Then \`supabase db push\` applies 0009 through 0011.
+
+Local replay check: bash scripts/verify-migrations.sh
 
 Then re-run:
   npx tsx --env-file=.env.local scripts/smoke-rfc0001-confirm.mts
