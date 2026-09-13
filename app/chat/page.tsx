@@ -26,6 +26,15 @@ import {
 } from "@/lib/proposalLifecycle";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
 import {
+  beginTurn,
+  completeTurn,
+  readPendingTurn,
+  recordEventSeq,
+  replayUrl,
+  type PendingTurn,
+} from "@/lib/turnSession";
+import { foldReplayedTurn, isTerminalEvent } from "@/lib/turnReplay";
+import {
   CustomMealForm,
   type CustomMealFormValues,
 } from "@/components/CustomMealForm";
@@ -112,6 +121,15 @@ interface StreamEvent {
   readonly evidence?: string;
   readonly result?: StreamTerminalResult;
   readonly error?: string;
+  /** Route-level `turn_meta` frame: the turnId a refresh would resume (§5). */
+  readonly turnId?: string;
+  readonly schema?: string;
+  /** Event seq; route-level frames do not carry one. */
+  readonly seq?: number;
+  /** Event timestamp, used to date the turn being resumed. */
+  readonly timestamp?: string;
+  /** `turn_start` input, used to re-render the user's own message on resume. */
+  readonly input?: { readonly tag?: string; readonly content?: string };
 }
 
 interface AssistantStreamState {
@@ -1021,6 +1039,123 @@ function TodayBar({
   );
 }
 
+/** A terminal event ends the turn: `turn_end` is the seam's own, `terminal` the
+ *  route-level frame that follows it (RFC 0008 §5). */
+function isTerminalStreamEvent(event: StreamEvent): boolean {
+  return isTerminalEvent(event.type);
+}
+
+/**
+ * Folds a finished (or interrupted) turn's stream state into the message the
+ * user sees.
+ *
+ * Shared by the live utterance path and the replay path so a turn that survived
+ * a refresh renders exactly like one that did not (RFC 0008 §5).
+ */
+function assistantMessageFromStreamState(
+  state: AssistantStreamState,
+  options: { readonly utterance: string },
+): DisplayMessage | undefined {
+  const hasSomething =
+    state.content ||
+    state.stopReason === "gate_blocked" ||
+    state.stopReason === "write_proposal" ||
+    state.resolverMiss ||
+    isRetryableStopReason(state.stopReason);
+
+  if (!hasSomething) {
+    return undefined;
+  }
+
+  const { cleanText, sources } = extractSources(state.content);
+
+  return {
+    role: "assistant",
+    content:
+      cleanText ||
+      state.content ||
+      (state.resolverMiss
+        ? state.resolverMiss.message
+        : isRetryableStopReason(state.stopReason)
+          ? retryableMessage({
+              utterance: options.utterance,
+              reason: state.stopReason,
+            })
+          : "Write proposal awaiting confirmation."),
+    sources: sources.length > 0 ? sources : undefined,
+    toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+    gateBlocked: state.stopReason === "gate_blocked",
+    gateReasons: state.gateReasons.length > 0 ? state.gateReasons : undefined,
+    stopReason: state.stopReason || undefined,
+    proposal: state.writeProposal,
+    resolverMiss: state.resolverMiss,
+  };
+}
+
+/**
+ * The live/replay stream callback, plus the client's turn bookkeeping.
+ *
+ * `turn_meta` registers the turn before its first event, every seq advances the
+ * high-water mark, and the terminal clears it — so anything still registered
+ * after a reload means a turn was interrupted (RFC 0008 §5).
+ */
+function trackedStreamHandler(
+  streamState: AssistantStreamState,
+  handlers: AssistantStreamHandlers,
+  failureMessage: string,
+): (event: StreamEvent) => void {
+  // The turn this handler is watching. It comes from turn_meta, which the route
+  // sends before the first event; seeding it from storage instead would let a
+  // pre-assembly failure frame clear a *different* turn's resumable entry.
+  let turnId: string | undefined;
+
+  return (event) => {
+    if (event.type === "error") {
+      // The pump has given up on this turn, so there is nothing left to resume.
+      completeTurn(window.sessionStorage);
+      throw new Error(event.error ?? failureMessage);
+    }
+
+    if (event.type === "turn_meta") {
+      turnId = event.turnId ?? turnId;
+      if (turnId) beginTurn(window.sessionStorage, turnId);
+      return;
+    }
+
+    if (typeof event.seq === "number" && turnId) {
+      recordEventSeq(window.sessionStorage, turnId, event.seq);
+    }
+
+    if (isTerminalStreamEvent(event)) {
+      completeTurn(window.sessionStorage);
+    }
+
+    applyAssistantStreamEvent(event, streamState, handlers);
+  };
+}
+
+/** How often a resumed turn asks the server for what is new (§3.5). */
+const RESUME_POLL_MS = 1000;
+/**
+ * How long a reloaded page keeps waiting for a terminal event.
+ *
+ * A turn older than this is one whose terminal write was dropped (or whose
+ * instance was killed) rather than one still in flight, so waiting longer only
+ * locks the composer on every reload. The number is an assumption about the
+ * deployed function limit — nothing in the repository binds the two.
+ */
+const RESUME_MAX_TURN_AGE_MS = 300_000;
+/**
+ * Runaway guard only: derived from the deadline so it can never fire first. An
+ * earlier fixed cap (90) abandoned live turns at 90s and invited a duplicate
+ * proposal.
+ */
+const RESUME_POLL_LIMIT = Math.ceil(RESUME_MAX_TURN_AGE_MS / RESUME_POLL_MS);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function ChatPage() {
   const { session, loading: sessionLoading, configured } = useSupabaseSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -1137,16 +1272,14 @@ export default function ChatPage() {
         }
 
         const streamState = createAssistantStreamState();
-        await readChatStream(response, (event) => {
-          if (event.type === "error") {
-            throw new Error(event.error ?? "An unexpected error occurred.");
-          }
-
-          applyAssistantStreamEvent(event, streamState, {
-            setCurrentTool,
-            setPartialResponse,
-          });
-        });
+        await readChatStream(
+          response,
+          trackedStreamHandler(
+            streamState,
+            { setCurrentTool, setPartialResponse },
+            "An unexpected error occurred.",
+          ),
+        );
 
         if (
           streamState.content ||
@@ -1155,36 +1288,12 @@ export default function ChatPage() {
           streamState.resolverMiss ||
           isRetryableStopReason(streamState.stopReason)
         ) {
-          const { cleanText, sources } = extractSources(streamState.content);
-
-          const assistantMsg: DisplayMessage = {
-            role: "assistant",
-            content:
-              cleanText ||
-              streamState.content ||
-              (streamState.resolverMiss
-                ? streamState.resolverMiss.message
-                : isRetryableStopReason(streamState.stopReason)
-                  ? retryableMessage({
-                      utterance: trimmed,
-                      reason: streamState.stopReason,
-                    })
-                  : "Write proposal awaiting confirmation."),
-            sources: sources.length > 0 ? sources : undefined,
-            toolCalls:
-              streamState.toolCalls.length > 0
-                ? streamState.toolCalls
-                : undefined,
-            gateBlocked: streamState.stopReason === "gate_blocked",
-            gateReasons:
-              streamState.gateReasons.length > 0
-                ? streamState.gateReasons
-                : undefined,
-            stopReason: streamState.stopReason || undefined,
-            proposal: streamState.writeProposal,
-            resolverMiss: streamState.resolverMiss,
-          };
-          setMessages((prev) => [...prev, assistantMsg]);
+          const assistantMsg = assistantMessageFromStreamState(streamState, {
+            utterance: trimmed,
+          });
+          if (assistantMsg) {
+            setMessages((prev) => [...prev, assistantMsg]);
+          }
 
           if (streamState.writeProposal) {
             setPendingProposal(streamState.writeProposal);
@@ -1231,6 +1340,160 @@ export default function ChatPage() {
     },
     [session, streaming, sessionLoading, buildHistory],
   );
+
+  /**
+   * Pick up a turn that a reload interrupted (RFC 0008 §5, acceptance D4).
+   *
+   * Two phases, because the server keeps producing the turn after the client
+   * left (§3.5):
+   *   1. replay the whole turn from the beginning — that is what carries
+   *      `turn_start.input`, so the user's own message is rendered instead of an
+   *      answer with no question above it;
+   *   2. keep asking for what is new (`since=lastSeq`) until the terminal event
+   *      lands, so a still-running turn completes in front of the user.
+   */
+  const resumeInterruptedTurn = useCallback(
+    async (pending: PendingTurn) => {
+      const storage = window.sessionStorage;
+      setStreaming(true);
+      setError(null);
+
+      const streamState = createAssistantStreamState();
+      const handlers = { setCurrentTool, setPartialResponse };
+      let userText: string | undefined;
+      let sawTerminal = false;
+      let lastSeq = pending.lastSeq;
+      let startedAtMs: number | undefined;
+
+      /** Returns false when the turn is not this user's (404) any more. */
+      const consume = async (url: string): Promise<boolean> => {
+        const response = await fetch(url, { headers: chatHeaders(session) });
+        if (response.status === 404) return false;
+        if (!response.ok) {
+          throw new Error(
+            await responseErrorMessage(
+              response,
+              "Could not restore the interrupted turn.",
+            ),
+          );
+        }
+
+        const replayed: StreamEvent[] = [];
+        await readChatStream(response, (event) => {
+          replayed.push(event);
+          if (typeof event.seq === "number") {
+            recordEventSeq(storage, pending.turnId, event.seq);
+          }
+          applyAssistantStreamEvent(event, streamState, handlers);
+        });
+
+        // The fold owns the rules that decide whether this turn comes back, so
+        // they are testable outside a browser (src/lib/turnReplay.ts).
+        const folded = foldReplayedTurn(replayed);
+        if (folded.userText) userText = folded.userText;
+        if (folded.startedAtMs) startedAtMs = folded.startedAtMs;
+        if (folded.lastSeq !== undefined) lastSeq = folded.lastSeq;
+        if (folded.sawTerminal) sawTerminal = true;
+
+        return true;
+      };
+
+      try {
+        const first = await consume(replayUrl(pending.turnId));
+        if (!first) {
+          // Gone, or never ours: nothing to resume, and no reason to keep the
+          // entry around for the next reload.
+          completeTurn(storage);
+          return;
+        }
+
+        setMessages((prev) =>
+          userText ? [...prev, { role: "user", content: userText }] : prev,
+        );
+
+        // A turn cannot outlive the platform's own function limit, so a row that
+        // is older than that will never be finalized (its terminal write was
+        // dropped, the instance was killed, …). Without this bound the tab would
+        // replay and poll for the same dead turn on every single reload.
+        const deadline =
+          (startedAtMs ?? Date.now()) + RESUME_MAX_TURN_AGE_MS;
+
+        let polls = 0;
+        while (!sawTerminal && polls < RESUME_POLL_LIMIT && Date.now() < deadline) {
+          polls += 1;
+          await sleep(RESUME_POLL_MS);
+          if (!(await consume(replayUrl(pending.turnId, lastSeq)))) {
+            completeTurn(storage);
+            return;
+          }
+        }
+
+        // Either way the entry goes: a turn that reached its terminal is done,
+        // and one that outlived every plausible lifetime never will.
+        completeTurn(storage);
+        if (!sawTerminal) {
+          setError("That answer stopped before it finished.");
+          if (userText) {
+            // Same treatment as a live turn that ends without an answer
+            // (RFC 0004 §6.2): keep the input and offer a retry.
+            setInput(userText);
+            setRetryable({ utterance: userText, reason: "aborted" });
+          }
+        }
+
+        const assistantMsg = assistantMessageFromStreamState(streamState, {
+          utterance: userText ?? "",
+        });
+        if (assistantMsg) {
+          setMessages((prev) => [...prev, assistantMsg]);
+        }
+
+        // The action surface has to be restored too, not just the text: a
+        // proposal whose card never renders is a meal the user cannot log.
+        if (streamState.writeProposal) {
+          setPendingProposal(streamState.writeProposal);
+          setPendingSafetyNotices(
+            streamState.safetyNotices.length > 0
+              ? streamState.safetyNotices
+              : projectProposalSafetyNotices(
+                  streamState.writeProposal,
+                  streamState.interactions,
+                ),
+          );
+        }
+        if (streamState.resolverMiss) {
+          setPendingResolverMiss(streamState.resolverMiss);
+        }
+        if (isRetryableStopReason(streamState.stopReason) && userText) {
+          setRetryable({ utterance: userText, reason: streamState.stopReason });
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not restore the interrupted turn.",
+        );
+      } finally {
+        setStreaming(false);
+        setPartialResponse("");
+        setCurrentTool(null);
+      }
+    },
+    [session],
+  );
+
+  const resumingRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionLoading || !session || resumingRef.current) return;
+    const pending = readPendingTurn(window.sessionStorage);
+    if (!pending) return;
+
+    // Once per mount: a second attempt would replay the same events on top of
+    // the messages the first one already rendered.
+    resumingRef.current = true;
+    void resumeInterruptedTurn(pending);
+  }, [sessionLoading, session, resumeInterruptedTurn]);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
@@ -1315,15 +1578,14 @@ export default function ChatPage() {
         }
 
         const streamState = createAssistantStreamState();
-        await readChatStream(response, (event) => {
-          if (event.type === "error") {
-            throw new Error(event.error ?? "Candidate log failed.");
-          }
-          applyAssistantStreamEvent(event, streamState, {
-            setCurrentTool,
-            setPartialResponse,
-          });
-        });
+        await readChatStream(
+          response,
+          trackedStreamHandler(
+            streamState,
+            { setCurrentTool, setPartialResponse },
+            "Candidate log failed.",
+          ),
+        );
 
         const pickMsg: DisplayMessage = {
           role: "user",
@@ -1453,15 +1715,14 @@ export default function ChatPage() {
           return;
         }
         const streamState = createAssistantStreamState();
-        await readChatStream(response, (event) => {
-          if (event.type === "error") {
-            throw new Error(event.error ?? "Edit failed.");
-          }
-          applyAssistantStreamEvent(event, streamState, {
-            setCurrentTool,
-            setPartialResponse,
-          });
-        });
+        await readChatStream(
+          response,
+          trackedStreamHandler(
+            streamState,
+            { setCurrentTool, setPartialResponse },
+            "Edit failed.",
+          ),
+        );
         if (streamState.writeProposal) {
           setMessages((prev) => [
             ...prev,
@@ -1533,10 +1794,15 @@ export default function ChatPage() {
 
         let reply = "";
         let notCommittable = false;
+        // A confirm turn is a turn too, so it registers and clears the client's
+        // pending-turn entry through the same handler as every other path (§5).
+        const confirmBookkeeping = trackedStreamHandler(
+          createAssistantStreamState(),
+          { setCurrentTool: () => {}, setPartialResponse: () => {} },
+          "Confirmation failed.",
+        );
         await readChatStream(response, (event) => {
-          if (event.type === "error") {
-            throw new Error(event.error ?? "Confirmation failed.");
-          }
+          confirmBookkeeping(event);
 
           const result = terminalResultFromEvent(event);
           if (result?.reply) {

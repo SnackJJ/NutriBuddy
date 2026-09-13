@@ -206,20 +206,32 @@ export class InMemoryTraceStore implements TraceStore {
       .filter((row) => row.userId === this.userId)
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .slice(0, Math.max(0, limit))
-      .map((row) => ({
-        turnId: row.turnId,
-        userId: row.userId,
-        inputKind: row.inputKind,
-        schemaVersion: row.schemaVersion,
-        startedAt: row.startedAt,
-        appVersion: row.appVersion,
-        finishedAt: row.finishedAt,
-        stopReason: row.stopReason,
-        steps: row.steps,
-        costUsd: row.costUsd,
-        latencyMs: row.latencyMs,
-      }));
+      .map(toTurnSummary);
   }
+
+  async findTurn(turnId: string): Promise<TurnSummary | undefined> {
+    const row = this.db.rows.get(turnId);
+    // Someone else's turn is not a turn as far as this store is concerned,
+    // mirroring the RLS the Supabase implementation reads through (§5 → 404).
+    if (!row || row.userId !== this.userId) return undefined;
+    return toTurnSummary(row);
+  }
+}
+
+function toTurnSummary(row: TurnRow): TurnSummary {
+  return {
+    turnId: row.turnId,
+    userId: row.userId,
+    inputKind: row.inputKind,
+    schemaVersion: row.schemaVersion,
+    startedAt: row.startedAt,
+    appVersion: row.appVersion,
+    finishedAt: row.finishedAt,
+    stopReason: row.stopReason,
+    steps: row.steps,
+    costUsd: row.costUsd,
+    latencyMs: row.latencyMs,
+  };
 }
 
 // ── aggregation, mirroring the RPC's SQL (RFC 0008 §3.4) ───────────────────

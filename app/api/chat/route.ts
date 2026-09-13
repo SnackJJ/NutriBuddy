@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
-import { turn, type TurnInput } from "@/harness/turn";
+import { SCHEMA_VERSION, turn, type TurnInput } from "@/harness/turn";
 import { DeepSeekAdapter } from "@/harness/modelAdapter";
 import { Tracer } from "@/harness/tracer";
 import { createServerSupabase, createUserSupabase } from "@/lib/supabase";
@@ -348,6 +348,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   // framing, never the turn — every event still reaches `turn_events`.
   return new Response(
     createTurnStream(turn(turnInput, ports), {
+      // Sent before the first event so the page can remember which turn it is
+      // watching: that is what makes a refresh mid-turn resumable (RFC 0008 §5).
+      meta: { type: "turn_meta", turnId, schema: SCHEMA_VERSION },
       // No store at all is also a lost trace: reporting "false" here would tell
       // the client an unrecorded turn was recorded (RFC 0008 §3.6).
       tracePersistFailed: () => trace?.persistFailed ?? true,

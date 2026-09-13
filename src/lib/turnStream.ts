@@ -9,6 +9,12 @@
 import type { AnyTurnEvent, TurnResult } from "@/harness/turn";
 
 export interface TurnStreamDeps {
+  /**
+   * Route-level frame sent before the first event (RFC 0008 §5): it carries the
+   * turnId the client needs to resume after a refresh. It is not an
+   * `AnyTurnEvent` — no seq, no schema-versioned event, never persisted.
+   */
+  readonly meta?: Readonly<Record<string, unknown>>;
   /** Read after the last event: a trace write was given up on (RFC 0008 §3.6). */
   readonly tracePersistFailed?: () => boolean;
   /**
@@ -60,6 +66,8 @@ export function createTurnStream(
 
       const pump = (async () => {
         try {
+          if (deps.meta) send(deps.meta);
+
           let next = await events.next();
           while (!next.done) {
             send(next.value);

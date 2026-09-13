@@ -180,6 +180,25 @@ function numeric(value: unknown): number | undefined {
   return undefined;
 }
 
+const TURN_COLUMNS =
+  "id, user_id, input_kind, schema_version, started_at, app_version, finished_at, stop_reason, steps, cost_usd, latency_ms";
+
+function toTurnSummary(row: Record<string, unknown>): TurnSummary {
+  return {
+    turnId: String(row.id),
+    userId: String(row.user_id),
+    inputKind: String(row.input_kind),
+    schemaVersion: String(row.schema_version),
+    startedAt: String(row.started_at),
+    appVersion: textOf(row.app_version),
+    finishedAt: textOf(row.finished_at),
+    stopReason: textOf(row.stop_reason),
+    steps: numeric(row.steps),
+    costUsd: numeric(row.cost_usd),
+    latencyMs: numeric(row.latency_ms),
+  };
+}
+
 export class SupabaseTraceStore implements TraceStore {
   readonly turnId: string;
 
@@ -305,29 +324,29 @@ export class SupabaseTraceStore implements TraceStore {
   async listTurns(limit: number): Promise<TurnSummary[]> {
     const { data, error } = await this.client
       .from("turns")
-      .select(
-        "id, user_id, input_kind, schema_version, started_at, app_version, finished_at, stop_reason, steps, cost_usd, latency_ms",
-      )
+      .select(TURN_COLUMNS)
       .eq("user_id", this.userId)
       .order("started_at", { ascending: false })
       .limit(Math.max(0, limit));
     if (error) throw this.readError(error, "listTurns");
 
-    return (data ?? []).map(
-      (row: Record<string, unknown>): TurnSummary => ({
-        turnId: String(row.id),
-        userId: String(row.user_id),
-        inputKind: String(row.input_kind),
-        schemaVersion: String(row.schema_version),
-        startedAt: String(row.started_at),
-        appVersion: textOf(row.app_version),
-        finishedAt: textOf(row.finished_at),
-        stopReason: textOf(row.stop_reason),
-        steps: numeric(row.steps),
-        costUsd: numeric(row.cost_usd),
-        latencyMs: numeric(row.latency_ms),
-      }),
+    return (data ?? []).map((row: Record<string, unknown>) =>
+      toTurnSummary(row),
     );
+  }
+
+  async findTurn(turnId: string): Promise<TurnSummary | undefined> {
+    const { data, error } = await this.client
+      .from("turns")
+      .select(TURN_COLUMNS)
+      // `user_id` again as well as RLS: a read through the service role (export
+      // scripts, #91) must not be able to see another user's turn either.
+      .eq("user_id", this.userId)
+      .eq("id", turnId)
+      .maybeSingle();
+    if (error) throw this.readError(error, "findTurn");
+
+    return data ? toTurnSummary(data as Record<string, unknown>) : undefined;
   }
 
   private readError(error: unknown, operation: string): TraceStoreError {

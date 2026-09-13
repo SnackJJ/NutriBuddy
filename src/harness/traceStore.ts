@@ -78,6 +78,15 @@ export interface TraceStore {
   append(event: AnyTurnEvent): Promise<void>;
   listByTurn(turnId: string, sinceSeq?: number): Promise<AnyTurnEvent[]>;
   /**
+   * The turn row the store's own user is allowed to see, or undefined.
+   *
+   * The replay endpoint needs this to tell "not your turn" (RFC 0008 §5 → 404)
+   * from "your turn, no new events yet" (→ 200 empty stream) — `listByTurn`
+   * answers both with an empty array, because RLS makes an invisible turn
+   * indistinguishable from an empty one.
+   */
+  findTurn(turnId: string): Promise<TurnSummary | undefined>;
+  /**
    * Recent turns for the store's own user — the store is user-bound, so the
    * caller cannot ask for someone else's turns (RLS is the same rule at the
    * database).

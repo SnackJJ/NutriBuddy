@@ -142,7 +142,7 @@ export function runTraceStoreContract(
       expect(store.persistFailed).toBe(true);
     });
 
-    it("hides another user's turn from listByTurn and listTurns", async () => {
+    it("hides another user's turn from listByTurn, listTurns and findTurn", async () => {
       const { store, otherUser, turnId } = createFixture();
 
       await store.append(turnStart(0));
@@ -151,6 +151,23 @@ export function runTraceStoreContract(
       const outsider = otherUser("user-B", turnId);
       expect(await outsider.listByTurn(turnId)).toEqual([]);
       expect(await outsider.listTurns(10)).toEqual([]);
+      // The replay endpoint turns this undefined into a 404 (RFC 0008 §5).
+      expect(await outsider.findTurn(turnId)).toBeUndefined();
+    });
+
+    it("finds this user's own turn and reports an unknown id as absent", async () => {
+      const { store, turnId } = createFixture();
+
+      await store.append(turnStart(0));
+      const found = await store.findTurn(turnId);
+      expect(found?.turnId).toBe(turnId);
+      expect(found?.inputKind).toBe("utterance");
+
+      // A uuid, because that is what the column is: a non-uuid id would reach
+      // Postgres as 22P02 and throw instead of answering "absent".
+      expect(
+        await store.findTurn("00000000-0000-4000-8000-000000000000"),
+      ).toBeUndefined();
     });
 
     it("lists only this user's turns, newest first, respecting the limit", async () => {

@@ -234,6 +234,7 @@ interface ReadCall {
   readonly filters: [string, unknown][];
   order?: [string, { ascending: boolean }];
   limit?: number;
+  maybeSingle?: boolean;
 }
 
 function fakeTable(rows: Record<string, unknown[]>): {
@@ -265,6 +266,10 @@ function fakeTable(rows: Record<string, unknown[]>): {
           call.limit = count;
           return builder;
         },
+        maybeSingle: () => {
+          call.maybeSingle = true;
+          return builder;
+        },
         then: (resolve: (value: unknown) => unknown) => {
           const matched = (rows[table] ?? []).filter((row) =>
             call.filters.every(([key, value]) =>
@@ -274,7 +279,10 @@ function fakeTable(rows: Record<string, unknown[]>): {
                 : (row as Record<string, unknown>)[key] === value,
             ),
           );
-          return Promise.resolve({ data: matched, error: null }).then(resolve);
+          // `maybeSingle` answers with the row or null, like PostgREST's
+          // `Accept: application/vnd.pgrst.object` does.
+          const data = call.maybeSingle ? (matched[0] ?? null) : matched;
+          return Promise.resolve({ data, error: null }).then(resolve);
         },
       };
 
@@ -368,6 +376,36 @@ describe("SupabaseTraceStore reads", () => {
     await expect(
       readStore(client).listByTurn("turn-1", 0),
     ).rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("finds one turn with the owner filter applied explicitly", async () => {
+    const table = fakeTable({
+      turns: [
+        { id: "turn-1", user_id: "user-A", input_kind: "utterance", schema_version: "1.9.0", started_at: at(0) },
+        { id: "turn-2", user_id: "user-B", input_kind: "utterance", schema_version: "1.9.0", started_at: at(0) },
+      ],
+    });
+
+    const found = await readStore(table.client).findTurn("turn-1");
+
+    expect(found?.turnId).toBe("turn-1");
+    // The user filter is explicit as well as RLS-enforced: an export script
+    // reading through the service role must not see another user's turn (#91).
+    expect(table.calls[0].filters).toEqual([
+      ["user_id", "user-A"],
+      ["id", "turn-1"],
+    ]);
+    expect(table.calls[0].maybeSingle).toBe(true);
+  });
+
+  it("reports an unknown or hidden turn as absent rather than throwing", async () => {
+    const table = fakeTable({
+      turns: [
+        { id: "turn-9", user_id: "user-B", input_kind: "utterance", schema_version: "1.9.0", started_at: at(0) },
+      ],
+    });
+
+    expect(await readStore(table.client).findTurn("turn-9")).toBeUndefined();
   });
 
   it("counts a stored turn_end as unfinished until the RPC finalizes it", async () => {

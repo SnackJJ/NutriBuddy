@@ -46,6 +46,25 @@ describe("createTurnStream", () => {
     ]);
   });
 
+  it("sends the route-level turn_meta frame before the first event", async () => {
+    // Not an AnyTurnEvent: no seq, never persisted, and it has to arrive first or
+    // a refresh would have no turnId to resume with (RFC 0008 §5).
+    const events = [turnStart(0), turnEnd(1, { seconds: 1 })];
+
+    const frames = (await readAll(
+      createTurnStream(body(events), {
+        meta: { type: "turn_meta", turnId: "turn-1", schema: "1.9.0" },
+      }),
+    )) as { type: string }[];
+
+    expect(frames[0]).toEqual({
+      type: "turn_meta",
+      turnId: "turn-1",
+      schema: "1.9.0",
+    });
+    expect(frames.slice(1)).toEqual([...events, { type: "terminal", ...TERMINAL_RESULT }]);
+  });
+
   it("marks the terminal when a trace write was given up on", async () => {
     let failed = false;
     const stream = createTurnStream(body([turnStart(0), turnEnd(1, { seconds: 1 })]), {
