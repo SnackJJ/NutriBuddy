@@ -1,0 +1,166 @@
+{
+  "schema": "1.0.0",
+  "env": {
+    "reportId": "2026-09-14T14-28-14Z-live-commandcode-v2",
+    "at": "2026-09-14T14:28:14.951Z",
+    "mode": "live",
+    "tag": "live-commandcode-v2",
+    "gitSha": "794d4c4",
+    "dirty": false,
+    "appVersion": "0.0.0-unversioned",
+    "catalogVersion": "usda-sr-legacy-2026-07-v1",
+    "datasetHash": "bd84acbe8dd4e2a1"
+  },
+  "n": 29,
+  "eval": {
+    "n": 29,
+    "bare": {
+      "passed": 15,
+      "failed": 14,
+      "passRate": 0.5172413793103449
+    },
+    "harness": {
+      "passed": 21,
+      "failed": 8,
+      "passRate": 0.7241379310344828
+    },
+    "deltaPoints": 20.68965517241379,
+    "groups": [
+      {
+        "group": "regression",
+        "n": 14,
+        "measured": 14,
+        "barePassed": 0,
+        "harnessPassed": 10,
+        "barePassRate": 0,
+        "harnessPassRate": 0.7142857142857143,
+        "deltaPoints": 71.42857142857143
+      },
+      {
+        "group": "capability",
+        "n": 15,
+        "measured": 15,
+        "barePassed": 15,
+        "harnessPassed": 11,
+        "barePassRate": 1,
+        "harnessPassRate": 0.7333333333333333,
+        "deltaPoints": -26.66666666666667
+      }
+    ],
+    "constraintViolationRate": {
+      "bare": {
+        "n": 29,
+        "value": 0.4827586206896552
+      },
+      "harness": {
+        "n": 29,
+        "value": 0.27586206896551724
+      }
+    },
+    "toolCallRate": {
+      "n": 29,
+      "value": 1
+    },
+    "sourceComplianceRate": {
+      "bare": {
+        "n": 29,
+        "value": 0.3448275862068966
+      },
+      "harness": {
+        "n": 29,
+        "value": 0.1724137931034483
+      }
+    },
+    "gateTurnRate": {
+      "n": 29,
+      "value": 0.3103448275862069
+    },
+    "sampleSize": {
+      "n": 29,
+      "meaningfulAt": 30,
+      "claimPercentages": false
+    },
+    "definitions": [
+      {
+        "key": "barePassRate",
+        "definition": "cases the bare model passed / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "harnessPassRate",
+        "definition": "cases the harness passed / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "passRateDelta",
+        "definition": "harness minus bare pass rate, in percentage points",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "constraintViolationRate",
+        "definition": "cases with at least one violation / n cases, per arm",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "toolCallRate",
+        "definition": "harness cases that called at least one tool / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "gateTurnRate",
+        "definition": "harness cases where a gate blocked at least once / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "sourceComplianceRate",
+        "definition": "cases whose reply carries a source marker (soft), per arm; its own literal, not a citation check",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "turnLatency",
+        "definition": "wall-clock turn duration in ms, from turn_start to turn_end in the trace; p50/p95 are nearest-rank",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "modelCallLatency",
+        "definition": "provider round-trip per model_call in ms, kept apart from turn latency",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "traceWriteLatency",
+        "definition": "turn_events.created_at minus the event's own timestamp, per append; the cost S1 adds to every yield",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "cost",
+        "definition": "sum and per-turn mean of model_call.costUsd, including every regenerate attempt",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "cacheHitRate",
+        "definition": "sum(cacheHitTokens) / sum(promptTokens); undefined when no prompt tokens",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "stopReasonDistribution",
+        "definition": "count of turn_end.result.stopReason over the window",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "gateDistribution",
+        "definition": "count of gate_verdict by checkpoint × verdict, and by checkName",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "retrieval",
+        "definition": "Recall@5 / MRR / citation correctness — V1.1; the field exists, the value does not",
+        "source": "not implemented in V1.0"
+      }
+    ]
+  },
+  "traces": null,
+  "telemetry": {
+    "included": false,
+    "reason": "listTurns: Could not find the table 'public.turns' in the schema cache"
+  }
+}
