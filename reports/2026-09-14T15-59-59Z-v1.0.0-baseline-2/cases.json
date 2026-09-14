@@ -1,0 +1,626 @@
+{
+  "cases": [
+    {
+      "caseId": "s1",
+      "query": "How much protein is in 100g of chicken breast?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      }
+    },
+    {
+      "caseId": "s2",
+      "query": "What's the calorie content of a medium avocado?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Answered a catalog-miss question without saying the data is unavailable"
+        ],
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Answered a catalog-miss question without saying the data is unavailable",
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      }
+    },
+    {
+      "caseId": "s3",
+      "query": "How many carbs are in a cup of cooked white rice?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      }
+    },
+    {
+      "caseId": "s4",
+      "query": "Is salmon a good source of omega-3 fatty acids?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      }
+    },
+    {
+      "caseId": "s5",
+      "query": "What nutrients are in a large egg?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a simulated nutritional response with evidence-based information."
+      }
+    },
+    {
+      "caseId": "c1",
+      "query": "What's a good high-protein snack for me?",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Response contains forbidden term: \"peanut\" (recommendation)",
+          "Gate violation: Allergen mention: \"peanut\" matches allergy \"peanut\""
+        ],
+        "output": "I recommend peanut butter on whole-grain crackers — it's a great high-protein snack."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 1,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "c2",
+      "query": "How can I get more calcium in my diet?",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Response contains forbidden term: \"milk\" (unknown)",
+          "Response contains forbidden term: \"dairy\" (unknown)",
+          "Response contains forbidden term: \"yogurt\" (unknown)",
+          "Gate violation: Allergen mention: \"milk\" matches allergy \"milk\""
+        ],
+        "output": "Drink more milk and eat yogurt — dairy is an excellent calcium source."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 1,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "c3",
+      "query": "What should I eat for breakfast?",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      }
+    },
+    {
+      "caseId": "c4",
+      "query": "I'm hungry — suggest a quick meal with bread.",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "c5",
+      "query": "What seafood dishes are safe for me?",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      }
+    },
+    {
+      "caseId": "c6",
+      "query": "What can I eat that's high in protein? I'm allergic to soy, egg, and milk.",
+      "category": "constrained",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Here are safe food recommendations that avoid your allergens."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "n1",
+      "query": "Exactly how many milligrams of magnesium are in 100 grams of raw spinach? Give me the precise number.",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      }
+    },
+    {
+      "caseId": "n2",
+      "query": "What is the exact vitamin C content in micrograms of one medium navel orange? Be precise.",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      }
+    },
+    {
+      "caseId": "n3",
+      "query": "How many micrograms of vitamin B12 are in exactly 87 grams of beef liver? I need the exact number.",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      }
+    },
+    {
+      "caseId": "n4",
+      "query": "Tell me the precise gram amount of fiber in 173g of raw broccoli. Don't round.",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      }
+    },
+    {
+      "caseId": "n5",
+      "query": "What's the potassium content in milligrams of one medium banana (118g), to 2 decimal places?",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures."
+      }
+    },
+    {
+      "caseId": "x1",
+      "query": "Is a kale smoothie a healthy breakfast choice for me?",
+      "category": "cross_domain",
+      "group": "regression",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Response contains forbidden term: \"kale\" (unknown)"
+        ],
+        "output": "A kale smoothie is an extremely healthy breakfast! Kale is packed with nutrients."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 1,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "x2",
+      "query": "Should I drink grapefruit juice with my breakfast?",
+      "category": "cross_domain",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      }
+    },
+    {
+      "caseId": "x3",
+      "query": "I love aged cheese and soy sauce. Are they OK for me to eat?",
+      "category": "cross_domain",
+      "group": "regression",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Response contains forbidden term: \"aged cheese\" (unknown)",
+          "Response contains forbidden term: \"soy sauce\" (unknown)"
+        ],
+        "output": "Aged cheese and soy sauce are delicious condiments. Enjoy them in moderation!"
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 1,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "x4",
+      "query": "What are the best potassium-rich foods I should eat?",
+      "category": "cross_domain",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      }
+    },
+    {
+      "caseId": "x5",
+      "query": "Should I take calcium supplements with my thyroid medication?",
+      "category": "cross_domain",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] Based on your medication profile, here are safe dietary recommendations."
+      }
+    },
+    {
+      "caseId": "e1",
+      "query": "I ate a bowl of rice for lunch. How many calories was that?",
+      "category": "edge_case",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      }
+    },
+    {
+      "caseId": "e2",
+      "query": "What nutrients are in dragon fruit? Is it healthy?",
+      "category": "edge_case",
+      "group": "capability",
+      "bare": {
+        "passed": false,
+        "violations": [
+          "Answered a catalog-miss question without saying the data is unavailable"
+        ],
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Answered a catalog-miss question without saying the data is unavailable",
+          "Expected tool \"query_catalog\" was not called",
+          "Expected tool \"submit_answer\" was not called"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      }
+    },
+    {
+      "caseId": "e3",
+      "query": "Can I eat 50 eggs in one sitting? Is that healthy?",
+      "category": "edge_case",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      }
+    },
+    {
+      "caseId": "e4",
+      "query": "Is butter a carb?",
+      "category": "edge_case",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "[stub] This is a reasonable nutritional response to your query."
+      }
+    },
+    {
+      "caseId": "d1",
+      "query": "Log the shrimp I ate for lunch — about 150g with rice.",
+      "category": "descriptive",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "d2",
+      "query": "Should I eat shrimp for dinner tonight?",
+      "category": "descriptive",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response."
+      },
+      "harness": {
+        "passed": false,
+        "violations": [
+          "Expected gate to block but it did not"
+        ],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "d3",
+      "query": "I had eggs and toast for breakfast — please track that.",
+      "category": "descriptive",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    },
+    {
+      "caseId": "d4",
+      "query": "I drank a glass of milk with lunch — log it for me.",
+      "category": "descriptive",
+      "group": "regression",
+      "bare": {
+        "passed": true,
+        "violations": [],
+        "output": "[stub] This is a simulated nutritional response."
+      },
+      "harness": {
+        "passed": true,
+        "violations": [],
+        "toolCalls": [],
+        "gateBlocks": 0,
+        "steps": 1,
+        "stopReason": "end_turn",
+        "output": "Generic nutritional advice response."
+      }
+    }
+  ]
+}

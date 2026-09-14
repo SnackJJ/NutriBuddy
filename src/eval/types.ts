@@ -30,6 +30,14 @@ export interface EvalExpected {
   readonly shouldAskClarification?: boolean;
   /** trace 里必须出现 gate_block（跨域冲突硬拦）。 */
   readonly shouldBeBlocked?: boolean;
+  /**
+   * 这条 case 问的食物**不在 catalog 里**（issue #130）。
+   *
+   * 正确行为因此不是"答对"，而是**如实说查不到**：调用目录工具、发现
+   * `miss_unknown`、不编数字。没有这个字段时，这类 case 与"能查到"的 case 共用同一套
+   * 期望，于是通过与否取决于模型这次是否恰好诚实 —— 一个偶然的绿色。
+   */
+  readonly expectsCatalogMiss?: boolean;
 }
 
 /** 单条 eval case：手工 query + 期望约束 + 可选用户上下文。 */

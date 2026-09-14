@@ -872,3 +872,69 @@ describe("mustNotContain is judged by what the sentence does (#128)", () => {
     expect(result.passed).toBe(false);
   });
 });
+
+// ── catalog-miss honesty (#130) ────────────────────────────────────────────
+//
+// `s2` (avocado) and `e2` (dragon fruit) ask about foods the seed catalog does not
+// have, so the correct behaviour is to say so — not to answer. Without an explicit
+// expectation these cases passed or failed on whether the model happened to be
+// honest that run, which is a green nobody can rely on.
+
+describe("expectsCatalogMiss (#130)", () => {
+  const missCase = { expectsCatalogMiss: true } as const;
+
+  it("accepts an honest miss with no invented number", () => {
+    const result = scoreBare(
+      "I don't have a verified catalog entry for avocado, so I can't give you a calorie figure. Check USDA FoodData Central for a precise value.",
+      missCase,
+      undefined,
+    );
+    expect(result.passed).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("rejects an invented nutrition figure", () => {
+    const result = scoreBare(
+      "A medium avocado has about 240 kcal and 10 g of fibre.",
+      missCase,
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations[0]).toContain("Fabricated nutrition figure");
+  });
+
+  it("rejects a vague answer that never admits the gap", () => {
+    const result = scoreBare(
+      "Avocados are a healthy choice with plenty of nutrients.",
+      missCase,
+      undefined,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.violations[0]).toContain("without saying the data is unavailable");
+  });
+
+  it("accepts the same admission in the prompt's other language", () => {
+    const result = scoreBare(
+      "目录里查不到这个食物，我无法核实它的营养值。",
+      missCase,
+      undefined,
+    );
+    expect(result.passed).toBe(true);
+  });
+
+  it("does not apply to cases whose food the catalog has", () => {
+    const result = scoreBare(
+      "Chicken breast has 31 g of protein per 100 g.",
+      { mustCallTools: [] },
+      undefined,
+    );
+    expect(result.passed).toBe(true);
+  });
+
+  it("is declared on the two cases that need it, and only those", () => {
+    const declared = loadEvalCases()
+      .filter((c) => c.expected.expectsCatalogMiss === true)
+      .map((c) => c.id);
+    expect(declared).toEqual(["s2", "e2"]);
+  });
+});

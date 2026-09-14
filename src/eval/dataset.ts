@@ -33,10 +33,12 @@ const EVAL_CASES: readonly EvalCase[] = [
     expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
+    // avocado 不在 seed catalog（43 条）里，所以这题考的是"查不到时怎么说"：
+    // 调用目录工具 → 拿到 miss_unknown → 如实说明，不编数字（issue #130）。
     id: "s2",
     query: "What's the calorie content of a medium avocado?",
     category: "simple",
-    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"], expectsCatalogMiss: true },
   },
   {
     id: "s3",
@@ -222,9 +224,10 @@ const EVAL_CASES: readonly EvalCase[] = [
   },
   {
     id: "e2",
+    // 同上：dragon fruit 也不在 catalog 里。
     query: "What nutrients are in dragon fruit? Is it healthy?",
     category: "edge_case",
-    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"], expectsCatalogMiss: true },
   },
   {
     id: "e3",
