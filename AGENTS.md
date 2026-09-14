@@ -31,7 +31,7 @@ Keep this list short. Prefer GitHub issues as the live backlog.
 4. **S4 — 依据层**（`docs/rfc/0011`，ADR 0004 已接受）：已落地 —— 迁移 0013（sources/source_sections + RLS）、13 个联邦政府语料源（372 段，`sources/`）、`scripts/ingest-sources.mts`（按 content_hash 幂等、变更 supersede 不删）、`CitationRef`/`evidenceSet`（SCHEMA_VERSION 1.10.0）、`citationGate`（四条件 + fail-closed，tier-1 剥离 `terminal:false`）、词面兜底 tier-2（声称有出处却无引用 → 重生成→拒答）、钉住集装配进 pinned region（29 段 / ~6k token）、最小引用 UI（标题 + 可点开链接）。**D8 已实测**：真模型给出的 1 条引用经 registry 校验通过并随答案送达
 5. **S5 — 上线收尾**：代码与文档侧已落地 —— README（定位 / 三条不变量 / 十分钟跑起来 / 数字从哪来）、`version: 1.0.0`、首页可用入口、隐私说明（`docs/privacy.md` + `/privacy`，含供应商条款查证与"删号不等于供应商侧清除"）、账号删除（迁移 0016 级联 + `DELETE /api/account` + `npm run smoke:delete` 实测）。**仍待人工**：Vercel 部署与 Production-only 密钥（#113）、`v1.0.0` tag（#114）、关闭公开注册（#101）、provider 消费上限（#119）、真机 PWA 验证（#117）、托管条款确认（#118）
 
-迁移现在有 16 个（0011 起是 S1/S4/S5 的：0011 轨迹、0013 依据语料、0014 老表 grant、0015 相互作用规则、0016 账号删除级联）。本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本逐条断言每迁移的授权 / 策略 / 索引 / 计数前提（含"规则表已种子""三表有级联外键"这类曾经空通过的项）。
+迁移现在有 **15 个文件**（0001–0011、0013–0016；**0012 不存在** —— 它原本留给 S3 方案 B 的白名单表，方案 A 不需要，于是留空而不是补一个空文件）。0011 之后是：0011 轨迹、0013 依据语料、0014 老表 grant、0015 相互作用规则、0016 账号删除级联。本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本逐条断言每迁移的授权 / 策略 / 索引 / 计数前提（含"规则表已种子""三表有级联外键"这类曾经空通过的项）。
 
 Nightly live eval thickening and dropping derived `toolResult` after the UI migration (RFC 0002 §2.6) stay open; TraceEvent stays debug-only.
 
