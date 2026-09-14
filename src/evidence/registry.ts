@@ -69,8 +69,18 @@ interface PinnedRow {
    * loader then reports an empty pinned set rather than an error.
    */
   readonly sources:
-    | { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }
-    | readonly { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }[]
+    | {
+        readonly slug?: unknown;
+        readonly doc_version?: unknown;
+        readonly status?: unknown;
+        readonly url?: unknown;
+      }
+    | readonly {
+        readonly slug?: unknown;
+        readonly doc_version?: unknown;
+        readonly status?: unknown;
+        readonly url?: unknown;
+      }[]
     | undefined;
 }
 
@@ -93,9 +103,26 @@ export function corpusVersionFrom(
   return `corpus:${createHash("sha256").update(canonical).digest("hex").slice(0, 12)}`;
 }
 
+/**
+ * What the chat UI needs to render a citation without a second round trip: the
+ * section's title and where a reader can check it.
+ *
+ * Sent with the turn's meta frame rather than fetched per citation, because the
+ * set is small (the pinned set), identical for every user, and already in memory
+ * on the server.
+ */
+export interface CitationUiEntry {
+  readonly sectionId: string;
+  readonly sourceId: string;
+  readonly docVersion: string;
+  readonly heading: string;
+  readonly url: string;
+}
+
 export interface LoadedEvidence {
   readonly evidence: PinnedEvidence;
   readonly registry: CitationRegistry;
+  readonly index: readonly CitationUiEntry[];
 }
 
 /**
@@ -123,7 +150,7 @@ export async function loadPinnedEvidence(
   const { data: pinnedRows, error: pinnedError } = await client
     .from("source_sections")
     .select(
-      "id, source_id, section_path, heading, ordinal, text, anchor, sources!inner(slug, doc_version, status)",
+      "id, source_id, section_path, heading, ordinal, text, anchor, sources!inner(slug, doc_version, status, url)",
     )
     .eq("pinned", true);
   if (pinnedError) throw new Error(`pinned sections read failed: ${pinnedError.message}`);
@@ -147,8 +174,27 @@ export async function loadPinnedEvidence(
     },
   );
 
+  const index: CitationUiEntry[] = sections.map((section) => {
+    const row = (pinnedRows ?? []).find(
+      (candidate: PinnedRow) => String(candidate.id) === section.id,
+    );
+    const embedded = row ? (Array.isArray(row.sources) ? row.sources[0] : row.sources) : undefined;
+    const documentUrl = embedded?.url === undefined ? "" : String(embedded.url);
+    return {
+      sectionId: section.id,
+      sourceId: section.sourceId,
+      docVersion: section.docVersion,
+      heading: section.heading ?? section.sectionPath,
+      // The registry's url is the revision the citation quotes (the archived copy
+      // for a source fetched that way), which is what a reader verifying the
+      // claim should see; the publisher's live page may have moved on.
+      url: section.anchor ? `${documentUrl}#${section.anchor}` : documentUrl,
+    };
+  });
+
   return {
     evidence: assemblePinnedEvidence(sections, corpusVersionFrom(sources)),
     registry: createSupabaseCitationRegistry(client),
+    index,
   };
 }

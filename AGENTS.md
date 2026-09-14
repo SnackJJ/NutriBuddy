@@ -27,8 +27,9 @@ Keep this list short. Prefer GitHub issues as the live backlog.
 
 1. **S1 已收口**（`docs/rfc/0008`）：T1–T9 全部落地（迁移 0011/0014、TraceStore 端口、`turn()` 接线、`SupabaseTraceStore`、重放路由、导出 `scripts/export-traces.mts`、保留 `scripts/prune-traces.ts`、D9 smoke）。两处仍未闭合、已留在票上：D4 的**真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）与 `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
 2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：已落地 —— `npm run eval:report` 产出 `reports/<reportId>/{report.md,summary.json,cases.json}` + `reports/index.json`（记 gitSha/appVersion/catalogVersion/datasetHash/n），`--compare <reportId>` 按阈值标倒退，`--traces` 把轨迹的延迟/成本并进来。**两份 live 基线已入 git**：`*-v1`（bare 手臂不给用户档案：bare 55.2% vs harness 79.3%，regression 1/14 → 12/14）与 `*-v2`（两臂信息相同：bare 51.7% vs harness 72.4%，regression 0/14 → 10/14，capability 15/15 → 11/15）。两次之间改了 bare 手臂的信息对等性，因此**两份互不可比**（compare 会明说）。它们暴露的问题已开票：简单查询在 max_steps 转圈且**终态回复为空**（#126）、d2 由模型自拒而 gate 没拦（#127）、`mustNotContain` 把"点名过敏原的警告"与"推荐过敏原"同样记为违规（#128）、provider 429 被当成能力失败（#129）
-3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）：代码侧已落地（配额纯函数 `src/lib/quota.ts`、`turns` 聚合、429 前置、最坏成本预估、UI 隐藏注册、拒绝日志）；运维人工步骤（关闭公开注册、provider 消费上限、Production-only 密钥）见 `docs/ops/v1.0-operations.md`，**尚未执行**；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
-4. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
+3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）：代码侧已落地（配额纯函数 `src/lib/quota.ts`、`turns` 聚合、429 前置、最坏成本预估、UI 隐藏注册、拒绝日志）；运维人工步骤（关闭公开注册、provider 消费上限、Production-only 密钥）见 `docs/ops/v1.0-operations.md`，**尚未执行**
+4. **S4 — 依据层**（`docs/rfc/0011`，ADR 0004 已接受）：已落地 —— 迁移 0013（sources/source_sections + RLS）、13 个联邦政府语料源（372 段，`sources/`）、`scripts/ingest-sources.mts`（按 content_hash 幂等、变更 supersede 不删）、`CitationRef`/`evidenceSet`（SCHEMA_VERSION 1.10.0）、`citationGate`（四条件 + fail-closed，tier-1 剥离 `terminal:false`）、词面兜底 tier-2（声称有出处却无引用 → 重生成→拒答）、钉住集装配进 pinned region（29 段 / ~6k token）、最小引用 UI（标题 + 可点开链接）。**D8 已实测**：真模型给出的 1 条引用经 registry 校验通过并随答案送达
+5. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
 
 S1 之后的迁移前提不变：本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本现在同时断言 0011 与 0014 的 grant / 策略 / 索引前提。
 

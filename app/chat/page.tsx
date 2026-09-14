@@ -3,6 +3,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChatMessage, WriteProposalData } from "@/harness/types";
 import { extractSources, friendlyToolName } from "@/lib/chatHelpers";
+import {
+  indexCitations,
+  resolveCitationChips,
+  type CitationChip,
+  type CitationIndexEntry,
+  type WireCitation,
+} from "@/lib/citationUi";
 import type { DrugNutrientInteraction } from "@/lib/drugInteractions";
 import {
   matchQualityLabel,
@@ -49,6 +56,12 @@ interface DisplayMessage {
   readonly content: string;
   /** Citation sources extracted from `[Source: …]` in the reply. */
   readonly sources?: readonly string[];
+  /**
+   * Evidence citations the gate verified (RFC 0011). Rendered as a titled link per
+   * section: the heading is what makes an entry scannable, and the link is what
+   * makes it checkable — a citation the reader cannot open is decoration.
+   */
+  readonly citations?: readonly CitationChip[];
   /** Tool calls made by the agent for this response. */
   readonly toolCalls?: readonly ToolCallEntry[];
   /** Whether the final reply was blocked by the post-gate. */
@@ -93,6 +106,8 @@ interface StreamTerminalResult {
   readonly reply?: string;
   readonly steps?: number;
   readonly stopReason?: string;
+  /** Typed output; its `citations` are the ones the gate verified. */
+  readonly output?: { readonly citations?: readonly WireCitation[] } | null;
   readonly proposal?: WriteProposalData;
   readonly interactions?: readonly DrugNutrientInteraction[];
   readonly safetyNotices?: readonly ProposalSafetyNotice[];
@@ -119,11 +134,14 @@ interface StreamEvent {
   readonly verdict?: string;
   readonly checkName?: string;
   readonly evidence?: string;
-  readonly result?: StreamTerminalResult;
+  /** Raw `turn_end` result: the typed output's citations live here. */
+  readonly result?: StreamTerminalResult & { readonly output?: unknown };
   readonly error?: string;
   /** Route-level `turn_meta` frame: the turnId a refresh would resume (§5). */
   readonly turnId?: string;
   readonly schema?: string;
+  /** Section titles and links for this turn's evidence (RFC 0011 §3.7). */
+  readonly citations?: readonly CitationIndexEntry[];
   /** Event seq; route-level frames do not carry one. */
   readonly seq?: number;
   /** Event timestamp, used to date the turn being resumed. */
@@ -137,6 +155,10 @@ interface AssistantStreamState {
   toolCalls: ToolCallEntry[];
   stopReason: string;
   gateReasons: string[];
+  /** Section id → title/link, from the turn's meta frame. */
+  citationIndex: Map<string, CitationIndexEntry>;
+  /** The citations that survived the gate, in the order the model gave them. */
+  citations: WireCitation[];
   writeProposal?: WriteProposalData;
   interactions: DrugNutrientInteraction[];
   safetyNotices: ProposalSafetyNotice[];
@@ -154,6 +176,8 @@ function createAssistantStreamState(): AssistantStreamState {
     toolCalls: [],
     stopReason: "",
     gateReasons: [],
+    citationIndex: new Map(),
+    citations: [],
     interactions: [],
     safetyNotices: [],
     resolverMiss: undefined,
@@ -231,11 +255,22 @@ function terminalResultFromEvent(
   event: StreamEvent,
 ): StreamTerminalResult | undefined {
   if (event.type === "turn_end") {
-    return event.result;
+    // The wire type is structural and unchecked: narrow the one field the UI reads.
+    const output = (event.result as { readonly output?: unknown } | undefined)?.output;
+    return output === undefined
+      ? event.result
+      : { ...event.result, output: output as StreamTerminalResult["output"] };
   }
 
   if (event.type === "terminal") {
-    return event;
+    // Route-level frame: the fields the UI reads, taken one by one rather than
+    // by spreading the event, whose `output` is untyped on the wire.
+    return {
+      reply: event.reply,
+      steps: event.steps,
+      stopReason: event.stopReason,
+      output: event.output as StreamTerminalResult["output"],
+    };
   }
 
   return undefined;
@@ -309,6 +344,13 @@ function applyTerminalResult(
 
   if (result.reply) {
     state.content = result.reply;
+  }
+
+  // Only citations that survived the provenance check reach here: an entry the
+  // gate stripped is not in `output.citations`, so the UI cannot show a source
+  // the answer did not actually stand on.
+  if (result.output?.citations) {
+    state.citations = [...result.output.citations];
   }
 
   if (result.stopReason === "write_proposal" && result.proposal) {
@@ -528,6 +570,49 @@ function MessageBubble({
                 Source: {src}
               </span>
             ))}
+          </div>
+        )}
+
+        {/* Verified evidence citations (RFC 0011) */}
+        {message.citations && message.citations.length > 0 && (
+          <div className="mt-2 space-y-1">
+            <p className="text-xs font-medium text-gray-500">Evidence</p>
+            <ul className="flex flex-col gap-1">
+              {message.citations.map((citation) => (
+                <li key={citation.sectionId} className="text-xs text-gray-600">
+                  {citation.url ? (
+                    <a
+                      href={citation.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-start gap-1 rounded text-blue-700 underline decoration-blue-300 underline-offset-2 hover:decoration-blue-600"
+                    >
+                      <svg
+                        className="mt-0.5 h-3 w-3 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13.5 6H6.75A1.75 1.75 0 005 7.75v9.5c0 .966.784 1.75 1.75 1.75h9.5A1.75 1.75 0 0018 17.25V10.5M15 3h6v6M21 3l-9 9"
+                        />
+                      </svg>
+                      <span>{citation.heading}</span>
+                    </a>
+                  ) : (
+                    // No link rather than a dead one: the citation is still
+                    // verified evidence, and an entry that cannot be opened is
+                    // not a reason to hide it.
+                    <span>{citation.heading}</span>
+                  )}
+                  <span className="ml-1 text-gray-400">({citation.docVersion})</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -1083,6 +1168,10 @@ function assistantMessageFromStreamState(
             })
           : "Write proposal awaiting confirmation."),
     sources: sources.length > 0 ? sources : undefined,
+    citations:
+      state.citations.length > 0
+        ? [...resolveCitationChips(state.citations, state.citationIndex)]
+        : undefined,
     toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
     gateBlocked: state.stopReason === "gate_blocked",
     gateReasons: state.gateReasons.length > 0 ? state.gateReasons : undefined,
@@ -1119,6 +1208,10 @@ function trackedStreamHandler(
     if (event.type === "turn_meta") {
       turnId = event.turnId ?? turnId;
       if (turnId) beginTurn(window.sessionStorage, turnId);
+      // The index arrives once per turn, from the same server-side load the
+      // evidence set came from; resolving ids anywhere else would be a second
+      // source of truth for what a citation points at.
+      streamState.citationIndex = indexCitations(event.citations ?? []);
       return;
     }
 

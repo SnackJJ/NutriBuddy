@@ -497,7 +497,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     createTurnStream(turn(turnInput, ports), {
       // Sent before the first event so the page can remember which turn it is
       // watching: that is what makes a refresh mid-turn resumable (RFC 0008 §5).
-      meta: { type: "turn_meta", turnId, schema: SCHEMA_VERSION },
+      meta: {
+        type: "turn_meta",
+        turnId,
+        schema: SCHEMA_VERSION,
+        // The section titles and links a citation can be rendered with. Sent once
+        // per turn, from the same load the evidence set came from, so the UI never
+        // has to resolve an id against a second source that could disagree.
+        ...(loaded ? { citations: loaded.index } : {}),
+      },
       // No store at all is also a lost trace: reporting "false" here would tell
       // the client an unrecorded turn was recorded (RFC 0008 §3.6).
       tracePersistFailed: () => trace?.persistFailed ?? true,
