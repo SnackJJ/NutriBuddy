@@ -1265,3 +1265,91 @@ describe("loop drain (internal unit helper)", () => {
   });
 
 });
+
+// ── repeated failed tool calls (live-run finding, S2 baseline) ─────────────
+//
+// A live run against a real model re-sent an identical failing tool call until
+// MAX_STEPS was spent: the failure text was already in the conversation, so the
+// retry could not produce a new fact, only another bill. The guard answers the
+// repeat with the previous failure instead of dispatching it again.
+
+describe("identical repeated tool calls", () => {
+  const failingTool = (calls: string[]) => {
+    const handler = async (args: Record<string, unknown>) => {
+      calls.push(JSON.stringify(args));
+      return {
+        kind: "typed_error" as const,
+        message: 'Required parameter "food_id" is missing.',
+        data: { type: "error", message: 'Required parameter "food_id" is missing.' },
+      };
+    };
+    return new Map([["query_catalog", handler]]);
+  };
+
+  const repeatCall: ToolCall = {
+    id: "call-1",
+    name: "query_catalog",
+    args: { template_id: "food_lookup" },
+  };
+
+  it("dispatches the failing call once and tells the model it repeated it", async () => {
+    const dispatched: string[] = [];
+    const prompts: string[] = [];
+    const adapter = stubAdapter((req) => {
+      prompts.push(req.messages.map((m) => m.content).join("\n"));
+      // Always the same call, so only the guard can stop it.
+      return { content: "", stop: true, toolCalls: [repeatCall], finishReason: "tool_calls" };
+    });
+
+    const { result } = await collect(
+      run({
+        userInput: "100g 鸡胸肉的蛋白质？",
+        adapter,
+        tracer: new Tracer(),
+        tools: failingTool(dispatched),
+        toolSchemas: [],
+      }),
+    );
+
+    expect(dispatched).toHaveLength(1);
+    // The guard's message reaches the model, not just the tracer.
+    const lastPrompt = prompts.at(-1) ?? "";
+    expect(lastPrompt).toContain("Repeated call");
+    expect(lastPrompt).toContain('Required parameter "food_id" is missing.');
+    expect(lastPrompt).toContain("Do not send it again");
+    expect(result.steps).toBeGreaterThan(1);
+  });
+
+  it("still dispatches a call whose arguments changed, since that is a new request", async () => {
+    const dispatched: string[] = [];
+    let call = 0;
+    const adapter = stubAdapter(() => {
+      call += 1;
+      return {
+        content: "",
+        stop: true,
+        toolCalls: [
+          call === 1
+            ? repeatCall
+            : { id: "call-2", name: "query_catalog", args: { template_id: "food_lookup", food_id: "f-1" } },
+        ],
+        finishReason: "tool_calls",
+      };
+    });
+
+    await collect(
+      run({
+        userInput: "100g 鸡胸肉的蛋白质？",
+        adapter,
+        tracer: new Tracer(),
+        tools: failingTool(dispatched),
+        toolSchemas: [],
+      }),
+    );
+
+    expect(dispatched).toEqual([
+      JSON.stringify({ template_id: "food_lookup" }),
+      JSON.stringify({ template_id: "food_lookup", food_id: "f-1" }),
+    ]);
+  });
+});

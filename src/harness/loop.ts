@@ -285,6 +285,38 @@ function createToolResultMessage(
   };
 }
 
+/** Identity of a tool call as the model made it: name plus exact arguments. */
+function callSignature(toolCall: ToolCall): string {
+  return `${toolCall.name}${JSON.stringify(toolCall.args)}`;
+}
+
+/** The human-readable reason a failed call gave, for the repeat guidance. */
+function describeFailure(outcome: ToolOutcome): string {
+  switch (outcome.kind) {
+    case "ok":
+      return "";
+    case "infra_error":
+      return outcome.cause;
+    default:
+      return outcome.message;
+  }
+}
+
+/**
+ * What the model is told when it repeats a call that already failed.
+ *
+ * It names the previous failure and asks for a decision, because the
+ * alternative — dispatching again — trades a new observation for the same one,
+ * at the caller's expense.
+ */
+function repeatGuidance(name: string, previous: string, count: number): string {
+  return (
+    `Repeated call: "${name}" was already called with these exact arguments and failed ` +
+    `(${previous}). This is repeat #${count}. Do not send it again: change the ` +
+    "arguments so the call can succeed, or answer without it."
+  );
+}
+
 function submitAnswerOutcome(output: TypedOutput | null): ToolOutcome {
   if (!output) {
     return { kind: "ok", name: SUBMIT_ANSWER_TOOL, data: null };
@@ -377,6 +409,13 @@ export async function* run(
   // working set 随步骤增长：工具结果回灌为 tool 消息，未交卷的模型产出
   // 回灌为 assistant 消息。
   const working: ChatMessage[] = [...history];
+  /**
+   * Tool calls that failed this turn, keyed by name + exact arguments, and how
+   * many times the model has since repeated each one. Both are per-turn: a new
+   * turn is a new chance to call anything.
+   */
+  const failedCalls = new Map<string, string>();
+  const repeats = new Map<string, number>();
   let reply = "";
 
   for (let step = 1; step <= maxSteps; step++) {
@@ -483,7 +522,31 @@ export async function* run(
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
 
+        // A call this turn already made with the same arguments, after it
+        // failed, is answered with that failure instead of being dispatched
+        // again. Live runs made the case for this: a model that misses a
+        // required parameter re-sent the identical call until MAX_STEPS was
+        // spent, paying for every retry and never seeing a new fact — the
+        // failure message was already in the conversation, so repeating the
+        // same request could not produce anything else.
+        const signature = callSignature(tc);
+        const previous = failedCalls.get(signature);
+        if (previous !== undefined) {
+          repeats.set(signature, (repeats.get(signature) ?? 0) + 1);
+          working.push(
+            createToolResultMessage(
+              tc,
+              repeatGuidance(tc.name, previous, repeats.get(signature) ?? 1),
+            ),
+          );
+          continue;
+        }
+
         const outcome = await dispatchTool(tc, tools, toolSchemas);
+
+        if (outcome.kind !== "ok") {
+          failedCalls.set(signature, describeFailure(outcome));
+        }
 
         yield observeFromOutcome(step, outcome);
 
