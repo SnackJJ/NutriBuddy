@@ -16,6 +16,8 @@ import type { Catalog } from "../catalog/catalog";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 import { scoreSignalsFromTurnEvents } from "./scoreSignals";
+import { isTransientProviderError, withTransientRetry } from "./providerRetry";
+import { PROVIDER_ATTEMPTS } from "./bare-runner";
 
 /**
  * 对一批 eval case 执行完整 harness 运行。
@@ -39,96 +41,123 @@ export async function runHarnessEval(
   const results: HarnessResult[] = [];
 
   for (const c of cases) {
-    const tracer = new Tracer();
-    const start = Date.now();
+    // One attempt at a case. Split out so a transient provider fault can be
+    // retried without duplicating the loop: a 429 mid-turn is a statement about
+    // the last few seconds, not about the harness (issue #129).
+    const runCase = async (): Promise<HarnessResult> => {
+      const tracer = new Tracer();
+      const start = Date.now();
 
-    let reply = "";
-    let steps = 0;
-    let stopReason: StopReason = "end_turn";
-    const toolCalls: string[] = [];
-    let gateVerdictBlocks = 0;
+      let reply = "";
+      let steps = 0;
+      let stopReason: StopReason = "end_turn";
+      const toolCalls: string[] = [];
+      let gateVerdictBlocks = 0;
 
-    const turnEvents: AnyTurnEvent[] = [];
+      const turnEvents: AnyTurnEvent[] = [];
 
-    const shouldRunGate =
-      c.userContext !== undefined && interactionStore !== undefined;
+      const shouldRunGate =
+        c.userContext !== undefined && interactionStore !== undefined;
 
-    try {
-      const result = await consumeTurn(
-        turn(
-          { tag: "utterance", content: c.query },
-          {
-            adapter,
-            tracer,
-            tools,
-            toolSchemas,
-            catalog,
-            userContext: shouldRunGate ? c.userContext : undefined,
-            interactionStore: shouldRunGate ? interactionStore : undefined,
-            // turn() turns a fatal error into a crash terminal instead of
-            // throwing (RFC 0008 §3.6), so the runner's own error text has to
-            // ride the port: scoring keys off EVAL_ERROR_PREFIX.
-            crashReply: (err) => `${EVAL_ERROR_PREFIX}${String(err)}`,
+      try {
+        const result = await consumeTurn(
+          turn(
+            { tag: "utterance", content: c.query },
+            {
+              adapter,
+              tracer,
+              tools,
+              toolSchemas,
+              catalog,
+              userContext: shouldRunGate ? c.userContext : undefined,
+              interactionStore: shouldRunGate ? interactionStore : undefined,
+              // turn() turns a fatal error into a crash terminal instead of
+              // throwing (RFC 0008 §3.6), so the runner's own error text has to
+              // ride the port: scoring keys off EVAL_ERROR_PREFIX.
+              crashReply: (err) => `${EVAL_ERROR_PREFIX}${String(err)}`,
+            },
+          ),
+          (event) => {
+            turnEvents.push(event);
+
+            if (isBlockedGateVerdict(event)) {
+              gateVerdictBlocks++;
+            }
+
+            if (event.type !== "step") {
+              return;
+            }
+
+            const { agentEvent } = event;
+            steps = agentEvent.step; // track last-seen step before potential crash (issue #21)
+            if (agentEvent.type === "act" && agentEvent.toolCall) {
+              toolCalls.push(agentEvent.toolCall.name);
+            }
           },
-        ),
-        (event) => {
-          turnEvents.push(event);
+        );
 
-          if (isBlockedGateVerdict(event)) {
-            gateVerdictBlocks++;
-          }
+        reply = result.reply;
+        steps = result.steps;
+        stopReason = result.stopReason;
+      } catch (err) {
+        // Safety net only: turn() reports its own fatal errors as a crash terminal
+        // (RFC 0008 §3.6), and `crashReply` above already put this text in the
+        // reply. Reaching here means the failure was outside the seam.
+        reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
+        stopReason = "crash";
+      }
 
-          if (event.type !== "step") {
-            return;
-          }
+      // Phase 3: score from turn-event facts, not TraceEvent tool_call/gate_block.
+      const signals = scoreSignalsFromTurnEvents(turnEvents, reply);
+      const scoredToolCalls =
+        signals.toolCalls.length > 0 ? signals.toolCalls : toolCalls;
+      const scoredBlocks = signals.wasBlocked
+        ? Math.max(1, gateVerdictBlocks)
+        : gateVerdictBlocks;
 
-          const { agentEvent } = event;
-          steps = agentEvent.step; // track last-seen step before potential crash (issue #21)
-          if (agentEvent.type === "act" && agentEvent.toolCall) {
-            toolCalls.push(agentEvent.toolCall.name);
-          }
-        },
+      const durationMs = Date.now() - start;
+      const scored = scoreHarness(
+        reply,
+        scoredToolCalls,
+        c.expected,
+        c.userContext,
+        scoredBlocks,
       );
 
-      reply = result.reply;
-      steps = result.steps;
-      stopReason = result.stopReason;
-    } catch (err) {
-      // Safety net only: turn() reports its own fatal errors as a crash terminal
-      // (RFC 0008 §3.6), and `crashReply` above already put this text in the
-      // reply. Reaching here means the failure was outside the seam.
-      reply = `${EVAL_ERROR_PREFIX}${String(err)}`;
-      stopReason = "crash";
-    }
+      return {
+        caseId: c.id,
+        response: reply,
+        steps,
+        stopReason,
+        passed: scored.passed,
+        violations: scored.violations,
+        toolCalls: scored.toolCalls,
+        gateBlocks: scored.gateBlocks,
+        durationMs,
+      };
+    };
 
-    // Phase 3: score from turn-event facts, not TraceEvent tool_call/gate_block.
-    const signals = scoreSignalsFromTurnEvents(turnEvents, reply);
-    const scoredToolCalls =
-      signals.toolCalls.length > 0 ? signals.toolCalls : toolCalls;
-    const scoredBlocks = signals.wasBlocked
-      ? Math.max(1, gateVerdictBlocks)
-      : gateVerdictBlocks;
-
-    const durationMs = Date.now() - start;
-    const scored = scoreHarness(
-      reply,
-      scoredToolCalls,
-      c.expected,
-      c.userContext,
-      scoredBlocks,
+    const outcome = await withTransientRetry(
+      runCase,
+      (result) =>
+        result.response.startsWith(EVAL_ERROR_PREFIX) &&
+        isTransientProviderError(result.response.slice(EVAL_ERROR_PREFIX.length))
+          ? result.response.slice(EVAL_ERROR_PREFIX.length)
+          : undefined,
+      { attempts: PROVIDER_ATTEMPTS },
     );
 
-    results.push({
-      caseId: c.id,
-      response: reply,
-      steps,
-      stopReason,
-      passed: scored.passed,
-      violations: scored.violations,
-      toolCalls: scored.toolCalls,
-      gateBlocks: scored.gateBlocks,
-      durationMs,
-    });
+    results.push(
+      outcome.transientFailure === undefined
+        ? outcome.value
+        : {
+            ...outcome.value,
+            infrastructure: {
+              reason: outcome.transientFailure,
+              attempts: outcome.attempts,
+            },
+          },
+    );
   }
 
   return results;

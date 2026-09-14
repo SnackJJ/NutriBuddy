@@ -12,8 +12,9 @@
 // 追问/澄清这类交互能力（那属于 harness 有而 bare 没有的部分，也是被测量项本身）。
 
 import type { ModelAdapter } from "../harness/types";
-import type { EvalCase, BareResult } from "./types";
+import type { BareResult, EvalCase } from "./types";
 import { scoreBare, EVAL_ERROR_PREFIX } from "./metrics";
+import { withTransientRetry, isTransientProviderError } from "./providerRetry";
 
 /**
  * The user facts the harness injects into its pinned region, written the way a
@@ -39,6 +40,9 @@ export function bareUserContextMessage(c: EvalCase): string | null {
  * 对一批 eval case 执行裸 LLM 运行。
  * 每个 case 只发一条 user 消息（+ 可选的一条用户档案 system 消息），无工具 / gate。
  */
+/** Attempts per case when the provider faults transiently (issue #129). */
+export const PROVIDER_ATTEMPTS = 3;
+
 export async function runBareEval(
   cases: readonly EvalCase[],
   adapter: ModelAdapter,
@@ -49,20 +53,36 @@ export async function runBareEval(
     const start = Date.now();
 
     const profile = bareUserContextMessage(c);
-    let response: string;
-    try {
-      const modelResp = await adapter.generate({
-        model: "flash",
-        thinking: true,
-        messages: [
-          ...(profile ? [{ role: "system" as const, content: profile }] : []),
-          { role: "user", content: c.query },
-        ],
-      });
-      response = modelResp.content;
-    } catch (err) {
-      response = `${EVAL_ERROR_PREFIX}${String(err)}`;
-    }
+
+    // A rate limit or a dropped connection says nothing about the code under
+    // test, so it is retried; what survives the retries is labelled rather than
+    // counted (issue #129).
+    const attempt = async (): Promise<string> => {
+      try {
+        const modelResp = await adapter.generate({
+          model: "flash",
+          thinking: true,
+          messages: [
+            ...(profile ? [{ role: "system" as const, content: profile }] : []),
+            { role: "user", content: c.query },
+          ],
+        });
+        return modelResp.content;
+      } catch (err) {
+        return `${EVAL_ERROR_PREFIX}${String(err)}`;
+      }
+    };
+
+    const outcome = await withTransientRetry(
+      attempt,
+      (text) =>
+        text.startsWith(EVAL_ERROR_PREFIX) &&
+        isTransientProviderError(text.slice(EVAL_ERROR_PREFIX.length))
+          ? text.slice(EVAL_ERROR_PREFIX.length)
+          : undefined,
+      { attempts: PROVIDER_ATTEMPTS },
+    );
+    const response = outcome.value;
 
     const durationMs = Date.now() - start;
     const { passed, violations } = scoreBare(
@@ -77,6 +97,14 @@ export async function runBareEval(
       passed,
       violations,
       durationMs,
+      ...(outcome.transientFailure !== undefined
+        ? {
+            infrastructure: {
+              reason: outcome.transientFailure,
+              attempts: outcome.attempts,
+            },
+          }
+        : {}),
     });
   }
 

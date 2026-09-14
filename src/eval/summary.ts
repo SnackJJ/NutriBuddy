@@ -250,6 +250,20 @@ export interface ArmCounts {
   readonly passRate?: number;
 }
 
+/**
+ * Provider faults that survived the retries (issue #129).
+ *
+ * Excluded from every rate's denominator and reported here by case id, because a
+ * number that improves by silently dropping what it could not measure is not a
+ * measurement. A non-empty list means this report's rates describe fewer cases
+ * than the dataset has, and the report says so.
+ */
+export interface InfrastructureReport {
+  readonly count: number;
+  readonly cases: readonly string[];
+  readonly reasons: readonly string[];
+}
+
 export interface EvalResultSummary {
   readonly n: number;
   readonly bare: ArmCounts;
@@ -270,6 +284,38 @@ export interface EvalResultSummary {
     readonly claimPercentages: boolean;
   };
   readonly definitions: readonly MetricDefinition[];
+  readonly infrastructure: InfrastructureReport;
+}
+
+function infrastructureOf(
+  bareResults: readonly BareResult[],
+  harnessResults: readonly HarnessResult[],
+): InfrastructureReport {
+  const faults = [
+    ...bareResults.map((result) => ({ caseId: result.caseId, fault: result.infrastructure })),
+    ...harnessResults.map((result) => ({ caseId: result.caseId, fault: result.infrastructure })),
+  ].filter((entry): entry is { caseId: string; fault: NonNullable<typeof entry.fault> } =>
+    entry.fault !== undefined,
+  );
+
+  return {
+    count: faults.length,
+    cases: [...new Set(faults.map((entry) => entry.caseId))],
+    reasons: [...new Set(faults.map((entry) => entry.fault.reason))],
+  };
+}
+
+/**
+ * The results a rate may be computed from.
+ *
+ * Infrastructure faults are dropped here and nowhere else, so every rate in this
+ * module is over the same population and the report can state which population
+ * that was.
+ */
+function measurable<T extends { readonly infrastructure?: unknown }>(
+  results: readonly T[],
+): readonly T[] {
+  return results.filter((result) => result.infrastructure === undefined);
 }
 
 /**
@@ -315,9 +361,11 @@ export interface RateMetrics {
 }
 
 export function rateMetrics(
-  bareResults: readonly BareResult[],
-  harnessResults: readonly HarnessResult[],
+  bareResultsInput: readonly BareResult[],
+  harnessResultsInput: readonly HarnessResult[],
 ): RateMetrics {
+  const bareResults = measurable(bareResultsInput);
+  const harnessResults = measurable(harnessResultsInput);
   const n = bareResults.length;
   const barePassed = bareResults.filter((r) => r.passed).length;
   const harnessPassed = harnessResults.filter((r) => r.passed).length;
@@ -358,10 +406,13 @@ export function rateMetrics(
 
 export function summarizeEvalResults(
   cases: readonly EvalCase[],
-  bareResults: readonly BareResult[],
-  harnessResults: readonly HarnessResult[],
+  bareResultsInput: readonly BareResult[],
+  harnessResultsInput: readonly HarnessResult[],
 ): EvalResultSummary {
-  const rates = rateMetrics(bareResults, harnessResults);
+  const infrastructure = infrastructureOf(bareResultsInput, harnessResultsInput);
+  const bareResults = measurable(bareResultsInput);
+  const harnessResults = measurable(harnessResultsInput);
+  const rates = rateMetrics(bareResultsInput, harnessResultsInput);
   const harnessById = new Map(harnessResults.map((r) => [r.caseId, r]));
   const bareById = new Map(bareResults.map((r) => [r.caseId, r]));
 
@@ -409,5 +460,6 @@ export function summarizeEvalResults(
       claimPercentages: cases.length >= MEANINGFUL_SAMPLE_SIZE,
     },
     definitions: METRIC_DEFINITIONS,
+    infrastructure,
   };
 }

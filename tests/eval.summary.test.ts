@@ -219,3 +219,51 @@ describe("summarizeEvalResults", () => {
     expect(rates.deltaPoints).toBe(0);
   });
 });
+
+// ── provider faults are labelled, not counted (#129) ───────────────────────
+
+describe("infrastructure faults", () => {
+  const fault = { reason: "429 upstream temporarily unavailable", attempts: 3 };
+
+  it("drops a faulted case from the denominators and names it", () => {
+    const cases = [evalCase("a"), evalCase("b"), evalCase("c")];
+    const summary = summarizeEvalResults(
+      cases,
+      [bare("a", true), bare("b", true), { ...bare("c", false), infrastructure: fault }],
+      [harness("a", true), harness("b", true), { ...harness("c", false), infrastructure: fault }],
+    );
+
+    // Two measurable cases, two passes: 1.0, not 0.67.
+    expect(summary.bare.passed + summary.bare.failed).toBe(2);
+    expect(summary.bare.passRate).toBe(1);
+    expect(summary.harness.passRate).toBe(1);
+    // And the exclusion is visible rather than implied by a smaller denominator.
+    expect(summary.infrastructure).toEqual({
+      count: 2,
+      cases: ["c"],
+      reasons: [fault.reason],
+    });
+  });
+
+  it("keeps the rate undefined when every case faulted, rather than reporting zero", () => {
+    const summary = summarizeEvalResults(
+      [evalCase("a")],
+      [{ ...bare("a", false), infrastructure: fault }],
+      [{ ...harness("a", false), infrastructure: fault }],
+    );
+
+    expect(summary.bare.passRate).toBeUndefined();
+    expect(summary.harness.passRate).toBeUndefined();
+    expect(summary.infrastructure.count).toBe(2);
+  });
+
+  it("leaves a healthy run alone", () => {
+    const summary = summarizeEvalResults(
+      [evalCase("a"), evalCase("b")],
+      [bare("a", true), bare("b", false)],
+      [harness("a", true), harness("b", true)],
+    );
+    expect(summary.infrastructure).toEqual({ count: 0, cases: [], reasons: [] });
+    expect(summary.harness.passRate).toBe(1);
+  });
+});

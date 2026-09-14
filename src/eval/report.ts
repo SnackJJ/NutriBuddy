@@ -269,6 +269,21 @@ export function renderReportMarkdown(
   lines.push("");
 
   lines.push("## 口径与样本量", "");
+  if (metrics.infrastructure.count > 0) {
+    // Named, not hidden: excluding cases is how a rate can look better while
+    // measuring less, so the report says which cases were excluded and why.
+    lines.push(
+      `**${metrics.infrastructure.count} 个 case 因 provider 故障被排除**（重试后仍失败）：` +
+        `${metrics.infrastructure.cases.join(", ")} — 通过率的分母因此是 ` +
+        `${metrics.harness.passed + metrics.harness.failed}，而不是 ${summary.n}。`,
+      "",
+    );
+    for (const reason of metrics.infrastructure.reasons.slice(0, 3)) {
+      lines.push(`- ${reason.slice(0, 200)}`);
+    }
+    lines.push("");
+  }
+
   if (metrics.sampleSize.claimPercentages) {
     lines.push(`n=${metrics.sampleSize.n} — 达到 ${metrics.sampleSize.meaningfulAt}，可以给出百分点差异。`);
   } else {

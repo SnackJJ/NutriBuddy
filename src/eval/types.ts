@@ -70,6 +70,20 @@ export type TraceProducer = (
 
 // ─── Baseline Comparison（issue #19）──────────────────────────────────────
 
+/**
+ * A provider fault rather than a result (issue #129).
+ *
+ * Present only when every retry failed for a transient reason. Such a case is
+ * excluded from the pass-rate denominators and named in the report, because
+ * counting it as a failure turns one bad minute at the provider into a false
+ * regression.
+ */
+export interface InfrastructureFault {
+  /** What the provider said, for the report. */
+  readonly reason: string;
+  readonly attempts: number;
+}
+
 /** Bare LLM 运行结果（单条 case）。 */
 export interface BareResult {
   readonly caseId: string;
@@ -77,6 +91,7 @@ export interface BareResult {
   readonly passed: boolean;
   readonly violations: readonly string[];
   readonly durationMs: number;
+  readonly infrastructure?: InfrastructureFault;
 }
 
 /** Harness 运行结果（单条 case）。 */
@@ -90,6 +105,8 @@ export interface HarnessResult {
   readonly toolCalls: readonly string[];
   readonly gateBlocks: number;
   readonly durationMs: number;
+  /** See {@link InfrastructureFault}. */
+  readonly infrastructure?: InfrastructureFault;
 }
 
 /** 单条 case 的对比行。 */
