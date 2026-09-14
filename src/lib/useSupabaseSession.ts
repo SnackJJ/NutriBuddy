@@ -11,8 +11,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { createBrowserSupabase } from "./supabase";
+import {
+  isSignupEnabled,
+  SIGNUP_CLOSED_MESSAGE,
+} from "./signupPolicy";
 
 let cachedClient: SupabaseClient | null | undefined;
+
+/**
+ * Read once, at module load: the flag is a build-time public env value
+ * (`NEXT_PUBLIC_*` is inlined by Next), so it cannot change within a session and
+ * a per-render read would only invite a second source of truth.
+ */
+const SIGNUP_ENABLED = isSignupEnabled();
 
 /** Browser-wide singleton; null when Supabase env vars are missing. */
 function getBrowserClient(): SupabaseClient | null {
@@ -33,6 +44,11 @@ export interface SupabaseSessionState {
   readonly loading: boolean;
   /** False when Supabase env vars are missing — auth UI should not render. */
   readonly configured: boolean;
+  /**
+   * False while public sign-up is closed (RFC 0010 §3.2 plan A): the sign-in
+   * page must not offer an entry that cannot succeed.
+   */
+  readonly signupEnabled: boolean;
   signIn(email: string, password: string): Promise<string | null>;
   signUp(email: string, password: string): Promise<string | null>;
   signOut(): Promise<void>;
@@ -75,6 +91,7 @@ export function useSupabaseSession(): SupabaseSessionState {
       session,
       loading,
       configured: client !== null,
+      signupEnabled: SIGNUP_ENABLED,
       async signIn(email: string, password: string): Promise<AuthResult> {
         if (!client) return "Supabase is not configured";
         const { error } = await client.auth.signInWithPassword({
@@ -85,6 +102,11 @@ export function useSupabaseSession(): SupabaseSessionState {
       },
       async signUp(email: string, password: string): Promise<AuthResult> {
         if (!client) return "Supabase is not configured";
+        // Second line of defence behind the hidden button: with sign-up closed
+        // the call is refused before it becomes a request that can only fail.
+        // The message is the same sentence the page shows, which is what keeps
+        // the refusal from describing who may register (RFC 0010 §5).
+        if (!SIGNUP_ENABLED) return SIGNUP_CLOSED_MESSAGE;
         const { error } = await client.auth.signUp({ email, password });
         return error ? error.message : null;
       },

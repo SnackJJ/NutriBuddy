@@ -27,7 +27,7 @@ Keep this list short. Prefer GitHub issues as the live backlog.
 
 1. **S1 已收口**（`docs/rfc/0008`）：T1–T9 全部落地（迁移 0011/0014、TraceStore 端口、`turn()` 接线、`SupabaseTraceStore`、重放路由、导出 `scripts/export-traces.mts`、保留 `scripts/prune-traces.ts`、D9 smoke）。两处仍未闭合、已留在票上：D4 的**真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）与 `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
 2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：产出可复现的数字与回归基线
-3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
+3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）：代码侧已落地（配额纯函数 `src/lib/quota.ts`、`turns` 聚合、429 前置、最坏成本预估、UI 隐藏注册、拒绝日志）；运维人工步骤（关闭公开注册、provider 消费上限、Production-only 密钥）见 `docs/ops/v1.0-operations.md`，**尚未执行**；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
 4. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
 
 S1 之后的迁移前提不变：本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本现在同时断言 0011 与 0014 的 grant / 策略 / 索引前提。
@@ -46,6 +46,7 @@ npm run smoke:confirm    # live Supabase confirm/void (needs .env.local)
 npm run smoke:trace      # D9: trace write door closed + cross-account reads (needs .env.local)
 npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏，`--with-text` 仅本地调试）
 npm run prune:traces     # 90 天滚动保留（默认 dry-run，`--apply` 才删；按月手工执行）
+npm run create:user      # 建号（白名单方案 A，RFC 0010；需 .env.local）
 npm run eval
 ```
 

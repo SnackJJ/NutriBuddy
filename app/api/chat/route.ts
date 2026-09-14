@@ -46,6 +46,24 @@ import {
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
 import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
 import { assertSessionSubject, getSessionFromHeader } from "@/lib/auth";
+import {
+  checkQuota,
+  parseQuotaLimits,
+  quotaRejectionBody,
+  type QuotaLogLine,
+  type QuotaFailureLog,
+  type QuotaRejection,
+} from "@/lib/quota";
+import { createSupabaseDailyUsageReader } from "@/lib/dailyUsage";
+import {
+  buildTurnCostBounds,
+  estimateWorstCaseTurnCostUsd,
+} from "@/lib/turnCostEstimate";
+import {
+  assemblePinnedRegion,
+  buildTemplatePromptSection,
+  DEFAULT_SYSTEM_PROMPT,
+} from "@/harness/contextAssembler";
 import type { ChatMessage, ToolHandler } from "@/harness/types";
 
 export const runtime = "nodejs";
@@ -60,6 +78,28 @@ const toolSchemas = [
   QUERY_CATALOG_SCHEMA,
   SUBMIT_ANSWER_SCHEMA,
 ] as const;
+
+// Worst-case single-turn cost bound (RFC 0010 §3.3 T4 / #100).
+//
+// Measured once, not per request: the pinned region is AOT-stable by design
+// (ADD §ContextAssembler), so measuring it again on every request would be work
+// whose result cannot change. The bound therefore covers the largest prompt this
+// route can assemble — every tool, the whole template catalog — and the
+// per-request part added at the gate is only the request's own text.
+const turnCostBounds = buildTurnCostBounds({
+  pinnedText: assemblePinnedRegion({
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    sqlTemplates: buildTemplatePromptSection(queryCatalog),
+    toolDefs: toolSchemas.map((schema) => ({
+      name: schema.function.name,
+      description: `Callable tool: ${schema.function.name}`,
+    })),
+  }),
+  toolSchemaText: JSON.stringify(toolSchemas),
+  catalogSignature: catalog.snapshot.version,
+});
+
+const quotaLimits = parseQuotaLimits();
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
@@ -96,6 +136,28 @@ function getRequestHistory(
   return body.tag === "utterance" || body.tag === undefined
     ? body.history
     : undefined;
+}
+
+/**
+ * Characters this request adds to the prompt — the only part of the worst-case
+ * cost bound the caller controls (the pinned region and the loop's ceilings are
+ * fixed). History is the one unbounded field a client can grow, so it is
+ * measured here rather than assumed.
+ */
+function requestChars(body: ChatRequestBody, turnInput: TurnInput): number {
+  switch (turnInput.tag) {
+    case "utterance": {
+      const history = getRequestHistory(body, turnInput) ?? [];
+      return (
+        turnInput.content.length +
+        history.reduce((sum, message) => sum + message.content.length, 0)
+      );
+    }
+    case "proposal_confirm":
+      return turnInput.proposalId.length + (turnInput.feedback?.length ?? 0);
+    case "candidate_log":
+      return turnInput.foodId.length + turnInput.foodName.length;
+  }
 }
 
 // ─── Turn trace ────────────────────────────────────────────────────────
@@ -249,6 +311,55 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const sessionUserId = session.userId;
 
+  // Session-scoped client, built once and reused by the quota preflight below
+  // (issue #62: identity and every user-data read run under least privilege).
+  const userClient = createUserSupabase(session.accessToken);
+
+  // ── Quota preflight (RFC 0010 §3.3) ───────────────────────────────
+  //
+  // Before any port is assembled, on purpose: a refused request must make no
+  // model call and leave no turn row, and the seam must not learn about quota at
+  // all — refusal is runtime control, not agent behaviour (§3.3). This is also
+  // why the counting read is the trace table the turn itself writes: a refusal
+  // happens before that row exists, so it cannot feed the counter that produced
+  // it (§5).
+  const quotaNow = new Date();
+  const usageReader = createSupabaseDailyUsageReader(userClient);
+  const quota = await checkQuota({
+    userId: sessionUserId,
+    path: new URL(request.url).pathname,
+    limits: quotaLimits,
+    now: quotaNow,
+    worstCaseTurnCostUsd: estimateWorstCaseTurnCostUsd({
+      bounds: turnCostBounds,
+      requestChars: requestChars(body, turnInput),
+    }),
+    readDailyUsage: (userId, dayStart) =>
+      usageReader.readDailyUsage(userId, dayStart),
+    // One line per refusal, as JSON so it is greppable and countable without a
+    // log parser (§3.4 / #103). The route owns transport vocabulary: the gate
+    // takes a log port and never reaches for a console itself.
+    logRejection: (line: QuotaLogLine) =>
+      console.warn(`[quota] ${JSON.stringify(line)}`),
+    logUnavailable: (line: QuotaFailureLog) =>
+      console.error(`[quota] ${JSON.stringify(line)}`),
+  });
+
+  if (quota.kind === "reject") {
+    return new Response(JSON.stringify(quotaRejectionBody(quota.rejection)), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (quota.kind === "unavailable") {
+    // Fail closed: a cap that opens when its counting source is down is not a
+    // cap. The turn would lose its trace row in this state anyway.
+    return new Response(JSON.stringify({ error: "quota_check_unavailable" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   // ── Build ports ───────────────────────────────────────────────────
   const adapter = new DeepSeekAdapter();
   const tracer = new Tracer();
@@ -258,7 +369,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   const trace = createTraceStore(sessionUserId, turnId);
 
   // ── Wire Supabase-backed stores and tools ─────────────────────────
-  const userClient = createUserSupabase(session.accessToken);
   const proposalStore = createSupabaseProposalStore({
     client: userClient,
   });

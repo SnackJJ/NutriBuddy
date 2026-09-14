@@ -5,20 +5,32 @@ import { profileFormSchema, GOAL_TYPES } from "@/lib/profileValidation";
 import type { GoalType } from "@/lib/profileValidation";
 import type { UserProfile } from "@/lib/memoryStore";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
+import { signInPresentation } from "@/lib/signupPolicy";
 
-/** Minimal email+password sign-in / sign-up form (issue #65). */
+/**
+ * Minimal email+password sign-in form (issue #65).
+ *
+ * Account creation is rendered only when `signupEnabled` says the Supabase
+ * project accepts public sign-ups (RFC 0010 §3.2 / #102): with sign-up closed,
+ * a "Create account" button is a control whose only possible outcome is failure.
+ * The notice takes its place so the absence is explained rather than silent.
+ */
 function SignInForm({
   signIn,
   signUp,
+  signupEnabled,
 }: {
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
+  signupEnabled: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const view = signInPresentation(signupEnabled);
 
   const submit = useCallback(
     async (action: "signIn" | "signUp") => {
@@ -94,15 +106,22 @@ function SignInForm({
             >
               Sign in
             </button>
-            <button
-              type="button"
-              disabled={busy || !email || !password}
-              onClick={() => submit("signUp")}
-              className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Create account
-            </button>
+            {view.showSignUp && (
+              <button
+                type="button"
+                disabled={busy || !email || !password}
+                onClick={() => submit("signUp")}
+                className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Create account
+              </button>
+            )}
           </div>
+          {view.closedNotice && (
+            <p className="text-xs text-gray-500" data-signup-closed>
+              {view.closedNotice}
+            </p>
+          )}
         </div>
       </div>
     </main>
@@ -190,6 +209,7 @@ export default function ProfilePage() {
     session,
     loading: sessionLoading,
     configured,
+    signupEnabled,
     signIn,
     signUp,
     signOut,
@@ -344,7 +364,13 @@ export default function ProfilePage() {
   }
 
   if (!session) {
-    return <SignInForm signIn={signIn} signUp={signUp} />;
+    return (
+      <SignInForm
+        signIn={signIn}
+        signUp={signUp}
+        signupEnabled={signupEnabled}
+      />
+    );
   }
 
   if (loading) {

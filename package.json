@@ -16,6 +16,7 @@
     "smoke:trace": "npx tsx --env-file=.env.local scripts/smoke-rfc0008-trace.mts",
     "export:traces": "npx tsx --env-file=.env.local scripts/export-traces.mts",
     "prune:traces": "npx tsx --env-file=.env.local scripts/prune-traces.mts",
+    "create:user": "npx tsx --env-file=.env.local scripts/create-user.mts",
     "verify:migrations": "bash scripts/verify-migrations.sh"
   },
   "devDependencies": {
