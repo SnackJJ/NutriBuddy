@@ -1,6 +1,53 @@
 {
   "reports": [
     {
+      "reportId": "2026-09-14T16-00-41Z-live-v3-final",
+      "at": "2026-09-14T16:00:41.929Z",
+      "mode": "live",
+      "tag": "live-v3-final",
+      "gitSha": "e5f4886",
+      "dirty": false,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "763fad0c3cd03f67",
+      "n": 29,
+      "summary": {
+        "barePassRate": 0.5517241379310345,
+        "harnessPassRate": 1,
+        "deltaPoints": 44.827586206896555,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 1
+          },
+          {
+            "group": "capability",
+            "n": 15,
+            "measured": 15,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.9655172413793104,
+        "turnLatency": {
+          "n": 0
+        },
+        "modelCallLatency": {
+          "n": 0
+        },
+        "traceWriteLatency": {
+          "n": 0
+        },
+        "cost": {
+          "n": 0,
+          "totalUsd": 0
+        }
+      }
+    },
+    {
       "reportId": "2026-09-14T15-59-59Z-v1.0.0-baseline-2",
       "at": "2026-09-14T15:59:59.372Z",
       "mode": "scripted",
