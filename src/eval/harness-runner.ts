@@ -3,7 +3,12 @@
 // 通过完整 Loop（pre-gate + post-gate + 工具）回答 eval query。
 // 记录每条 case 的响应、步数、工具调用、gate block 次数、违规、耗时。
 
-import type { ModelAdapter, StopReason, ToolHandler } from "../harness/types";
+import type {
+  ModelAdapter,
+  StopReason,
+  ToolHandler,
+  ToolSchema,
+} from "../harness/types";
 import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
@@ -19,6 +24,9 @@ import { scoreSignalsFromTurnEvents } from "./scoreSignals";
  * @param tools — 工具调度表
  * @param interactionStore — 药物相互作用数据源（gate 需要）
  * @param catalog — 食物目录（input gate 冲突扫描需要，issue #53）
+ * @param toolSchemas — 发给模型的工具定义。**不传等于模型看不到工具**：那时
+ *   `mustCallTools` 类的 case 必失败，而失败原因是评测配置而不是 harness 能力，
+ *   报告却分辨不出来。live 手臂必须传产品实际使用的那组 schema。
  */
 export async function runHarnessEval(
   cases: readonly EvalCase[],
@@ -26,6 +34,7 @@ export async function runHarnessEval(
   tools: ReadonlyMap<string, ToolHandler>,
   interactionStore?: InteractionStore,
   catalog?: Catalog,
+  toolSchemas?: readonly ToolSchema[],
 ): Promise<HarnessResult[]> {
   const results: HarnessResult[] = [];
 
@@ -52,6 +61,7 @@ export async function runHarnessEval(
             adapter,
             tracer,
             tools,
+            toolSchemas,
             catalog,
             userContext: shouldRunGate ? c.userContext : undefined,
             interactionStore: shouldRunGate ? interactionStore : undefined,

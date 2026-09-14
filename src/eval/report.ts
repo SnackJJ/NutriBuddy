@@ -23,10 +23,21 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import { CATALOG_SNAPSHOT_VERSION, createCatalog, SEED_FOODS } from "../catalog/catalog";
+import { createQueryCatalog, ALL_QUERY_TEMPLATES } from "../catalog/queryCatalog";
+import { createInMemoryQueryRunner } from "../catalog/inMemoryQueryRunner";
+import { createLogMealHandler, LOG_MEAL_SCHEMA } from "../harness/logMeal";
+import {
+  createQueryCatalogHandler,
+  QUERY_CATALOG_SCHEMA,
+} from "../harness/queryCatalog";
+import { SUBMIT_ANSWER_SCHEMA } from "../harness/submitAnswer";
+import { evalInteractionStore } from "./evalInteractions";
+import { createFileStores } from "../lib/cliStores";
 import { loadEvalCases } from "./dataset";
 import { runBareEval } from "./bare-runner";
 import { runHarnessEval } from "./harness-runner";
@@ -61,6 +72,13 @@ export const REPORT_SCHEMA_VERSION = "1.0.0";
 
 /** §6: the length a model output is cut to before it is written to disk. */
 export const OUTPUT_LIMIT = 240;
+
+/**
+ * The account id the live harness arm's tools write for. The eval runs offline
+ * stores, so this is a local label rather than an auth identity — it exists so
+ * every tool call is bound to *some* caller, the way the route binds a session.
+ */
+const EVAL_USER_ID = "eval-user";
 
 /** Default window for trace telemetry: the same day-ish span a run describes. */
 const DEFAULT_TRACE_WINDOW_HOURS = 24;
@@ -609,19 +627,65 @@ export async function main(
   const runEval =
     deps.runEval ??
     (async (runMode: ReportMode): Promise<ReportRunResult> => {
-      const adapter = runMode === "live" ? new DeepSeekAdapter() : createStubAdapter(cases);
-      const tools =
-        runMode === "live" ? new Map<string, ToolHandler>() : createStubTools();
-      const interactionStore: InteractionStore = { all: async () => [] };
-      const bare = await runBareEval(cases, adapter);
-      const harness = await runHarnessEval(
-        cases,
-        adapter,
-        tools,
-        interactionStore,
-        createCatalog(SEED_FOODS),
+      const catalog = createCatalog(SEED_FOODS);
+      // The harness arm runs the product's tool set, not an empty one. Until
+      // this was wired, live runs gave the model no tool definitions at all, so
+      // every `mustCallTools` case failed for a configuration reason and the
+      // report could not tell that apart from a capability gap.
+      const toolSchemas = [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA];
+
+      if (runMode === "scripted") {
+        const adapter = createStubAdapter(cases);
+        return {
+          cases,
+          bareResults: await runBareEval(cases, adapter),
+          harnessResults: await runHarnessEval(
+            cases,
+            adapter,
+            createStubTools(),
+            evalInteractionStore(),
+            catalog,
+            toolSchemas,
+          ),
+        };
+      }
+
+      const adapter = new DeepSeekAdapter();
+      const stores = createFileStores(
+        join(tmpdir(), `nutribuddy-eval-${process.pid}-${Date.now()}.json`),
+        { userId: EVAL_USER_ID },
       );
-      return { cases, bareResults: bare, harnessResults: harness };
+      const tools = new Map<string, ToolHandler>([
+        [
+          "log_meal",
+          createLogMealHandler({
+            catalog,
+            proposalStore: stores.proposalStore,
+            userId: EVAL_USER_ID,
+          }),
+        ],
+        [
+          "query_catalog",
+          createQueryCatalogHandler({
+            queryCatalog: createQueryCatalog(ALL_QUERY_TEMPLATES),
+            runner: createInMemoryQueryRunner(catalog, stores.listMealRecords()),
+            userId: EVAL_USER_ID,
+          }),
+        ],
+      ]);
+
+      return {
+        cases,
+        bareResults: await runBareEval(cases, adapter),
+        harnessResults: await runHarnessEval(
+          cases,
+          adapter,
+          tools,
+          evalInteractionStore(),
+          catalog,
+          toolSchemas,
+        ),
+      };
     });
 
   let results: ReportRunResult;

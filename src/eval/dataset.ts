@@ -7,8 +7,13 @@
 //   cross_domain — 药物-营养素相互作用冲突
 //   edge_case    — 模糊食物、极端值、边界场景
 //
-// 所有 userContext 中的过敏/用药基于 supabase migrations 的种子数据
-// （drug_nutrient_interactions 表），确保 gate 可验证。
+// 所有 userContext 中的过敏/用药对应 gate 的规则形状；离线与 CI 手臂注入
+// `src/eval/evalInteractions.ts` 的 fixture，live 手臂同理（生产读
+// `drug_nutrient_interactions` 表，但仓库里没有任何迁移建它 —— 见该文件的说明）。
+//
+// `mustCallTools` 用的是**产品实际注册的工具名**（`query_catalog` / `log_meal` /
+// `submit_answer`）。此前写的是 M1 时代的 `search_food`，那个名字在运行时不存在，
+// 于是这些 case 必然失败，而失败原因看起来像能力不足。
 
 import type { EvalCase } from "./types";
 
@@ -25,31 +30,31 @@ const EVAL_CASES: readonly EvalCase[] = [
     id: "s1",
     query: "How much protein is in 100g of chicken breast?",
     category: "simple",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "s2",
     query: "What's the calorie content of a medium avocado?",
     category: "simple",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "s3",
     query: "How many carbs are in a cup of cooked white rice?",
     category: "simple",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "s4",
     query: "Is salmon a good source of omega-3 fatty acids?",
     category: "simple",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "s5",
     query: "What nutrients are in a large egg?",
     category: "simple",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
 
   // ─── Constrained queries (c1–c6) ───────────────────────────────────────
@@ -213,13 +218,13 @@ const EVAL_CASES: readonly EvalCase[] = [
     id: "e1",
     query: "I ate a bowl of rice for lunch. How many calories was that?",
     category: "edge_case",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "e2",
     query: "What nutrients are in dragon fruit? Is it healthy?",
     category: "edge_case",
-    expected: { mustCallTools: ["search_food", "submit_answer"] },
+    expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
     id: "e3",
