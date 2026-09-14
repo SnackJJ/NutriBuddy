@@ -8,25 +8,77 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import {
-  isSignupEnabled,
+  fetchAuthSettings,
   signInPresentation,
+  signupAvailability,
   SIGNUP_CLOSED_MESSAGE,
-  SIGNUP_ENABLED_ENV,
 } from "../src/lib/signupPolicy";
 
-describe("isSignupEnabled (#102)", () => {
-  it("defaults to closed when the flag is absent", () => {
-    // V1.0 ships with sign-up closed, so an unset flag must hide the entry; a
-    // default of "open" would put a doomed button on every fresh deployment.
-    expect(isSignupEnabled({})).toBe(false);
-    expect(isSignupEnabled({ [SIGNUP_ENABLED_ENV]: "" })).toBe(false);
+describe("signupAvailability (#102)", () => {
+  it("offers sign-up only when Auth says sign-up is open", () => {
+    expect(signupAvailability({ disable_signup: false })).toEqual({
+      available: true,
+      reason: null,
+    });
   });
 
-  it("opens only for the literal true", () => {
-    for (const value of ["1", "TRUE", "True", "yes", " true", "true "]) {
-      expect(isSignupEnabled({ NEXT_PUBLIC_SIGNUP_ENABLED: value })).toBe(false);
+  it("fails closed when Auth says it is closed", () => {
+    expect(signupAvailability({ disable_signup: true })).toEqual({
+      available: false,
+      reason: "signup_disabled",
+    });
+  });
+
+  it("fails closed when the answer is missing or unreadable", () => {
+    // Unreachable and field-absent are the two shapes that used to be a
+    // deployment's silent default; both mean "do not render the button".
+    expect(signupAvailability(null)).toEqual({
+      available: false,
+      reason: "settings_unavailable",
+    });
+    expect(signupAvailability({}).available).toBe(false);
+  });
+});
+
+describe("fetchAuthSettings (#102)", () => {
+  const ok = (body: unknown) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  it("reads disable_signup from the public settings endpoint", async () => {
+    let seen = "";
+    const settings = await fetchAuthSettings({
+      url: "https://project.supabase.co/",
+      anonKey: "anon",
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        seen = `${url}|${(init?.headers as Record<string, string>).apikey}`;
+        return ok({ disable_signup: true });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(seen).toBe("https://project.supabase.co/auth/v1/settings|anon");
+    expect(settings).toEqual({ disable_signup: true });
+  });
+
+  it("returns null for a failed response, a non-object body, or a missing field", async () => {
+    const failed = (async () =>
+      ({ ok: false, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch;
+    const notJson = (async () => ok("nope")) as unknown as typeof fetch;
+    const missing = (async () => ok({ external: {} })) as unknown as typeof fetch;
+
+    for (const fetchImpl of [failed, notJson, missing]) {
+      await expect(
+        fetchAuthSettings({ url: "https://x", anonKey: "k", fetchImpl }),
+      ).resolves.toBeNull();
     }
-    expect(isSignupEnabled({ NEXT_PUBLIC_SIGNUP_ENABLED: "true" })).toBe(true);
+  });
+
+  it("returns null when the request throws, rather than propagating into render", async () => {
+    const throwing = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    await expect(
+      fetchAuthSettings({ url: "https://x", anonKey: "k", fetchImpl: throwing }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -62,25 +114,29 @@ describe("useSupabaseSession signUp guard (#102)", () => {
   const hookSource = () =>
     fs.readFileSync("src/lib/useSupabaseSession.ts", "utf-8");
 
-  it("refuses to call Supabase auth.signUp while sign-up is closed", () => {
+  it("asks Auth before calling auth.signUp, and refuses while it says no", () => {
     const source = hookSource();
-    const guard = source.indexOf("if (!SIGNUP_ENABLED) return SIGNUP_CLOSED_MESSAGE;");
+    const guard = source.indexOf(
+      "if (!(await resolveSignupAvailable())) return SIGNUP_CLOSED_MESSAGE;",
+    );
     const call = source.indexOf("client.auth.signUp(");
     expect(guard).toBeGreaterThan(-1);
     expect(call).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(call);
   });
 
-  it("exposes the flag through the hook state", () => {
+  it("exposes the answer through the hook state, starting closed", () => {
     const source = hookSource();
-    expect(source).toContain("signupEnabled: SIGNUP_ENABLED");
+    expect(source).toContain("const [signupEnabled, setSignupEnabled] = useState(false);");
+    expect(source).toContain("signupEnabled,");
     expect(source).toContain("readonly signupEnabled: boolean;");
   });
 
-  it("reads the flag once, at module load", () => {
-    // NEXT_PUBLIC_* is inlined at build time, so a per-render read would only
-    // create a second place where the answer could differ.
-    expect(hookSource()).toMatch(/const SIGNUP_ENABLED = isSignupEnabled\(\);/);
+  it("asks Auth once per page load", () => {
+    // One module-level promise: without it, every component that renders the
+    // form would issue its own settings request.
+    expect(hookSource()).toMatch(/let signupSettingsPromise: Promise<boolean> \| null = null;/);
+    expect(hookSource()).toMatch(/if \(signupSettingsPromise\) return signupSettingsPromise;/);
   });
 });
 

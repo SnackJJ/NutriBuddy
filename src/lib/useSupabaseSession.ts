@@ -12,18 +12,35 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { createBrowserSupabase } from "./supabase";
 import {
-  isSignupEnabled,
+  fetchAuthSettings,
+  signupAvailability,
   SIGNUP_CLOSED_MESSAGE,
 } from "./signupPolicy";
 
 let cachedClient: SupabaseClient | null | undefined;
 
 /**
- * Read once, at module load: the flag is a build-time public env value
- * (`NEXT_PUBLIC_*` is inlined by Next), so it cannot change within a session and
- * a per-render read would only invite a second source of truth.
+ * Sign-up availability, from Auth's own public settings endpoint.
+ *
+ * Two properties this shape buys, both of which the env flag it replaced could
+ * not have: the module-level promise means one request per page load no matter
+ * how many components ask, and every consumer starts from `false` — so the
+ * button never appears before the answer does, which is the flash that would
+ * reintroduce the doomed button for one paint.
  */
-const SIGNUP_ENABLED = isSignupEnabled();
+let signupSettingsPromise: Promise<boolean> | null = null;
+
+function resolveSignupAvailable(): Promise<boolean> {
+  if (signupSettingsPromise) return signupSettingsPromise;
+  signupSettingsPromise = (async () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) return false;
+    const settings = await fetchAuthSettings({ url, anonKey });
+    return signupAvailability(settings).available;
+  })();
+  return signupSettingsPromise;
+}
 
 /** Browser-wide singleton; null when Supabase env vars are missing. */
 function getBrowserClient(): SupabaseClient | null {
@@ -45,8 +62,8 @@ export interface SupabaseSessionState {
   /** False when Supabase env vars are missing — auth UI should not render. */
   readonly configured: boolean;
   /**
-   * False while public sign-up is closed (RFC 0010 §3.2 plan A): the sign-in
-   * page must not offer an entry that cannot succeed.
+   * Whether account creation can succeed (RFC 0010 §3.2 plan A): the sign-in
+   * page must not offer an entry that cannot succeed. False until Auth answers.
    */
   readonly signupEnabled: boolean;
   signIn(email: string, password: string): Promise<string | null>;
@@ -61,6 +78,20 @@ export function useSupabaseSession(): SupabaseSessionState {
   const client = getBrowserClient();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(client !== null);
+  const [signupEnabled, setSignupEnabled] = useState(false);
+
+  useEffect(() => {
+    // Deliberately not awaited inside the auth effect: a slow or unreachable
+    // Auth settings endpoint must not hold up the session, and the default
+    // (closed) is the safe thing to render in the meantime.
+    let cancelled = false;
+    resolveSignupAvailable().then((available) => {
+      if (!cancelled) setSignupEnabled(available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!client) return;
@@ -91,7 +122,7 @@ export function useSupabaseSession(): SupabaseSessionState {
       session,
       loading,
       configured: client !== null,
-      signupEnabled: SIGNUP_ENABLED,
+      signupEnabled,
       async signIn(email: string, password: string): Promise<AuthResult> {
         if (!client) return "Supabase is not configured";
         const { error } = await client.auth.signInWithPassword({
@@ -106,7 +137,7 @@ export function useSupabaseSession(): SupabaseSessionState {
         // the call is refused before it becomes a request that can only fail.
         // The message is the same sentence the page shows, which is what keeps
         // the refusal from describing who may register (RFC 0010 §5).
-        if (!SIGNUP_ENABLED) return SIGNUP_CLOSED_MESSAGE;
+        if (!(await resolveSignupAvailable())) return SIGNUP_CLOSED_MESSAGE;
         const { error } = await client.auth.signUp({ email, password });
         return error ? error.message : null;
       },
@@ -114,7 +145,7 @@ export function useSupabaseSession(): SupabaseSessionState {
         await client?.auth.signOut();
       },
     }),
-    [client, session, loading],
+    [client, session, loading, signupEnabled],
   );
 }
 

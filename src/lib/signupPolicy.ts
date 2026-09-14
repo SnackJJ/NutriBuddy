@@ -1,30 +1,47 @@
 // Sign-up availability for the sign-in page (RFC 0010 §3.2 — S3 / #102).
 //
 // V1.0 takes plan A: public sign-up is closed in Supabase Auth and accounts are
-// created by the operator script (`scripts/create-user.mts`). The browser cannot
-// read that Dashboard setting, so the UI takes the same fact from an env flag and
-// **defaults to closed**. The failure this prevents is a "Create account" button
-// that is guaranteed to fail, and a default of "open" would reproduce exactly
-// that on a fresh deployment; when plan B (an allowlist table with a `before user
-// created` hook) lands in V1.1, the flag is opened there instead.
+// created by the operator script (`scripts/create-user.mts`).
 //
-// This flag is not the gate. Supabase Auth is the gate, and RFC 0010 §3.2 says
-// the client UI is never the only door: turning the flag on while sign-up is
-// closed merely brings a failing button back, and turning it off closes nothing
-// that was open.
+// The UI asks **Auth itself**, not a switch of its own. Auth's public settings
+// endpoint reports `disable_signup`, so the button follows the gate that actually
+// decides: with a duplicate env flag, flipping the Dashboard switch leaves the UI
+// claiming the opposite, and the failure is silent in the direction that matters
+// — a "Create account" button whose only possible outcome is failure.
+//
+// The client UI is still not the gate (RFC 0010 §3.2): Supabase Auth refuses the
+// sign-up regardless. This module only decides what is worth rendering.
 
-export const SIGNUP_ENABLED_ENV = "NEXT_PUBLIC_SIGNUP_ENABLED";
+/** The subset of `GET /auth/v1/settings` this decision needs. */
+export interface AuthSettings {
+  readonly disable_signup?: boolean;
+}
+
+export interface SignupAvailability {
+  /** Whether account creation can succeed, as far as Auth says. */
+  readonly available: boolean;
+  /**
+   * Why it is unavailable, or null when it is available. Distinguishes "Auth
+   * said no" from "Auth could not be reached" for whatever logs this, while both
+   * render the same notice to the user.
+   */
+  readonly reason: "signup_disabled" | "settings_unavailable" | null;
+}
 
 /**
- * Read strictly: only the literal `true` opens the flag. A typo, a stray space or
- * `1` leaves sign-up hidden, because the visible failure (nobody can register) is
- * recoverable by the operator while the hidden one (everybody meets a doomed
- * button) is not reported by anyone.
+ * Read the setting, failing closed.
+ *
+ * Unreachable, malformed and field-absent all mean "do not offer account
+ * creation": the visible failure (nobody can register from the UI) is
+ * recoverable by the operator, while the hidden one (everybody meets a doomed
+ * button) is reported by nobody.
  */
-export function isSignupEnabled(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  return env[SIGNUP_ENABLED_ENV] === "true";
+export function signupAvailability(
+  settings: AuthSettings | null,
+): SignupAvailability {
+  if (settings === null) return { available: false, reason: "settings_unavailable" };
+  if (settings.disable_signup === false) return { available: true, reason: null };
+  return { available: false, reason: "signup_disabled" };
 }
 
 /**
@@ -47,9 +64,38 @@ export interface SignInPresentation {
   readonly closedNotice: string | null;
 }
 
-export function signInPresentation(signupEnabled: boolean): SignInPresentation {
+export function signInPresentation(available: boolean): SignInPresentation {
   return {
-    showSignUp: signupEnabled,
-    closedNotice: signupEnabled ? null : SIGNUP_CLOSED_MESSAGE,
+    showSignUp: available,
+    closedNotice: available ? null : SIGNUP_CLOSED_MESSAGE,
   };
+}
+
+/**
+ * `GET {url}/auth/v1/settings` — public, needs only the anon key, and the same
+ * source the operator's Dashboard toggle writes to.
+ *
+ * Returns null on any failure: the caller's decision is fail-closed, and a thrown
+ * error here would only be caught one level up to make the same choice.
+ */
+export async function fetchAuthSettings(input: {
+  readonly url: string;
+  readonly anonKey: string;
+  readonly fetchImpl?: typeof fetch;
+}): Promise<AuthSettings | null> {
+  const doFetch = input.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(
+      `${input.url.replace(/\/+$/, "")}/auth/v1/settings`,
+      { headers: { apikey: input.anonKey } },
+    );
+    if (!response.ok) return null;
+    const parsed = (await response.json()) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const disableSignup = (parsed as { disable_signup?: unknown }).disable_signup;
+    if (typeof disableSignup !== "boolean") return null;
+    return { disable_signup: disableSignup };
+  } catch {
+    return null;
+  }
 }
