@@ -48,6 +48,7 @@ npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏�
 npm run prune:traces     # 90 天滚动保留（默认 dry-run，`--apply` 才删；按月手工执行）
 npm run create:user      # 建号（白名单方案 A，RFC 0010；需 .env.local）
 npm run eval
+npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需模型 key（NUTRIBUDDY_MODEL_PROVIDER=commandcode 可走网关）
 ```
 
 ## What to read
