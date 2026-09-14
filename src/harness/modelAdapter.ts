@@ -104,7 +104,11 @@ export const PROVIDER_PROFILES: Record<Exclude<ModelProviderId, "custom">, Provi
     baseUrl: "https://api.commandcode.ai/provider/v1",
     apiKeyEnv: "COMMANDCODE_API_KEY",
     models: {
-      flash: "deepseek/deepseek-v4-flash",
+      flash: "deepseek/deepseek-v4.1-flash",
+      // v4.1 exists only as flash on this gateway (probe: "Model
+      // deepseek/deepseek-v4.1-pro is not supported on this endpoint" on
+      // 2026-09-14), so pro stays on v4 rather than silently pointing at a
+      // model that would 400. When the gateway adds it, one env var changes.
       pro: "deepseek/deepseek-v4-pro",
     },
     pricing: TIER_PRICING_USD,

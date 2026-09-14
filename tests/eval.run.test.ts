@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { main, pendingProducer } from "../src/eval/run";
-import type { TraceProducer } from "../src/eval/types";
+import { bareUserContextMessage, runBareEval } from "../src/eval/bare-runner";
+import type { EvalCase, TraceProducer } from "../src/eval/types";
+import type { ModelAdapter, ModelRequest } from "../src/harness/types";
 import type { TraceEvent, TraceInput } from "../src/harness/tracer";
 
 function trace(...events: TraceInput[]): TraceEvent[] {
@@ -67,5 +69,63 @@ describe("eval run (npm run eval entrypoint)", () => {
       stdout: () => {},
     });
     expect(code).toBe(0);
+  });
+});
+
+// ── the ablation's independent variable (bare-arm fairness) ────────────────
+//
+// The bare arm must know exactly what the harness knows about the user, or the
+// comparison measures the profile plumbing instead of the machinery. These
+// assertions pin the information, not the wording.
+
+describe("runBareEval user context", () => {
+  const constrained: EvalCase = {
+    id: "c1",
+    query: "What's a good high-protein snack for me?",
+    category: "constrained",
+    expected: { mustNotContain: ["peanut"] },
+    userContext: { allergies: ["peanut"], medications: ["warfarin"] },
+  };
+
+  it("states the profile it is judged against, in the same turn", async () => {
+    const seen: ModelRequest[] = [];
+    const adapter: ModelAdapter = {
+      generate: async (request) => {
+        seen.push(request);
+        return { content: "how about some almonds?", stop: true };
+      },
+    };
+
+    await runBareEval([constrained], adapter);
+
+    const messages = seen[0].messages;
+    expect(messages.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(messages[0].content).toContain("allergies: peanut");
+    expect(messages[0].content).toContain("current medications: warfarin");
+    expect(messages[1].content).toBe(constrained.query);
+  });
+
+  it("sends no system message when the case has no profile", async () => {
+    const seen: ModelRequest[] = [];
+    const adapter: ModelAdapter = {
+      generate: async (request) => {
+        seen.push(request);
+        return { content: "ok", stop: true };
+      },
+    };
+
+    await runBareEval(
+      [{ id: "s1", query: "protein in chicken?", category: "simple", expected: {} }],
+      adapter,
+    );
+
+    expect(seen[0].messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("says nothing about tools, gates or retries — the machinery is the variable", () => {
+    const message = bareUserContextMessage(constrained) ?? "";
+    for (const forbidden of ["tool", "gate", "allergen", "avoid", "do not"]) {
+      expect(message.toLowerCase()).not.toContain(forbidden);
+    }
   });
 });
