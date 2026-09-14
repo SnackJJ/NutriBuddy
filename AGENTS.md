@@ -45,6 +45,7 @@ npm run typecheck
 npm run verify:migrations # 空库重放检查（需 Docker + psql，会 db reset 本地栈）
 npm run smoke:confirm    # live Supabase confirm/void (needs .env.local)
 npm run smoke:trace      # D9: trace write door closed + cross-account reads (needs .env.local)
+npm run smoke:delete     # 账号删除后五张表清空、语料表不变（service role 计数，needs .env.local）
 npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏，`--with-text` 仅本地调试）
 npm run prune:traces     # 90 天滚动保留（默认 dry-run，`--apply` 才删；按月手工执行）
 npm run create:user      # 建号（白名单方案 A，RFC 0010；需 .env.local）

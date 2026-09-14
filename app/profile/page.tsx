@@ -5,6 +5,7 @@ import { profileFormSchema, GOAL_TYPES } from "@/lib/profileValidation";
 import type { GoalType } from "@/lib/profileValidation";
 import type { UserProfile } from "@/lib/memoryStore";
 import { useSupabaseSession, authHeader } from "@/lib/useSupabaseSession";
+import { DeleteAccountControl } from "@/components/DeleteAccountControl";
 import { signInPresentation } from "@/lib/signupPolicy";
 
 /**
@@ -529,6 +530,23 @@ export default function ProfilePage() {
             )}
           </div>
         </form>
+
+        {/* Deleting the account is the last thing on the page on purpose: it is
+            irreversible, and it should not sit next to the save button. */}
+        <DeleteAccountControl
+          email={session.user.email ?? "your account"}
+          onDelete={async () => {
+            const response = await fetch("/api/account", {
+              method: "DELETE",
+              headers: authHeader(session),
+            });
+            if (!response.ok) {
+              return `Deletion failed (${response.status}).`;
+            }
+            const body = (await response.json()) as { clean?: boolean };
+            return { clean: body.clean !== false };
+          }}
+        />
       </div>
     </main>
   );

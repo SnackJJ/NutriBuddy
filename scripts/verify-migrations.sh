@@ -317,6 +317,23 @@ begin
     raise exception '0015: signed-in readers cannot read the interaction rules';
   end if;
 
+  -- 0016's premise: every account-scoped table follows the account. Before it, a
+  -- deleted account kept its meal history and its medication list, and nothing in
+  -- a replayed database said so.
+  select string_agg(t.tbl, ', ') into missing
+    from (values ('proposals'), ('meal_logs'), ('user_profile')) as t(tbl)
+   where not exists (
+     select 1 from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = ('public.' || t.tbl)::regclass
+        and c.confrelid = 'auth.users'::regclass
+        and c.confdeltype = 'c'          -- ON DELETE CASCADE
+        and pg_get_constraintdef(c.oid) like '%user_id%'
+   );
+  if missing is not null then
+    raise exception '0016: no cascading foreign key to auth.users on: %', missing;
+  end if;
+
   -- The local stack's own version is the premise of everything above, and it is
   -- the one part of "local replay ≈ production" that config.toml states.
   if current_setting('server_version_num')::int / 10000
