@@ -19,7 +19,7 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 - **Topology**: single agent. Model chooses and narrates; facts / numbers / entities / writes are defined and checked by deterministic code.
 - **Test seam**: one `turn` boundary — tagged input + injected ports → schema-versioned event stream → exactly one terminal event.
 - **Loop**: ReAct + typed query catalog (template id + typed params). No free-form SQL; no mental nutrition arithmetic.
-- **Data**: USDA FoodData Central as **snapshot ingestion**; runtime reads local catalog. Knowledge RAG: `docs/adr/0004` (Proposed) brings it **into scope as an evidence layer only** — it never supplies numbers, entities, or writes; retrieval itself lands in V1.1.
+- **Data**: USDA FoodData Central as **snapshot ingestion**; runtime reads local catalog. Knowledge RAG: `docs/adr/0004` (**Accepted**, 2026-09-14) brings it **into scope as an evidence layer only** — it never supplies numbers, entities, or writes; V1.0 ships the registry/corpus/pinned set/citation checks, retrieval itself lands in V1.1 (`docs/rfc/0011`).
 
 ## Next (V1.0 — plan in `docs/rfc/0007`)
 
