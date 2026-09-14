@@ -10,7 +10,7 @@
   "licenseFlags": [],
   "authorityLevel": 1,
   "docVersion": "ods-potassium@2024",
-  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "fetchedAt": "2026-09-14T15:13:14.936Z",
   "sha256": "4fbe8bf0fd52dd10316bae61eafa0ad2ce80fe4dd50cd95c59a3b939d065eb44",
   "sectionCount": 26,
   "sections": [
@@ -103,7 +103,7 @@
       "chars": 412
     },
     {
-      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy-people-with",
+      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy-people-with-2",
       "sectionPath": "Potassium / Groups at Risk of Potassium Inadequacy / People with pica",
       "heading": "People with pica",
       "ordinal": 12,

@@ -24,8 +24,12 @@
 ### 3.1 数据模型（迁移 0013）
 
 ```sql
+-- 实现注记（2026-09-14，迁移 0013）：`id` 是 **`<slug>@<doc_version>`**，稳定文档身份另存
+-- `slug` 列。原因是本节的"变更则 upsert 并把旧版本标 superseded（不删）"在 `id = slug` 下无处安放
+-- 旧版本 —— 旧 trace 可能引用它，而引用必须能解析。另加一条 partial unique index：
+-- 每个 slug 至多一个 active 版本，"同一文档两个 active"这个状态由数据库拒绝表示。
 create table public.sources (
-  id             text primary key,        -- slug，如 "ods-vitamin-d"
+  id             text primary key,        -- <slug>@<doc_version>
   title          text not null,
   publisher      text not null,
   url            text not null,

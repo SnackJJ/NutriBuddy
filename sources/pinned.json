@@ -1,6 +1,17 @@
 {
   "_note": "V1.0 钉住证据集（RFC 0011 §3.7）：进 context 的固定子集，按 sectionId 排序，字节稳定。不按用户挑选 —— 按用户相关性挑证据本质是检索，属 V1.1。",
-  "_rule": "每个优先级有配额（0 药物相互作用 8 / 1 用药相互作用 5 / 2 推荐摄入量 8 / 3 食物来源 8 / 4 过量风险 3），同时受 maxSections=40 与 maxChars=24000 约束（≈6k token，chars/4 估算）。先按优先级、再按 (sourceId, ordinal) 顺序填充；被配额或预算挤掉的段落在 excludedByBudget 里点名，不静默丢弃。",
+  "_rule": "先放 required（产品交互表里已建模的药物必须在语料里有可引用的段落：warfarin / 保钾利尿剂 / levothyroxine），再按优先级配额填充（0 药物相互作用 8 / 1 用药相互作用 5 / 2 推荐摄入量 8 / 3 食物来源 8 / 4 过量风险 3），同时受 maxSections=40 与 maxChars=24000 约束（≈6k token，chars/4 估算）。被配额或预算挤掉的段落在 excludedByBudget 里点名，不静默丢弃。",
+  "_coverage": {
+    "modeled_drugs_with_pinned_source": [
+      "warfarin",
+      "spironolactone (保钾利尿剂)",
+      "levothyroxine"
+    ],
+    "modeled_drugs_without_corpus_source": [
+      "simvastatin (grapefruit)",
+      "phenelzine (tyramine) — ODS 无对应 fact sheet；其规则来自 drug_nutrient_interactions 表，见 #125"
+    ]
+  },
   "_budget": {
     "maxSections": 40,
     "maxChars": 24000,
@@ -13,7 +24,7 @@
       "sourceId": "ods-calcium",
       "sectionPath": "Calcium / Interactions with Medications",
       "chars": 306,
-      "priority": "drug interaction the product models"
+      "priority": "required: a drug this product models"
     },
     {
       "sectionId": "ods-calcium#calcium-interactions-with-medications-dolutegravir",
@@ -27,7 +38,7 @@
       "sourceId": "ods-calcium",
       "sectionPath": "Calcium / Interactions with Medications / Levothyroxine",
       "chars": 371,
-      "priority": "drug interaction the product models"
+      "priority": "required: a drug this product models"
     },
     {
       "sectionId": "ods-calcium#calcium-interactions-with-medications-lithium",
@@ -49,13 +60,6 @@
       "sectionPath": "Calcium / Recommended Intakes",
       "chars": 1686,
       "priority": "recommended intakes"
-    },
-    {
-      "sectionId": "ods-calcium#calcium-sources-of-calcium-food",
-      "sourceId": "ods-calcium",
-      "sectionPath": "Calcium / Sources of Calcium / Food",
-      "chars": 2151,
-      "priority": "food sources"
     },
     {
       "sectionId": "ods-folate#folate-interactions-with-medications",
@@ -118,7 +122,7 @@
       "sourceId": "ods-iron",
       "sectionPath": "Iron / Interactions with Medications / Levothyroxine",
       "chars": 498,
-      "priority": "drug interaction the product models"
+      "priority": "required: a drug this product models"
     },
     {
       "sectionId": "ods-iron#iron-recommended-intakes",
@@ -146,7 +150,7 @@
       "sourceId": "ods-omega-3",
       "sectionPath": "Omega-3 Fatty Acids / Interactions with Medications / Warfarin (Coumadin) and similar anticoagulants",
       "chars": 854,
-      "priority": "drug interaction the product models"
+      "priority": "required: a drug this product models"
     },
     {
       "sectionId": "ods-omega-3#omega-3-fatty-acids-recommended-intakes",
@@ -154,6 +158,34 @@
       "sectionPath": "Omega-3 Fatty Acids / Recommended Intakes",
       "chars": 1928,
       "priority": "recommended intakes"
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications",
+      "sourceId": "ods-potassium",
+      "sectionPath": "Potassium / Interactions with Medications",
+      "chars": 268,
+      "priority": "drug interaction the product models"
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-angiotensin-converti",
+      "sourceId": "ods-potassium",
+      "sectionPath": "Potassium / Interactions with Medications / Angiotensin converting enzyme inhibitors and angiotensin receptor blockers",
+      "chars": 611,
+      "priority": "drug interaction the product models"
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-loop-and-thiazide-di",
+      "sourceId": "ods-potassium",
+      "sectionPath": "Potassium / Interactions with Medications / Loop and thiazide diuretics",
+      "chars": 387,
+      "priority": "drug interaction the product models"
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-potassium-sparing-di",
+      "sourceId": "ods-potassium",
+      "sectionPath": "Potassium / Interactions with Medications / Potassium-sparing diuretics",
+      "chars": 353,
+      "priority": "required: a drug this product models"
     },
     {
       "sectionId": "ods-potassium#potassium-recommended-intakes",
@@ -177,44 +209,21 @@
       "priority": "recommended intakes"
     },
     {
-      "sectionId": "ods-vitamin-k#vitamin-k-health-risks-from-excessive-vitamin-k",
-      "sourceId": "ods-vitamin-k",
-      "sectionPath": "Vitamin K / Health Risks from Excessive Vitamin K",
-      "chars": 252,
-      "priority": "excess intake risk"
-    }
-  ],
-  "excludedByBudget": [
-    {
-      "sectionId": "ods-potassium#potassium-interactions-with-medications",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
-    },
-    {
-      "sectionId": "ods-potassium#potassium-interactions-with-medications-angiotensin-converti",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
-    },
-    {
-      "sectionId": "ods-potassium#potassium-interactions-with-medications-potassium-sparing-di",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
-    },
-    {
-      "sectionId": "ods-potassium#potassium-interactions-with-medications-loop-and-thiazide-di",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
-    },
-    {
       "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
+      "sourceId": "ods-vitamin-k",
+      "sectionPath": "Vitamin K / Interactions with Medications",
+      "chars": 296,
+      "priority": "drug interaction the product models"
     },
     {
       "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-warfarin-coumadin-an",
-      "priority": 0,
-      "reason": "over quota(8) or budget"
-    },
+      "sourceId": "ods-vitamin-k",
+      "sectionPath": "Vitamin K / Interactions with Medications / Warfarin (Coumadin) and similar anticoagulants",
+      "chars": 578,
+      "priority": "required: a drug this product models"
+    }
+  ],
+  "excludedByBudget": [
     {
       "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-antibiotics",
       "priority": 0,
@@ -381,6 +390,11 @@
       "reason": "over quota(8) or budget"
     },
     {
+      "sectionId": "ods-calcium#calcium-sources-of-calcium-food",
+      "priority": 3,
+      "reason": "over quota(8) or budget"
+    },
+    {
       "sectionId": "ods-folate#folate-sources-of-folate-food",
       "priority": 3,
       "reason": "over quota(8) or budget"
@@ -472,6 +486,11 @@
     },
     {
       "sectionId": "ods-vitamin-d#vitamin-d-health-risks-from-excessive-vitamin-d",
+      "priority": 4,
+      "reason": "over quota(3) or budget"
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-health-risks-from-excessive-vitamin-k",
       "priority": 4,
       "reason": "over quota(3) or budget"
     },

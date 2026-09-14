@@ -10,7 +10,7 @@
   "licenseFlags": [],
   "authorityLevel": 1,
   "docVersion": "ods-omega-3@2024",
-  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "fetchedAt": "2026-09-14T15:13:14.936Z",
   "sha256": "65dc492c6b886ba04aa550cd61f0fd0dfb86a801b3b9fa8a439b1184d6f10fe1",
   "sectionCount": 44,
   "sections": [
@@ -95,7 +95,7 @@
       "chars": 725
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-2",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Initial clinical research",
       "heading": "Initial clinical research",
       "ordinal": 11,
@@ -103,7 +103,7 @@
       "chars": 3112
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-3",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recent clinical trials",
       "heading": "Recent clinical trials",
       "ordinal": 12,
@@ -111,7 +111,7 @@
       "chars": 4160
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-4",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Possible reasons for conflicting findings",
       "heading": "Possible reasons for conflicting findings",
       "ordinal": 13,
@@ -119,7 +119,7 @@
       "chars": 1784
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-5",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recent reviews and meta-analyses",
       "heading": "Recent reviews and meta-analyses",
       "ordinal": 14,
@@ -127,7 +127,7 @@
       "chars": 1610
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-6",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recommendations from the American Heart Association and the Dietary Guidelines for Americans",
       "heading": "Recommendations from the American Heart Association and the Dietary Guidelines for Americans",
       "ordinal": 15,
@@ -135,7 +135,7 @@
       "chars": 1823
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea-7",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Conclusions about omega-3s and CVD",
       "heading": "Conclusions about omega-3s and CVD",
       "ordinal": 16,
@@ -151,7 +151,7 @@
       "chars": 492
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne-2",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Evidence from observational research",
       "heading": "Evidence from observational research",
       "ordinal": 18,
@@ -159,7 +159,7 @@
       "chars": 1478
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne-3",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Randomized controlled trials of omega-3 supplementation",
       "heading": "Randomized controlled trials of omega-3 supplementation",
       "ordinal": 19,
@@ -167,7 +167,7 @@
       "chars": 2551
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne-4",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Agency for Healthcare Research and Quality report ",
       "heading": "Agency for Healthcare Research and Quality report ",
       "ordinal": 20,
@@ -175,7 +175,7 @@
       "chars": 675
     },
     {
-      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne-5",
       "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Recommendations from the Dietary Guidelines for Americans",
       "heading": "Recommendations from the Dietary Guidelines for Americans",
       "ordinal": 21,

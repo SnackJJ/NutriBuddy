@@ -10,7 +10,7 @@
   "licenseFlags": [],
   "authorityLevel": 1,
   "docVersion": "ods-magnesium@2024",
-  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "fetchedAt": "2026-09-14T15:13:14.936Z",
   "sha256": "3dc2033cc45e6bd814aa19c55d231be43623d3006aead701b14e67ab9112985e",
   "sectionCount": 27,
   "sections": [
@@ -95,7 +95,7 @@
       "chars": 318
     },
     {
-      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with",
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with-2",
       "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / People with type 2 diabetes",
       "heading": "People with type 2 diabetes",
       "ordinal": 11,
@@ -103,7 +103,7 @@
       "chars": 267
     },
     {
-      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with",
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with-3",
       "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / People with alcohol dependence",
       "heading": "People with alcohol dependence",
       "ordinal": 12,

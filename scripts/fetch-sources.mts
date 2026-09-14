@@ -228,12 +228,24 @@ export function groupSections(sourceId: string, blocks: readonly RawBlock[]): Se
   let current: { path: string; heading: string | null; anchor?: string; parts: string[] } | null =
     null;
 
+  /**
+   * Slugs are truncated to 60 characters, so two long sibling paths can collide
+   * ("Groups at Risk of X Inadequacy / People with ..." twice). The corpus check
+   * rejects duplicate ids, so a collision is disambiguated here rather than
+   * discovered later: the section id is what a citation points at, and two rows
+   * sharing one is a citation that cannot be resolved.
+   */
+  const usedSlugs = new Map<string, number>();
+
   const flush = (): void => {
     if (!current) return;
     const text = current.parts.join("\n\n").trim();
     if (text.length > 0) {
       const ordinal = sections.length + 1;
-      const sectionId = `${sourceId}#${slug(current.path) || `s${ordinal}`}`;
+      const base = slug(current.path) || `s${ordinal}`;
+      const seen = usedSlugs.get(base) ?? 0;
+      usedSlugs.set(base, seen + 1);
+      const sectionId = `${sourceId}#${seen === 0 ? base : `${base}-${seen + 1}`}`;
       sections.push({
         sectionId,
         sectionPath: current.path,

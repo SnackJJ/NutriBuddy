@@ -1,0 +1,129 @@
+{
+  "schema": "1.0.0",
+  "ingestedAt": "2026-09-14T15:15:38.417Z",
+  "pinnedBudget": {
+    "maxSections": 40,
+    "maxChars": 24000,
+    "sections": 29,
+    "chars": 23862
+  },
+  "sources": [
+    {
+      "slug": "dga-2020-2025",
+      "sourceId": "dga-2020-2025@dga-2020-2025@2024",
+      "docVersion": "dga-2020-2025@2024",
+      "contentHash": "3ca1a0938ea2be7b2de32ef99bbf0a8d581d2de08527e3e0a890905de207acc6",
+      "sections": 8,
+      "pinned": 0,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-calcium",
+      "sourceId": "ods-calcium@ods-calcium@2024",
+      "docVersion": "ods-calcium@2024",
+      "contentHash": "325c88ef5fd6fe23781e5c003364a54dd1c40bf9398eda5e8303e0d58c87e941",
+      "sections": 33,
+      "pinned": 6,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-folate",
+      "sourceId": "ods-folate@ods-folate@2024",
+      "docVersion": "ods-folate@2024",
+      "contentHash": "b74b51f7a362f8f206b2e28e18ad4357c50087162a33dec12786c4b1b243eb32",
+      "sections": 29,
+      "pinned": 5,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-iodine",
+      "sourceId": "ods-iodine@ods-iodine@2024",
+      "docVersion": "ods-iodine@2024",
+      "contentHash": "0f3f6758fe35c0dfcc436ef79d2683d95f08823bc2c268cffb9a8269d4330d77",
+      "sections": 30,
+      "pinned": 3,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-iron",
+      "sourceId": "ods-iron@ods-iron@2024",
+      "docVersion": "ods-iron@2024",
+      "contentHash": "6796305dc5811632906a9fb37d3cb58d02a64ae9cff5523c4c9b202662d06e9c",
+      "sections": 27,
+      "pinned": 2,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-magnesium",
+      "sourceId": "ods-magnesium@ods-magnesium@2024",
+      "docVersion": "ods-magnesium@2024",
+      "contentHash": "3dc2033cc45e6bd814aa19c55d231be43623d3006aead701b14e67ab9112985e",
+      "sections": 27,
+      "pinned": 2,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-omega-3",
+      "sourceId": "ods-omega-3@ods-omega-3@2024",
+      "docVersion": "ods-omega-3@2024",
+      "contentHash": "65dc492c6b886ba04aa550cd61f0fd0dfb86a801b3b9fa8a439b1184d6f10fe1",
+      "sections": 44,
+      "pinned": 2,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-potassium",
+      "sourceId": "ods-potassium@ods-potassium@2024",
+      "docVersion": "ods-potassium@2024",
+      "contentHash": "4fbe8bf0fd52dd10316bae61eafa0ad2ce80fe4dd50cd95c59a3b939d065eb44",
+      "sections": 26,
+      "pinned": 5,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-vitamin-b12",
+      "sourceId": "ods-vitamin-b12@ods-vitamin-b12@2024",
+      "docVersion": "ods-vitamin-b12@2024",
+      "contentHash": "ea0a275d1c03092673f5753b0d4ecf0b645b59f5fff69efd705a660134790b13",
+      "sections": 27,
+      "pinned": 2,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-vitamin-c",
+      "sourceId": "ods-vitamin-c@ods-vitamin-c@2024",
+      "docVersion": "ods-vitamin-c@2024",
+      "contentHash": "333c8b6fd25f5612592c3b6f4a3c4376dff0b7cb68ef5b3495a92682f19de041",
+      "sections": 25,
+      "pinned": 0,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-vitamin-d",
+      "sourceId": "ods-vitamin-d@ods-vitamin-d@2024",
+      "docVersion": "ods-vitamin-d@2024",
+      "contentHash": "687cbc1331ed0b595de897b98a366f488f939f3a5f9d6ffad6bb9414a7bdffde",
+      "sections": 44,
+      "pinned": 0,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-vitamin-k",
+      "sourceId": "ods-vitamin-k@ods-vitamin-k@2024",
+      "docVersion": "ods-vitamin-k@2024",
+      "contentHash": "06c6f2bf1f19c833809877252e339798cde8297bd86bde85b784a9010e582004",
+      "sections": 22,
+      "pinned": 2,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    },
+    {
+      "slug": "ods-zinc",
+      "sourceId": "ods-zinc@ods-zinc@2024",
+      "docVersion": "ods-zinc@2024",
+      "contentHash": "cfc093c820cfb5440fc6b0fee0c217aad2a0132fef6cecadc9e7224b1e16c0d2",
+      "sections": 30,
+      "pinned": 0,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)"
+    }
+  ]
+}

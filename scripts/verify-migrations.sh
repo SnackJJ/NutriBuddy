@@ -253,6 +253,46 @@ begin
     raise exception '0014: no index leads with the policy column on: %', missing;
   end if;
 
+  -- 0013's premise: the evidence layer is public read-only data with no client
+  -- write path, and only active documents are visible.
+  if not exists (
+    select 1 from pg_tables
+     where schemaname = 'public' and tablename in ('sources', 'source_sections')
+     group by schemaname having count(*) = 2
+  ) then
+    raise exception '0013 did not create sources / source_sections';
+  end if;
+
+  if has_table_privilege('anon', 'public.sources', 'select, insert, update, delete')
+     or has_table_privilege('anon', 'public.source_sections', 'select, insert, update, delete')
+     or has_table_privilege('authenticated', 'public.sources', 'insert')
+     or has_table_privilege('authenticated', 'public.sources', 'update')
+     or has_table_privilege('authenticated', 'public.sources', 'delete')
+     or has_table_privilege('authenticated', 'public.source_sections', 'insert')
+     or has_table_privilege('authenticated', 'public.source_sections', 'update')
+     or has_table_privilege('authenticated', 'public.source_sections', 'delete')
+  then
+    raise exception '0013: the evidence corpus is writable by a user-facing role';
+  end if;
+
+  if not has_table_privilege('authenticated', 'public.sources', 'select')
+     or not has_table_privilege('authenticated', 'public.source_sections', 'select')
+  then
+    raise exception '0013: signed-in readers cannot read the evidence corpus';
+  end if;
+
+  -- "At most one active version per document" is the invariant that makes a
+  -- superseded version unambiguous. Asserted because a schema without it still
+  -- replays cleanly and only shows up as a wrong citation later.
+  if not exists (
+    select 1 from pg_indexes
+     where schemaname = 'public'
+       and tablename = 'sources'
+       and indexname = 'sources_one_active_per_slug'
+  ) then
+    raise exception '0013: the one-active-version-per-source index is missing';
+  end if;
+
   -- The local stack's own version is the premise of everything above, and it is
   -- the one part of "local replay ≈ production" that config.toml states.
   if current_setting('server_version_num')::int / 10000

@@ -10,7 +10,7 @@
   "licenseFlags": [],
   "authorityLevel": 1,
   "docVersion": "ods-vitamin-b12@2024",
-  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "fetchedAt": "2026-09-14T15:13:14.936Z",
   "sha256": "ea0a275d1c03092673f5753b0d4ecf0b645b59f5fff69efd705a660134790b13",
   "sectionCount": 27,
   "sections": [
@@ -103,7 +103,7 @@
       "chars": 778
     },
     {
-      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ",
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ-2",
       "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Individuals with gastrointestinal disorders",
       "heading": "Individuals with gastrointestinal disorders",
       "ordinal": 12,
@@ -111,7 +111,7 @@
       "chars": 680
     },
     {
-      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ",
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ-3",
       "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Individuals who have had gastrointestinal surgery",
       "heading": "Individuals who have had gastrointestinal surgery",
       "ordinal": 13,

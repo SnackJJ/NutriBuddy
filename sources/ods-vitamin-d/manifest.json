@@ -10,7 +10,7 @@
   "licenseFlags": [],
   "authorityLevel": 1,
   "docVersion": "ods-vitamin-d@2024",
-  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "fetchedAt": "2026-09-14T15:13:14.936Z",
   "sha256": "687cbc1331ed0b595de897b98a366f488f939f3a5f9d6ffad6bb9414a7bdffde",
   "sectionCount": 44,
   "sections": [
@@ -119,7 +119,7 @@
       "chars": 476
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with-2",
       "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with dark skin",
       "heading": "People with dark skin",
       "ordinal": 14,
@@ -127,7 +127,7 @@
       "chars": 559
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with-3",
       "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with conditions that limit fat absorption",
       "heading": "People with conditions that limit fat absorption",
       "ordinal": 15,
@@ -135,7 +135,7 @@
       "chars": 647
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with-4",
       "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with obesity or who have undergone gastric bypass surgery",
       "heading": "People with obesity or who have undergone gastric bypass surgery",
       "ordinal": 16,
@@ -167,7 +167,7 @@
       "chars": 3297
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis--2",
       "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Vitamin D supplements for bone health in minority populations",
       "heading": "Vitamin D supplements for bone health in minority populations",
       "ordinal": 20,
@@ -175,7 +175,7 @@
       "chars": 1070
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis--3",
       "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Vitamin D supplements and muscle function",
       "heading": "Vitamin D supplements and muscle function",
       "ordinal": 21,
@@ -183,7 +183,7 @@
       "chars": 996
     },
     {
-      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis--4",
       "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Conclusions about vitamin D supplements and bone health",
       "heading": "Conclusions about vitamin D supplements and bone health",
       "ordinal": 22,
