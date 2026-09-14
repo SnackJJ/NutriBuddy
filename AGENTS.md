@@ -23,14 +23,14 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 
 ## Next (V1.0 — plan in `docs/rfc/0007`)
 
-Keep this list short. Prefer GitHub issues as the live backlog. (#82 / #83 landed; the previous list here was stale.)
+Keep this list short. Prefer GitHub issues as the live backlog.
 
-1. **S1 — 轨迹持久化与 turn 重放**（`docs/rfc/0008`）：路径上的头号阻塞项 —— 审计 / 回放 / 归因 / RL 资产全挂在它上面。**T1–T5 已落地**（迁移 0011、TraceStore 端口、`turn()` 接线与终态语义、`SupabaseTraceStore`、失败语义测试）；剩余 #91（查询面）、#120（迁移 0014）、#122（90 天保留）
+1. **S1 已收口**（`docs/rfc/0008`）：T1–T9 全部落地（迁移 0011/0014、TraceStore 端口、`turn()` 接线、`SupabaseTraceStore`、重放路由、导出 `scripts/export-traces.mts`、保留 `scripts/prune-traces.ts`、D9 smoke）。两处仍未闭合、已留在票上：D4 的**真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）与 `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
 2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：产出可复现的数字与回归基线
 3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）；**S4 — 依据层**（source registry + 引用检查，`docs/rfc/0011`，前置 `docs/adr/0004` 接受）
 4. **S5 — 上线收尾**：部署、README、隐私与数据删除路径、`version` + tag
 
-S1 的迁移改动带两个必须先满足的前提：本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），而 `supabase/config.toml` 的 `major_version` **尚未**与 hosted 项目核对（见该文件内注释，归 #113 前闭合）。
+S1 之后的迁移前提不变：本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本现在同时断言 0011 与 0014 的 grant / 策略 / 索引前提。
 
 Nightly live eval thickening and dropping derived `toolResult` after the UI migration (RFC 0002 §2.6) stay open; TraceEvent stays debug-only.
 
