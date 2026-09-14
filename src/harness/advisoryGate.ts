@@ -22,6 +22,27 @@ export interface Conflict {
   readonly id: string;
   /** Human-readable description for evidence messages. */
   readonly description: string;
+  /**
+   * How the user asked, when a scan classified it (issue #127).
+   *
+   * The output checks exempt a conflict the input gate already saw, so that a
+   * logging turn can say the food's name and a refuse-and-cite turn can name
+   * what it refuses. `descriptive` is always exempt; `prescriptive` is exempt
+   * only where the answer *warns* rather than recommends (see the frame check in
+   * turn.ts), and `neutral` is never exempt — a classifier that could not tell
+   * what was asked is not a reason to guess in the permissive direction. Absent
+   * means "no intent was classified here" (entity-level producers such as a
+   * confirmed proposal) and keeps the previous behaviour for those.
+   */
+  readonly intent?: "descriptive" | "prescriptive" | "neutral";
+  /**
+   * Canonical names of the foods that triggered this conflict.
+   *
+   * Carried as data rather than parsed back out of `description`, because the
+   * frame check has to find the *food* in the answer: the conflict id is the
+   * allergen ("shellfish") while the answer names the food ("shrimp").
+   */
+  readonly foods?: readonly string[];
 }
 
 export interface AdvisoryStructureInput {

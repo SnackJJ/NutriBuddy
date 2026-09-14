@@ -51,6 +51,30 @@ import {
 
 /** 默认最大步数（issue #10 上调以留出 gate 重试余量）。 */
 export const MAX_STEPS = 8;
+
+/**
+ * Ceilings that stop a turn which is not making progress (issue #126).
+ *
+ * The live baselines produced the case for these: a model that already had the
+ * observation it needed kept calling `query_catalog` with slightly different
+ * arguments until MAX_STEPS was spent — 20 to 24 calls, tens of seconds, and an
+ * empty reply. The identical-call guard above cannot see it, because the
+ * arguments differ; the signal that is missing is *novelty*.
+ *
+ * So two counters, both about information rather than repetition:
+ *   * a step whose calls return nothing the turn has not already seen is a
+ *     stale step; `STALE_STEPS_BEFORE_NUDGE` consecutive ones mean the model is
+ *     not learning anything more;
+ *   * `MAX_TOOL_CALLS` bounds the pathological case where every step does return
+ *     something new but the turn still never converges.
+ *
+ * When either trips, tool dispatch stops for the rest of the turn and the model
+ * is told why and what to do instead. A refusal to execute is the honest form:
+ * continuing to spend money on calls that cannot change the answer is not a
+ * service to the caller.
+ */
+export const STALE_STEPS_BEFORE_NUDGE = 2;
+export const MAX_TOOL_CALLS = 16;
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CODE_ACT_TOOL = "code_act";
 
@@ -285,6 +309,21 @@ function createToolResultMessage(
   };
 }
 
+/**
+ * Whether this outcome carries something the turn has not seen before.
+ *
+ * Compared by serialized payload, which is what the model itself would have to
+ * compare; two calls that return the same bytes are the same fact however
+ * different their arguments were.
+ */
+function isNovelOutcome(outcome: ToolOutcome, seen: Set<string>): boolean {
+  if (outcome.kind !== "ok") return false;
+  const serialized = JSON.stringify(outcome.data);
+  if (seen.has(serialized)) return false;
+  seen.add(serialized);
+  return true;
+}
+
 /** Identity of a tool call as the model made it: name plus exact arguments. */
 function callSignature(toolCall: ToolCall): string {
   return `${toolCall.name}${JSON.stringify(toolCall.args)}`;
@@ -416,6 +455,11 @@ export async function* run(
    */
   const failedCalls = new Map<string, string>();
   const repeats = new Map<string, number>();
+  /** Observation payloads seen this turn, for the novelty check below. */
+  const seenObservations = new Set<string>();
+  let toolCallsMade = 0;
+  let staleSteps = 0;
+  let dispatchStopped: string | null = null;
   let reply = "";
 
   for (let step = 1; step <= maxSteps; step++) {
@@ -519,8 +563,19 @@ export async function* run(
         createAssistantToolCallMessage(response.content, response.toolCalls),
       );
 
+      let newFactsThisStep = false;
+
       for (const tc of response.toolCalls) {
         yield { type: "act", step, toolCall: tc };
+
+        if (dispatchStopped !== null) {
+          // Already decided that more calls cannot help. Saying so costs one
+          // message and saves the rest of the step's calls.
+          working.push(
+            createToolResultMessage(tc, `${dispatchStopped} Answer with submit_answer.`),
+          );
+          continue;
+        }
 
         // A call this turn already made with the same arguments, after it
         // failed, is answered with that failure instead of being dispatched
@@ -543,9 +598,12 @@ export async function* run(
         }
 
         const outcome = await dispatchTool(tc, tools, toolSchemas);
+        toolCallsMade += 1;
 
         if (outcome.kind !== "ok") {
           failedCalls.set(signature, describeFailure(outcome));
+        } else if (isNovelOutcome(outcome, seenObservations)) {
+          newFactsThisStep = true;
         }
 
         yield observeFromOutcome(step, outcome);
@@ -565,6 +623,28 @@ export async function* run(
           };
         }
       }
+
+      // ── Progress check (issue #126) ──────────────────────────────
+      //
+      // Judged per step, not per call: a step is what the model gets to react to,
+      // and a step that learned nothing is the unit of "spinning".
+      const callsThisStep = response.toolCalls.length;
+      if (dispatchStopped === null && callsThisStep > 0) {
+        staleSteps = newFactsThisStep ? 0 : staleSteps + 1;
+        if (staleSteps >= STALE_STEPS_BEFORE_NUDGE) {
+          dispatchStopped =
+            "No new information came back from the last tool calls, so more calls cannot change the answer.";
+        } else if (toolCallsMade >= MAX_TOOL_CALLS) {
+          dispatchStopped = `This turn has already made ${toolCallsMade} tool calls without finishing.`;
+        }
+        if (dispatchStopped !== null) {
+          working.push({
+            role: "system",
+            content: `${dispatchStopped} Use the observations you already have and call submit_answer with your final answer now.`,
+          });
+        }
+      }
+
       // 工具调用后继续循环（不在此步交卷）
       continue;
     }

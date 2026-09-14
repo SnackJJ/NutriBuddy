@@ -1353,3 +1353,95 @@ describe("identical repeated tool calls", () => {
     ]);
   });
 });
+
+// ── progress guard (issue #126) ────────────────────────────────────────────
+//
+// The live baseline's failure mode was not repetition but *staleness*: a model
+// that already had the observation kept asking for it with different arguments.
+// Twenty-odd calls, eight steps, empty reply. The guard counts steps that learned
+// nothing, not calls that look alike.
+
+describe("no-progress turns", () => {
+  /** A tool whose answers stop varying after the first call. */
+  function fadingTool(observations: string[]) {
+    let call = 0;
+    const handler = async () => {
+      const text = observations[Math.min(call, observations.length - 1)];
+      call += 1;
+      return { kind: "ok" as const, data: { type: "observation", text } };
+    };
+    return new Map([["query_catalog", handler]]);
+  }
+
+  it("stops dispatching once steps stop returning new facts, and says why", async () => {
+    let call = 0;
+    const prompts: string[] = [];
+    const adapter = stubAdapter((request) => {
+      prompts.push(request.messages.map((m) => `${m.role}: ${m.content}`).join("\n"));
+      call += 1;
+      // Every step asks for something slightly different, so the identical-call
+      // guard never fires — this is the shape the live run produced.
+      return {
+        content: "",
+        stop: true,
+        finishReason: "tool_calls",
+        toolCalls: [
+          { id: `call-${call}`, name: "query_catalog", args: { template_id: "food_lookup", n: call } },
+        ],
+      };
+    });
+
+    await collect(
+      run({
+        userInput: "100g 鸡胸肉的蛋白质？",
+        adapter,
+        tracer: new Tracer(),
+        tools: fadingTool(["chicken breast 100g: 31g protein"]),
+        toolSchemas: [],
+      }),
+    );
+
+    // The turn ends at max_steps either way; what matters is that the model was
+    // told, and that the calls stopped rather than continuing to the ceiling.
+    const toolMessages = prompts.at(-1) ?? "";
+    expect(toolMessages).toContain("No new information came back");
+    expect(toolMessages).toContain("submit_answer");
+  });
+
+  it("does not stop a turn that is still learning", async () => {
+    let call = 0;
+    const dispatched: string[] = [];
+    const adapter = stubAdapter(() => {
+      call += 1;
+      return {
+        content: "",
+        stop: true,
+        finishReason: "tool_calls",
+        toolCalls: [{ id: `call-${call}`, name: "query_catalog", args: { n: call } }],
+      };
+    });
+    const probing = new Map([
+      [
+        "query_catalog",
+        async (args: Record<string, unknown>) => {
+          dispatched.push(String(args.n));
+          return { kind: "ok" as const, data: { type: "observation", text: `value ${args.n}` } };
+        },
+      ],
+    ]);
+
+    await collect(
+      run({
+        userInput: "q",
+        adapter,
+        tracer: new Tracer(),
+        tools: probing,
+        toolSchemas: [],
+      }),
+    );
+
+    // Distinct facts each step: the guard must not fire, and the budget is what
+    // eventually stops it.
+    expect(dispatched.length).toBeGreaterThan(2);
+  });
+});

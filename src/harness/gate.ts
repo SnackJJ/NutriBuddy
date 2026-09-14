@@ -426,6 +426,11 @@ export function scanUtteranceForConflicts(
   );
   const conflicts: Conflict[] = [];
   const hitFoods: string[] = [];
+  // Classified once, stamped on every conflict: the output checks need it to
+  // decide whether naming the allergen is legitimate (descriptive: the user is
+  // logging what they ate) or the failure itself (prescriptive: the user asked
+  // whether to eat it).
+  const intent = classifyUtteranceIntent(utterance);
 
   for (const food of catalog.allFoods) {
     // Runtime guard: snapshot-loaded foods may lack a reviewed tag row —
@@ -442,6 +447,8 @@ export function scanUtteranceForConflicts(
         conflicts.push({
           type: "allergy",
           id: allergen,
+          intent,
+          foods: [food.canonicalName],
           description: `Food "${food.canonicalName}" is tagged with allergen "${allergen}" — matches user allergy`,
         });
       }
@@ -449,9 +456,5 @@ export function scanUtteranceForConflicts(
     }
   }
 
-  return {
-    conflicts,
-    intent: classifyUtteranceIntent(utterance),
-    hitFoods,
-  };
+  return { conflicts, intent, hitFoods };
 }

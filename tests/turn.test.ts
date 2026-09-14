@@ -4466,3 +4466,44 @@ describe("turn event enrichment (issue #51)", () => {
     }
   });
 });
+
+// ── every terminal says something (issue #126) ─────────────────────────────
+//
+// The live baselines produced `turn_end` events with `reply: ""` for `max_steps`
+// and for a `write_proposal` that carried no proposal: correct for the audit,
+// useless to the person waiting. These pin the fallback at both ends — the event
+// and the returned result — because a fix applied to only one of them is the bug.
+
+describe("terminal replies", () => {
+  it("replaces an empty max_steps reply with something a user can act on", async () => {
+    const { events, result } = await collect(
+      turn(
+        { tag: "utterance", content: "protein?" },
+        createPorts(() => ({
+          content: "",
+          stop: true,
+          finishReason: "tool_calls",
+          toolCalls: [{ id: "c1", name: "never_returns", args: {} }],
+        })),
+      ),
+    );
+
+    const terminal = events.at(-1);
+    expect(terminal?.type).toBe("turn_end");
+    if (terminal?.type !== "turn_end") throw new Error("no terminal");
+    expect(terminal.result.stopReason).toBe("max_steps");
+    expect(terminal.result.reply.length).toBeGreaterThan(0);
+    expect(result.reply).toBe(terminal.result.reply);
+    expect(terminal.result.reply).toContain("ran out of steps");
+  });
+
+  it("leaves a reply the model actually produced alone", async () => {
+    const { result } = await collect(
+      turn(
+        { tag: "utterance", content: "protein?" },
+        createPorts(() => ({ content: "about 31 g", stop: true })),
+      ),
+    );
+    expect(result.reply).toBe("about 31 g");
+  });
+});

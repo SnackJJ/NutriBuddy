@@ -294,11 +294,49 @@ function createTurnStepEvent(
   return { ...nextMetadata(), type: "step", agentEvent };
 }
 
+/**
+ * Deterministic sentences for the terminals that have nothing to say.
+ *
+ * Live baselines produced `turn_end` events with `reply: ""` for `max_steps` and
+ * for a `write_proposal` that never carried a proposal. The trace was correct and
+ * the user saw nothing at all — a terminal that exists for the audit and says
+ * nothing to the person waiting on it (issue #126).
+ *
+ * These are the harness's own words, not the model's: they say what happened and
+ * what to do next, and they claim nothing about the food. Wording rules follow
+ * the rest of the file — no internals, no numbers, no advice.
+ */
+const EMPTY_REPLY_FALLBACK: Record<TurnResult["stopReason"], string> = {
+  end_turn:
+    "I could not put an answer together for that. Try rephrasing it, or ask about one thing at a time.",
+  max_steps:
+    "I ran out of steps before I could answer that. Nothing was written. Try a narrower question — one food or one meal at a time.",
+  aborted: "That request was interrupted, so I did not finish. Nothing was written.",
+  gate_blocked:
+    "I cannot answer that one safely, so I have not. Nothing was written.",
+  write_proposal:
+    "I could not prepare a logging proposal for that, so nothing was written. Try telling me the food and the portion.",
+  crash:
+    "Something went wrong while I was working on that. Nothing was written; please try again.",
+};
+
+/**
+ * Every terminal carries a reply a user can read.
+ *
+ * Applied at the single place the terminal result is constructed, so it holds for
+ * the loop's own terminals and for the crash path alike — and only when the
+ * existing reply is empty, because a model that said something keeps its words.
+ */
+function withReadableReply(result: TurnResult): TurnResult {
+  if (result.reply.trim().length > 0) return result;
+  return { ...result, reply: EMPTY_REPLY_FALLBACK[result.stopReason] };
+}
+
 function createTurnEndEvent(
   result: TurnResult,
   nextMetadata: NextEventMetadata,
 ): TurnEndEvent {
-  return { ...nextMetadata(), type: "turn_end", result };
+  return { ...nextMetadata(), type: "turn_end", result: withReadableReply(result) };
 }
 
 function createGateVerdictEvent(
@@ -502,29 +540,142 @@ function createOutputGateCheck(
   };
 }
 
+/**
+ * Cues that decide whether a mention sits in a recommendation or in a warning.
+ *
+ * This is the difference between an answer that says "shrimp is fine for you"
+ * and one that says "shrimp is off the table — you are allergic to shellfish".
+ * Both name the allergen; only one of them is the failure the path exists to
+ * prevent (issue #127, found by the live baseline's d2). A blanket exemption let
+ * both through; a blanket block would refuse every correct refusal, which costs
+ * two regenerations and hands the user a worse answer for doing the right thing.
+ *
+ * Deterministic and lexical, like the backstop it feeds — the same family as the
+ * rest of the output checks, not a second judge. #128 (assertion phrases) is the
+ * general form of this check; this is the narrow version the allergen path needs
+ * now.
+ */
+/**
+ * A recommendation that is being refused: "I can't recommend shrimp".
+ *
+ * Checked before the recommendation cues, because the word "recommend" appears
+ * in the most common correct refusal, and reading it as a recommendation would
+ * block exactly the answers the refuse-and-cite path is trying to produce.
+ */
+const NEGATED_RECOMMENDATION =
+  /\b(can't|cannot|won't|will not|don't|do not|wouldn't|shouldn't|not able to)\s+(\w+\s+){0,2}recommend\b/;
+
+const RECOMMENDATION_CUES: readonly RegExp[] = [
+  /\bis (fine|ok|okay|safe|healthy|good)\b/,
+  /\byou (can|may|should) (eat|have|try|enjoy|include)\b/,
+  /\brecommend\b/,
+  /\bgo ahead\b/,
+  /\benjoy\b/,
+  /\bsafe (for you|to eat|to have)\b/,
+  /\bgood (choice|option|idea)\b/,
+  /\bfine to eat\b/,
+];
+
+const REFUSAL_CUES: readonly RegExp[] = [
+  /\bavoid\b/,
+  /\bdo not\b|\bdon't\b/,
+  /\bcannot\b|\bcan't\b|\bwon't\b|\bwill not\b/,
+  /\bnot (safe|recommended|advisable|a good)\b/,
+  /\boff the table\b/,
+  /\ballerg/,
+  /\brisk\b/,
+  /\bstay away\b/,
+  /\brefrain\b/,
+];
+
+function sentenceSplit(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+function mentionsTerm(sentence: string, term: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`, "i").test(sentence);
+}
+
+type MentionFrame = "recommendation" | "warning" | "unknown";
+
+/**
+ * What one sentence is doing with the food it names.
+ *
+ * Order matters: a negated recommendation is a warning, and an unrecognised
+ * sentence is `unknown` rather than a pass — the permissive direction is the one
+ * this check exists to close.
+ */
+function classifySentence(sentence: string): MentionFrame {
+  if (NEGATED_RECOMMENDATION.test(sentence)) return "warning";
+  if (RECOMMENDATION_CUES.some((cue) => cue.test(sentence))) return "recommendation";
+  if (REFUSAL_CUES.some((cue) => cue.test(sentence))) return "warning";
+  return "unknown";
+}
+
+/**
+ * True when every sentence that names the food or the allergen is a warning.
+ *
+ * "Every" is the strict reading on purpose: one recommendation sentence is enough
+ * to keep the mention unexempted, and an answer that both warns and recommends
+ * has recommended.
+ */
+function mentionIsWarning(prose: string, conflict: Conflict): boolean {
+  const terms = [conflict.id, ...(conflict.foods ?? [])].filter(
+    (term) => term.length > 0,
+  );
+  const mentioning = sentenceSplit(prose).filter((sentence) =>
+    terms.some((term) => mentionsTerm(sentence, term)),
+  );
+  if (mentioning.length === 0) return false;
+  return mentioning.every((sentence) => classifySentence(sentence) === "warning");
+}
+
+/** The conflicts whose mentions this answer is allowed to keep. */
+function exemptibleConflicts(
+  prose: string,
+  knownConflicts: readonly Conflict[],
+): readonly string[] {
+  return knownConflicts
+    .filter((conflict) => {
+      if (conflict.intent === "descriptive") return true;
+      if (conflict.intent === "prescriptive") return mentionIsWarning(prose, conflict);
+      return false;
+    })
+    .map((conflict) => conflict.id);
+}
+
+/**
+ * Drop the reasons that name a conflict the output checks are allowed to ignore.
+ *
+ * Allowed means the mention is legitimate: a logging turn saying what the user
+ * ate, or a prescriptive turn whose answer warns instead of recommends. Anything
+ * else keeps its reason and blocks — including a prescriptive answer that
+ * recommends the allergen, which is the case that motivated the rule.
+ */
 function postGateReasonsAfterKnownConflictExemptions(
   reasons: readonly string[],
   knownConflicts: readonly Conflict[],
+  prose: string,
 ): readonly string[] {
   const exemptIds = new Set(
-    knownConflicts.map((conflict) => conflict.id.toLowerCase()),
+    exemptibleConflicts(prose, knownConflicts).map((id) => id.toLowerCase()),
   );
 
   return reasons.filter((reason) => {
     const lowerReason = reason.toLowerCase();
     for (const id of exemptIds) {
-      if (lowerReason.includes(id)) {
-        return false;
-      }
+      if (lowerReason.includes(id)) return false;
     }
     return true;
   });
 }
 
-function knownConflictExemptionEvidence(
-  knownConflicts: readonly Conflict[],
-): string {
-  return `Known descriptive conflict(s) exempted: ${knownConflicts.map((c) => c.id).join(", ")}`;
+function knownConflictExemptionEvidence(exemptIds: readonly string[]): string {
+  return `Known conflict(s) exempted as warnings or logs: ${exemptIds.join(", ")}`;
 }
 
 function createLexicalBackstopCheck(
@@ -540,9 +691,11 @@ function createLexicalBackstopCheck(
   const check = checkPostGate(prose, userContext, interactions);
 
   if (knownConflicts && knownConflicts.length > 0 && !check.passed) {
+    const exemptIds = exemptibleConflicts(prose, knownConflicts);
     const blockReasons = postGateReasonsAfterKnownConflictExemptions(
       check.reasons,
       knownConflicts,
+      prose,
     );
 
     if (blockReasons.length === 0) {
@@ -550,7 +703,7 @@ function createLexicalBackstopCheck(
         OUTPUT_LEXICAL_BACKSTOP_CHECK,
         true,
         [],
-        knownConflictExemptionEvidence(knownConflicts),
+        knownConflictExemptionEvidence(exemptIds),
       );
     }
 
@@ -632,7 +785,12 @@ function createEntityCheck(
     (userContext?.allergies ?? []).map((allergy) => allergy.toLowerCase()),
   );
   const exemptAllergens = new Set(
-    knownConflicts.map((conflict) => conflict.id.toLowerCase()),
+    // Strictly descriptive: a FoodRef is a structured pointer at a catalog food,
+    // not prose that can warn, so a prescriptive turn may not point at the
+    // allergen even while its text says "do not eat this".
+    knownConflicts
+      .filter((conflict) => conflict.intent === "descriptive")
+      .map((conflict) => conflict.id.toLowerCase()),
   );
 
   for (const ref of output.foodRefs) {
@@ -1387,7 +1545,10 @@ async function* runTurn(
       );
     }
     yield createTurnEndEvent(result, nextMetadata);
-    return result;
+    // The returned result is what callers read (`consumeTurn`, the route's
+    // terminal frame), so the fallback has to reach it too — a fix applied only
+    // to the event would leave the user-facing reply empty, which is the bug.
+    return withReadableReply(result);
   }
 
   const isGateBlocked = result.stopReason === "gate_blocked";
@@ -1411,7 +1572,7 @@ async function* runTurn(
 
   yield createTurnEndEvent(result, nextMetadata);
 
-  return result;
+  return withReadableReply(result);
 }
 
 /**
@@ -1487,7 +1648,7 @@ export async function* turn(
       next = await body.next();
     }
 
-    return next.value;
+    return withReadableReply(next.value);
   } catch (err) {
     const result: TurnResult = {
       reply: crashReplyFor(ports, err),
