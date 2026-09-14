@@ -16,6 +16,11 @@ import {
   loadCorpus,
   missingSourceDirs,
 } from "../src/evidence/corpus";
+import {
+  assemblePinnedEvidence,
+  loadPinnedEvidenceFromCorpus,
+  PinnedBudgetError,
+} from "../src/evidence/pinnedSet";
 
 describe("committed evidence corpus", () => {
   const corpus = loadCorpus();
@@ -109,5 +114,69 @@ describe("CorpusError", () => {
     expect(error.problems).toEqual(["one", "two"]);
     expect(error.message).toContain("one");
     expect(error.message).toContain("two");
+  });
+});
+
+// ── the pinned set as context (S4 / #111) ──────────────────────────────────
+//
+// Three properties, all of them things a reviewer would otherwise have to trust:
+// byte-stability (the pinned region is what prompt-cache hits are made of),
+// self-identification (a model can only cite ids it was shown), and an enforced
+// budget (a corpus that outgrows RFC 0011 §3.7 must fail loudly).
+
+describe("assemblePinnedEvidence", () => {
+  const section = (id: string, text: string) => ({
+    id,
+    // Versioned, like the registry: a citation quotes the document version back.
+    sourceId: `${id.split("#")[0]}@2024`,
+    docVersion: "doc@2024",
+    sectionPath: `Path of ${id}`,
+    heading: `Heading of ${id}`,
+    ordinal: 1,
+    text,
+  });
+
+  it("orders by section id so the region is byte-stable", () => {
+    const first = assemblePinnedEvidence([section("b#x", "B"), section("a#y", "A")], "v1");
+    const second = assemblePinnedEvidence([section("a#y", "A"), section("b#x", "B")], "v1");
+    expect(first.text).toBe(second.text);
+    expect(first.evidenceSet.sectionIds).toEqual(["a#y", "b#x"]);
+  });
+
+  it("states each section's id and document, because those are what a citation names", () => {
+    const evidence = assemblePinnedEvidence([section("ods-x#y", "Vitamin X text.")], "v1");
+    expect(evidence.text).toContain("Section id: ods-x#y");
+    expect(evidence.text).toContain("Document: ods-x@2024");
+    expect(evidence.text).toContain("will be removed");
+    expect(evidence.text).toContain("Vitamin X text.");
+  });
+
+  it("refuses to build a set over the section budget", () => {
+    const many = Array.from({ length: 41 }, (_, index) => section(`s#${index}`, "x"));
+    expect(() => assemblePinnedEvidence(many, "v1")).toThrow(PinnedBudgetError);
+  });
+
+  it("refuses to build a set over the character budget", () => {
+    const huge = [section("s#1", "x".repeat(24001))];
+    expect(() => assemblePinnedEvidence(huge, "v1")).toThrow(/over budget/);
+  });
+
+  it("returns an empty set rather than an error when nothing is pinned", () => {
+    const evidence = assemblePinnedEvidence([], "v1");
+    expect(evidence.text).toBe("");
+    expect(evidence.evidenceSet).toEqual({ sourceVersion: "v1", sectionIds: [] });
+  });
+
+  it("gives every committed pinned section a citable id and a version", () => {
+    const evidence = loadPinnedEvidenceFromCorpus(loadCorpus(), "sources/snapshot.json@test");
+    expect(evidence.sections).toBe(25 + 4);
+    expect(evidence.chars).toBeGreaterThan(0);
+    for (const id of evidence.evidenceSet.sectionIds) {
+      expect(id).toMatch(/^[a-z0-9-]+#[a-z0-9-]+$/);
+    }
+    // Every block names its document, which is what a citation quotes back.
+    const documentLines = evidence.text.match(/^Document: .+$/gm) ?? [];
+    expect(documentLines).toHaveLength(evidence.sections);
+    expect(documentLines.some((line) => line.includes("ods-vitamin-k@2024"))).toBe(true);
   });
 });

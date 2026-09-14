@@ -140,6 +140,13 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
    */
   readonly evidenceSet?: TurnEvidenceSet;
   /**
+   * The evidence text that goes into the pinned region (RFC 0011 §3.7). Kept
+   * next to `evidenceSet` because they are two views of one thing: what the model
+   * sees, and what the gate will allow it to cite. Wiring one without the other
+   * produces either unciteable evidence or citable text the model never read.
+   */
+  readonly evidenceText?: string;
+  /**
    * Registry lookup for the citation check (RFC 0011 §3.5). Absent means the
    * registry is unavailable, which the gate reads as fail-closed: no citation
    * survives a turn that could not check it.
@@ -1379,6 +1386,7 @@ function createRunTurnInput(
     userInput: input.content,
     inputDirective,
     userId: ports.userId,
+    evidenceText: ports.evidenceText,
     adapter: ports.adapter,
     tracer: ports.tracer,
     eventLog: ports.eventLog,

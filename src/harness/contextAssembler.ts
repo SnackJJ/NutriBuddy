@@ -50,6 +50,13 @@ export interface PinnedRegion {
   readonly sqlTemplates?: string;
   /** 当前可用工具的 JSON schema 列表。 */
   readonly toolDefs?: readonly ToolDef[];
+  /**
+   * 依据层文本（RFC 0011 §3.7）：本轮可引用的证据段落。
+   *
+   * 放在 pinned region 而不是 dynamic region：它按 sectionId 排序、跨轮字节稳定，
+   * 因此能吃 prompt cache；放进 dynamic 等于每轮都让它失效。
+   */
+  readonly evidence?: string;
 }
 
 /**
@@ -65,6 +72,10 @@ export function assemblePinnedRegion(pinned: PinnedRegion): string {
 
   if (pinned.sqlTemplates) {
     sections.push(pinned.sqlTemplates);
+  }
+
+  if (pinned.evidence) {
+    sections.push(pinned.evidence);
   }
 
   if (pinned.toolDefs && pinned.toolDefs.length > 0) {

@@ -46,6 +46,7 @@ import {
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
 import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
 import { assertSessionSubject, getSessionFromHeader } from "@/lib/auth";
+import { loadPinnedEvidence, type LoadedEvidence } from "@/evidence/registry";
 import {
   checkQuota,
   parseQuotaLimits,
@@ -100,6 +101,35 @@ const turnCostBounds = buildTurnCostBounds({
 });
 
 const quotaLimits = parseQuotaLimits();
+
+/**
+ * The pinned evidence set, loaded once per instance (RFC 0011 §3.7).
+ *
+ * Once, not per request: the set is byte-stable by design, and the whole point of
+ * putting it in the pinned region is that it does not change between turns. A
+ * database that cannot be read at cold start leaves the product answering without
+ * citable evidence — the pre-S4 behaviour — because "no evidence" is a smaller
+ * failure than "evidence nothing checked", and the citation gate fails closed on
+ * the same principle.
+ */
+let evidencePromise: Promise<LoadedEvidence | null> | null = null;
+
+function evidence(): Promise<LoadedEvidence | null> {
+  if (!evidencePromise) {
+    evidencePromise = (async () => {
+      try {
+        return await loadPinnedEvidence(createServerSupabase());
+      } catch (err) {
+        console.error(
+          "[chat] evidence registry unavailable; answers will carry no citations",
+          err,
+        );
+        return null;
+      }
+    })();
+  }
+  return evidencePromise;
+}
 
 // ─── Tool wiring ───────────────────────────────────────────────────────
 
@@ -411,6 +441,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
+  // Evidence is loaded (once per instance) before assembly: a turn that cites
+  // needs both halves — the text the model reads and the set the gate checks.
+  const loaded = await evidence();
+
   // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)
   const assembly = assembleChatTurnPorts({
     kind: turnInput.tag,
@@ -429,6 +463,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     toolSchemas: tools ? toolSchemas : undefined,
     userContext,
     interactionStore,
+    evidenceText: loaded?.evidence.text,
+    evidenceSet: loaded?.evidence.evidenceSet,
+    citationRegistry: loaded?.registry,
     requireTools: turnInput.tag === "utterance",
   });
 

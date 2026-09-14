@@ -268,6 +268,8 @@ export interface RunTurnInput {
    * input — the pinned region stays byte-stable.
    */
   readonly inputDirective?: string;
+  /** Pinned evidence text for this turn (RFC 0011 §3.7); see `evidenceSet`. */
+  readonly evidenceText?: string;
 }
 
 export type TurnResult = TerminalResult;
@@ -405,6 +407,7 @@ export async function* run(
     queryCatalog,
     clock,
     inputDirective,
+    evidenceText,
   } = input;
 
   const nowMs = clock ? () => clock().getTime() : () => Date.now();
@@ -443,6 +446,10 @@ export async function* run(
     userProfile: gateCtx?.pinnedRegion || undefined,
     sqlTemplates: templateSection,
     toolDefs,
+    // Evidence text is assembled by the caller (it owns the corpus) and rides the
+    // pinned region; absent means this turn may cite nothing, which the citation
+    // gate enforces rather than trusting.
+    evidence: evidenceText,
   };
 
   // working set 随步骤增长：工具结果回灌为 tool 消息，未交卷的模型产出

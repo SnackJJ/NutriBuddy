@@ -6,7 +6,9 @@
 // all (tests, the CLI), where the answer is "unavailable" and therefore "no
 // citation survives".
 
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { assemblePinnedEvidence, type EvidenceSection, type PinnedEvidence } from "./pinnedSet";
 import type {
   CitationRegistry,
   CitationRegistryEntry,
@@ -43,5 +45,102 @@ export function createSupabaseCitationRegistry(client: SupabaseClient): Citation
         ];
       });
     },
+  };
+}
+
+interface PinnedRow {
+  readonly id: string;
+  readonly source_id: string;
+  readonly section_path: string;
+  readonly heading: string | null;
+  readonly ordinal: number;
+  readonly text: string;
+  readonly anchor: string | null;
+  // PostgREST types a to-one embed as an array; the value is one object at
+  // runtime, which the flatMap below tolerates either way.
+  readonly sources:
+    | readonly {
+        readonly doc_version?: unknown;
+        readonly status?: unknown;
+      }[]
+    | undefined;
+}
+
+/**
+ * The corpus version, derived from what is actually in the registry.
+ *
+ * Built from the active documents' (id, content_hash) pairs rather than read from
+ * a file, because the route runs where the corpus files may not be deployed and
+ * because the version has to describe the rows a turn was judged against, not the
+ * rows someone intended to ingest. Sorted before hashing, so the same registry
+ * always produces the same label.
+ */
+export function corpusVersionFrom(
+  sources: readonly { readonly id: string; readonly contentHash: string }[],
+): string {
+  const canonical = [...sources]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((source) => `${source.id}:${source.contentHash}`)
+    .join("\n");
+  return `corpus:${createHash("sha256").update(canonical).digest("hex").slice(0, 12)}`;
+}
+
+export interface LoadedEvidence {
+  readonly evidence: PinnedEvidence;
+  readonly registry: CitationRegistry;
+}
+
+/**
+ * Load the pinned set the route puts in context, or nothing.
+ *
+ * Failure is not fatal here on purpose: the product can answer without citable
+ * evidence (that is the pre-S4 behaviour), and a citation is never allowed to be
+ * unverifiable, so "no evidence" is a smaller failure than "evidence nobody
+ * checked". The catch is at the call site, which logs it.
+ */
+export async function loadPinnedEvidence(
+  client: SupabaseClient,
+): Promise<LoadedEvidence> {
+  const { data: sourceRows, error: sourceError } = await client
+    .from("sources")
+    .select("id, content_hash")
+    .eq("status", "active");
+  if (sourceError) throw new Error(`sources read failed: ${sourceError.message}`);
+
+  const sources = (sourceRows ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    contentHash: String(row.content_hash),
+  }));
+
+  const { data: pinnedRows, error: pinnedError } = await client
+    .from("source_sections")
+    .select(
+      "id, source_id, section_path, heading, ordinal, text, anchor, sources!inner(doc_version, status)",
+    )
+    .eq("pinned", true);
+  if (pinnedError) throw new Error(`pinned sections read failed: ${pinnedError.message}`);
+
+  const sections: EvidenceSection[] = (pinnedRows ?? []).flatMap(
+    (row: PinnedRow) => {
+      const source = row.sources?.[0];
+      if (!source || String(source.status) !== "active") return [];
+      return [
+        {
+          id: String(row.id),
+          sourceId: String(row.source_id),
+          docVersion: String(source.doc_version),
+          sectionPath: String(row.section_path),
+          heading: row.heading === null ? null : String(row.heading),
+          ordinal: Number(row.ordinal),
+          text: String(row.text),
+          anchor: row.anchor === null ? undefined : String(row.anchor),
+        },
+      ];
+    },
+  );
+
+  return {
+    evidence: assemblePinnedEvidence(sections, corpusVersionFrom(sources)),
+    registry: createSupabaseCitationRegistry(client),
   };
 }

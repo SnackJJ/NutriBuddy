@@ -193,14 +193,20 @@ describe("chat route uses the session-scoped client", () => {
     expect(routeSource).toContain("createUserSupabase");
     expect(routeSource).toContain("getSessionFromHeader");
 
-    // RFC 0008 §3.3 narrows that rule for exactly one path: the trace write.
-    // Migration 0011 grants `append_turn_event`'s EXECUTE to service_role alone,
-    // because the audit surface must not be writable by the subject it audits —
-    // the same door 0007 opened for the profile API. The assertion is therefore
-    // "the service role appears once, inside the trace store factory" rather
-    // than "never".
+    // Two paths are allowed to use the service role, and the assertion is
+    // therefore "exactly these two, and no user data on either" rather than
+    // "never":
+    //
+    //   * the trace write (RFC 0008 §3.3). Migration 0011 grants
+    //     `append_turn_event`'s EXECUTE to service_role alone, because the audit
+    //     surface must not be writable by the subject it audits — the same door
+    //     0007 opened for the profile API.
+    //   * the pinned evidence load (RFC 0011 §3.7). The corpus is public
+    //     read-only data that is identical for every user, and it is read once
+    //     per instance rather than per request; going through a session client
+    //     would mean re-reading it per request for no confidentiality gained.
     const serviceRoleUses = routeSource.match(/createServerSupabase\(\)/g) ?? [];
-    expect(serviceRoleUses).toHaveLength(1);
+    expect(serviceRoleUses).toHaveLength(2);
 
     const traceFactory = routeSource.slice(
       routeSource.indexOf("function createTraceStore"),
@@ -208,6 +214,16 @@ describe("chat route uses the session-scoped client", () => {
     );
     expect(traceFactory).toContain("createServerSupabase()");
     expect(traceFactory).toContain("createSupabaseTraceStore");
+
+    const evidenceLoader = routeSource.slice(
+      routeSource.indexOf("function evidence()"),
+      routeSource.indexOf("─── Tool wiring"),
+    );
+    expect(evidenceLoader).toContain("createServerSupabase()");
+    expect(evidenceLoader).toContain("loadPinnedEvidence");
+    // The load takes no user identity: it is the same rows for everybody, and a
+    // parameter that could scope it would invite a per-user corpus.
+    expect(evidenceLoader).not.toContain("sessionUserId");
   });
 });
 

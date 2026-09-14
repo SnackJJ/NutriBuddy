@@ -13,7 +13,8 @@ import type {
   ProposalStore,
 } from "./logMeal";
 import type { TraceStore } from "./traceStore";
-import type { TurnPorts, TurnResult } from "./turn";
+import type { TurnEvidenceSet, TurnPorts, TurnResult } from "./turn";
+import type { CitationRegistry } from "./citationGate";
 import { resolveConfirmPorts } from "./turn";
 
 export type TurnAssemblyKind =
@@ -48,6 +49,15 @@ export interface CreateTurnAssemblyInput {
   readonly toolSchemas?: readonly ToolSchema[];
   readonly userContext?: UserContext;
   readonly interactionStore?: InteractionStore;
+  /**
+   * Evidence for this turn (RFC 0011 §3.4/§3.7). The text is what the model
+   * reads; the set is what the citation gate allows; the registry is what it
+   * checks against. Supplied together by whoever owns the corpus, and simply
+   * absent when nobody does — in which case no citation is legal.
+   */
+  readonly evidenceText?: string;
+  readonly evidenceSet?: TurnEvidenceSet;
+  readonly citationRegistry?: CitationRegistry;
   /**
    * Trace port (RFC 0008 §3.2). Optional because the CLI and scripted tests run
    * without a database; the chat route always supplies one.
@@ -138,6 +148,9 @@ export function createTurnAssembly(
   const ports: TurnPorts = {
     adapter: input.adapter,
     tracer: input.tracer,
+    evidenceText: input.evidenceText,
+    evidenceSet: input.evidenceSet,
+    citationRegistry: input.citationRegistry,
     clock: input.clock,
     eventLog: input.eventLog,
     history: input.history,
