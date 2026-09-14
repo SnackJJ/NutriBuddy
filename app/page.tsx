@@ -57,10 +57,15 @@ export default function Home() {
         </div>
       </div>
 
-      <p className="text-xs leading-relaxed text-gray-500">
-        本项目提供营养信息与记录工具，<strong>不构成医疗建议</strong>
-        ，也不能替代医生或注册营养师。有疾病、正在服药或怀孕时，请先咨询专业人士。
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs leading-relaxed text-gray-500">
+          本项目提供营养信息与记录工具，<strong>不构成医疗建议</strong>
+          ，也不能替代医生或注册营养师。有疾病、正在服药或怀孕时，请先咨询专业人士。
+        </p>
+        <Link href="/privacy" className="text-xs text-blue-700 underline">
+          隐私与数据：我们收集什么、留多久、怎么删除
+        </Link>
+      </div>
     </main>
   );
 }

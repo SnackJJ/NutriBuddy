@@ -70,7 +70,12 @@ export function DeleteAccountControl({ onDelete, email }: DeleteAccountControlPr
         This removes <strong>{email}</strong> and everything recorded under it: your profile
         (allergies, medications, targets), meal logs, proposals and the turn traces.
         It cannot be undone. The shared food catalog and evidence corpus are not your
-        data and are not affected.
+        data and are not affected. Content already sent to the model provider when an
+        answer was generated is also outside this deletion — see the{" "}
+        <a className="underline" href="/privacy" target="_blank" rel="noreferrer">
+          privacy note
+        </a>
+        .
       </p>
 
       {!expanded ? (
