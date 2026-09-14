@@ -49,6 +49,7 @@ import {
   type CitationRegistry,
 } from "./citationGate";
 import { checkCitationAssertions } from "./citationAssertion";
+import { mentionIsWarning } from "./mentionFrame";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -627,89 +628,8 @@ function createOutputGateCheck(
  * two regenerations and hands the user a worse answer for doing the right thing.
  *
  * Deterministic and lexical, like the backstop it feeds — the same family as the
- * rest of the output checks, not a second judge. #128 (assertion phrases) is the
- * general form of this check; this is the narrow version the allergen path needs
- * now.
+ * rest of the output checks, not a second judge.
  */
-/**
- * A recommendation that is being refused: "I can't recommend shrimp".
- *
- * Checked before the recommendation cues, because the word "recommend" appears
- * in the most common correct refusal, and reading it as a recommendation would
- * block exactly the answers the refuse-and-cite path is trying to produce.
- */
-const NEGATED_RECOMMENDATION =
-  /\b(can't|cannot|won't|will not|don't|do not|wouldn't|shouldn't|not able to)\s+(\w+\s+){0,2}recommend\b/;
-
-const RECOMMENDATION_CUES: readonly RegExp[] = [
-  /\bis (fine|ok|okay|safe|healthy|good)\b/,
-  /\byou (can|may|should) (eat|have|try|enjoy|include)\b/,
-  /\brecommend\b/,
-  /\bgo ahead\b/,
-  /\benjoy\b/,
-  /\bsafe (for you|to eat|to have)\b/,
-  /\bgood (choice|option|idea)\b/,
-  /\bfine to eat\b/,
-];
-
-const REFUSAL_CUES: readonly RegExp[] = [
-  /\bavoid\b/,
-  /\bdo not\b|\bdon't\b/,
-  /\bcannot\b|\bcan't\b|\bwon't\b|\bwill not\b/,
-  /\bnot (safe|recommended|advisable|a good)\b/,
-  /\boff the table\b/,
-  /\ballerg/,
-  /\brisk\b/,
-  /\bstay away\b/,
-  /\brefrain\b/,
-];
-
-function sentenceSplit(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 0);
-}
-
-function mentionsTerm(sentence: string, term: string): boolean {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(sentence);
-}
-
-type MentionFrame = "recommendation" | "warning" | "unknown";
-
-/**
- * What one sentence is doing with the food it names.
- *
- * Order matters: a negated recommendation is a warning, and an unrecognised
- * sentence is `unknown` rather than a pass — the permissive direction is the one
- * this check exists to close.
- */
-function classifySentence(sentence: string): MentionFrame {
-  if (NEGATED_RECOMMENDATION.test(sentence)) return "warning";
-  if (RECOMMENDATION_CUES.some((cue) => cue.test(sentence))) return "recommendation";
-  if (REFUSAL_CUES.some((cue) => cue.test(sentence))) return "warning";
-  return "unknown";
-}
-
-/**
- * True when every sentence that names the food or the allergen is a warning.
- *
- * "Every" is the strict reading on purpose: one recommendation sentence is enough
- * to keep the mention unexempted, and an answer that both warns and recommends
- * has recommended.
- */
-function mentionIsWarning(prose: string, conflict: Conflict): boolean {
-  const terms = [conflict.id, ...(conflict.foods ?? [])].filter(
-    (term) => term.length > 0,
-  );
-  const mentioning = sentenceSplit(prose).filter((sentence) =>
-    terms.some((term) => mentionsTerm(sentence, term)),
-  );
-  if (mentioning.length === 0) return false;
-  return mentioning.every((sentence) => classifySentence(sentence) === "warning");
-}
-
 /** The conflicts whose mentions this answer is allowed to keep. */
 function exemptibleConflicts(
   prose: string,
@@ -718,7 +638,9 @@ function exemptibleConflicts(
   return knownConflicts
     .filter((conflict) => {
       if (conflict.intent === "descriptive") return true;
-      if (conflict.intent === "prescriptive") return mentionIsWarning(prose, conflict);
+      if (conflict.intent === "prescriptive") {
+        return mentionIsWarning(prose, [conflict.id, ...(conflict.foods ?? [])]);
+      }
       return false;
     })
     .map((conflict) => conflict.id);
