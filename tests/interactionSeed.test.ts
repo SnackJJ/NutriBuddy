@@ -90,3 +90,50 @@ describe("interaction rule seed", () => {
     expect(sql).toMatch(/grant select on public\.drug_nutrient_interactions to authenticated/);
   });
 });
+
+// ── the README a new reader actually follows (S5 / #114) ──────────────────
+
+describe("README", () => {
+  const readme = readFileSync("README.md", "utf8");
+  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
+    version: string;
+    scripts: Record<string, string>;
+  };
+
+  it("has a version, so reports and traces can name the release", () => {
+    // `appVersion` in a report and `turns.app_version` in a trace both read this;
+    // "0.0.0-unversioned" was the honest answer until now.
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("only quotes commands that exist", () => {
+    const referenced = [...readme.matchAll(/`npm run ([a-z:]+)`/g)].map((match) => match[1]);
+    expect(referenced.length).toBeGreaterThan(3);
+    for (const name of referenced) {
+      expect(Object.keys(pkg.scripts), `README quotes a script that does not exist: ${name}`).toContain(name);
+    }
+  });
+
+  it("states the three invariants the harness exists for", () => {
+    expect(readme).toContain("三条不变量");
+    expect(readme).toMatch(/数字只能来自目录事实/);
+    expect(readme).toMatch(/实体只能由 resolver 铸造/);
+    expect(readme).toMatch(/写入只能来自用户确认过的提案/);
+  });
+
+  it("says where the numbers come from, including that both arms get the same profile", () => {
+    // The ablation's validity is the part a reader would otherwise have to trust.
+    expect(readme).toContain("数字从哪来");
+    expect(readme).toContain("两臂拿到相同的用户档案");
+    expect(readme).toContain("不可比");
+  });
+
+  it("points at the architecture documents rather than restating them", () => {
+    expect(readme).toContain("docs/ADD.md");
+    expect(readme).toContain("docs/adr/");
+  });
+
+  it("carries the medical boundary", () => {
+    expect(readme).toContain("不构成医疗建议");
+  });
+});

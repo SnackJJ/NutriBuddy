@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "scripts": {
     "sandcastle": "npx tsx .sandcastle/main.mts",
     "sandcastle:deepseek": "cp .sandcastle/.env.deepseek .sandcastle/.env && npx tsx .sandcastle/main.mts",
