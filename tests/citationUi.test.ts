@@ -116,3 +116,27 @@ describe("the route's citation index (#112)", () => {
     expect(source.match(/loadPinnedEvidence\(/g) ?? []).toHaveLength(1);
   });
 });
+
+// ── the landing page's contract (S5 / #116) ────────────────────────────────
+
+describe("landing page", () => {
+  const homeSource = () => readFileSync("app/page.tsx", "utf-8");
+
+  it("gives a signed-out visitor both entry points", () => {
+    const source = homeSource();
+    expect(source).toContain('href="/chat"');
+    expect(source).toContain('href="/profile"');
+  });
+
+  it("states the medical boundary in the page itself, not only in a policy doc", () => {
+    // The product refuses some questions by design; a reader who does not know
+    // that reads a refusal as a bug.
+    expect(homeSource()).toContain("不构成医疗建议");
+  });
+
+  it("does not make the boundary dismissible", () => {
+    const source = homeSource();
+    expect(source).not.toContain("dismiss");
+    expect(source).not.toContain("onClose");
+  });
+});
