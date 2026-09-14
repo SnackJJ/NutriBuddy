@@ -810,10 +810,19 @@ export async function main(
       return 1;
     }
     compare = {
+      // The identity arguments are the whole point of the comparison: without
+      // them a scripted report and a live one (or two different datasets) print
+      // deltas as if the numbers described the same measurement.
       result: compareSummaries(
         before.summary,
         buildComparableSummary(summary.eval, summary.traces),
         deps.compareThresholds ?? DEFAULT_COMPARE_THRESHOLDS,
+        {
+          beforeDatasetHash: before.datasetHash,
+          afterDatasetHash: summary.env.datasetHash,
+          beforeMode: before.mode,
+          afterMode: summary.env.mode,
+        },
       ),
       beforeId: args.compareTo,
     };

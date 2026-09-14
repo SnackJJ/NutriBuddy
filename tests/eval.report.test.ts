@@ -359,6 +359,27 @@ describe("main", () => {
     expect(markdown).toContain(`## 与 \`${firstId}\` 对比`);
   });
 
+  it("refuses to judge a live report against a scripted one", async () => {
+    const fs = memoryFs();
+    // A recorded run of the other mode, with the same dataset.
+    await main([], reportDeps(fs, { now: () => new Date("2026-09-13T12:00:00.000Z") }));
+    const recordedId = parseIndex(fs.files.get("reports/index.json") ?? "")[0].reportId;
+
+    const code = await main(
+      ["--compare", recordedId, "--live"],
+      reportDeps(fs, {
+        now: () => new Date("2026-09-13T13:00:00.000Z"),
+        runEval: async () => fixedResults(),
+      }),
+    );
+
+    expect(code).toBe(0);
+    const markdown = fs.files.get("reports/2026-09-13T13-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("**不可比");
+    expect(markdown).toContain("mode differs");
+    expect(markdown).not.toContain("倒退项");
+  });
+
   it("refuses to compare against a reportId that is not in the index", async () => {
     const fs = memoryFs();
     const errors: string[] = [];
