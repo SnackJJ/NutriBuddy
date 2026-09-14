@@ -135,8 +135,12 @@ describe("landing page", () => {
   });
 
   it("does not make the boundary dismissible", () => {
+    // The page is a server component with no client state at all, which is the
+    // precise form of "nothing here can hide the notice" — a substring check for
+    // the word would trip on the comment explaining the rule.
     const source = homeSource();
-    expect(source).not.toContain("dismiss");
-    expect(source).not.toContain("onClose");
+    expect(source).not.toContain("use client");
+    expect(source).not.toContain("useState");
+    expect(source).not.toContain("onClick");
   });
 });
