@@ -173,6 +173,86 @@ begin
     raise exception '0011: the trace surface is reachable by a user-facing role';
   end if;
 
+  -- 0014's premise: the three tables that predate RFC 0006 §7 carry exactly the
+  -- privileges the confirm path needs and none of the default grants. Both
+  -- directions are asserted: a missing grant breaks confirm
+  -- (npm run smoke:confirm is the live form of this), and a leftover default
+  -- grant is the state this migration exists to end.
+  if not has_table_privilege('authenticated', 'public.proposals',
+                             'select, insert, update')
+     or not has_table_privilege('authenticated', 'public.meal_logs',
+                                'select, insert')
+     or not has_table_privilege('authenticated', 'public.user_profile',
+                                'select')
+  then
+    raise exception '0014: a grant the confirm path needs is missing';
+  end if;
+
+  -- has_table_privilege returns true only when *every* listed privilege is
+  -- held, so the negatives are one call per privilege — a comma list here would
+  -- pass while a single dangerous grant survived.
+  if has_table_privilege('authenticated', 'public.proposals', 'delete')
+     or has_table_privilege('authenticated', 'public.proposals', 'truncate')
+     or has_table_privilege('authenticated', 'public.proposals', 'references')
+     or has_table_privilege('authenticated', 'public.proposals', 'trigger')
+     or has_table_privilege('authenticated', 'public.meal_logs', 'update')
+     or has_table_privilege('authenticated', 'public.meal_logs', 'delete')
+     or has_table_privilege('authenticated', 'public.meal_logs', 'truncate')
+     or has_table_privilege('authenticated', 'public.meal_logs', 'references')
+     or has_table_privilege('authenticated', 'public.meal_logs', 'trigger')
+     or has_table_privilege('authenticated', 'public.user_profile', 'insert')
+     or has_table_privilege('authenticated', 'public.user_profile', 'update')
+     or has_table_privilege('authenticated', 'public.user_profile', 'delete')
+     or has_table_privilege('authenticated', 'public.user_profile', 'truncate')
+     or has_table_privilege('authenticated', 'public.user_profile', 'references')
+     or has_table_privilege('authenticated', 'public.user_profile', 'trigger')
+     or has_table_privilege('anon', 'public.proposals', 'select, insert, update, delete')
+     or has_table_privilege('anon', 'public.meal_logs', 'select, insert, update, delete')
+     or has_table_privilege('anon', 'public.user_profile', 'select, insert, update, delete')
+  then
+    raise exception '0014: a default grant survives on a legacy table';
+  end if;
+
+  -- The policy set is part of the claim: ALTER POLICY must rewrite the
+  -- expressions without dropping a policy, so a count is asserted alongside the
+  -- form (3 + 2 + 1 = 6, after 0007 dropped user_profile's write policies).
+  select count(*) into applied from pg_policies
+   where schemaname = 'public'
+     and tablename in ('proposals', 'meal_logs', 'user_profile');
+  if applied <> 6 then
+    raise exception '0014: expected 6 policies on the legacy tables, found %',
+      applied;
+  end if;
+
+  select string_agg(p.tablename || '.' || p.policyname, ', ') into missing
+    from pg_policies p
+   where p.schemaname = 'public'
+     and p.tablename in ('proposals', 'meal_logs', 'user_profile')
+     and coalesce(p.qual, p.with_check) !~* 'select\s+auth\.uid\(\)';
+  if missing is not null then
+    raise exception '0014: policy still calls auth.uid() per row: %', missing;
+  end if;
+
+  -- 0014 adds no index, which is only safe while the policy column is already
+  -- covered. Asserting the property rather than the absence of a change is what
+  -- makes that durable.
+  select string_agg(t.tablename, ', ') into missing
+    from (values ('proposals'), ('meal_logs'), ('user_profile'))
+      as t(tablename)
+   where not exists (
+     select 1
+       from pg_index i
+       join pg_class c on c.oid = i.indrelid
+       join pg_namespace n on n.oid = c.relnamespace
+       join pg_attribute a on a.attrelid = c.oid and a.attnum = i.indkey[0]
+      where n.nspname = 'public'
+        and c.relname = t.tablename
+        and a.attname = 'user_id'
+   );
+  if missing is not null then
+    raise exception '0014: no index leads with the policy column on: %', missing;
+  end if;
+
   -- The local stack's own version is the premise of everything above, and it is
   -- the one part of "local replay ≈ production" that config.toml states.
   if current_setting('server_version_num')::int / 10000

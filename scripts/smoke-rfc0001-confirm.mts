@@ -1,49 +1,28 @@
 /**
- * Live Supabase smoke for RFC 0001 confirm/void RPCs.
+ * Live Supabase smoke for RFC 0001 confirm/void RPCs — and, since #120, for the
+ * grants those RPCs run on.
  *
  * Usage (from repo root, with .env.local loaded):
  *   npx tsx --env-file=.env.local scripts/smoke-rfc0001-confirm.mts
  *
  * Requires migration 0009 applied (commit_proposal_and_insert_meal + void_proposal).
- * Creates a temporary auth user, exercises commit / void / not_committable, then deletes the user.
+ * Creates two temporary auth users — one who commits and voids, one who tries to
+ * read the first one's rows — then deletes both.
+ *
+ * Why this is the acceptance for migration 0014: the RPCs are security invoker,
+ * so every statement inside them runs on the caller's grants, and the unit tests
+ * inject a fake client that has no grants at all. Nothing else in the repository
+ * exercises `grant select, insert, update on proposals` / `grant insert on
+ * meal_logs` against a real database.
+ *
+ * Target selection: the process environment wins over `.env.local`, so exporting
+ * a URL is how a run is aimed at the local stack instead of the project the file
+ * points at (RFC 0008 §3.8 work; the other smoke script has the same rule).
  */
 
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-function loadEnvLocal(): Record<string, string> {
-  const env: Record<string, string> = { ...process.env } as Record<
-    string,
-    string
-  >;
-  try {
-    for (const line of readFileSync(".env.local", "utf8").split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const i = t.indexOf("=");
-      if (i < 0) continue;
-      let k = t.slice(0, i).trim();
-      let v = t.slice(i + 1).trim();
-      if (
-        (v.startsWith('"') && v.endsWith('"')) ||
-        (v.startsWith("'") && v.endsWith("'"))
-      ) {
-        v = v.slice(1, -1);
-      }
-      env[k] = v;
-    }
-  } catch {
-    // process.env only
-  }
-  return env;
-}
-
-function requireEnv(env: Record<string, string>, key: string): string {
-  const v = env[key];
-  if (!v) throw new Error(`Missing ${key}`);
-  return v;
-}
+import { loadEnvLocal, requireEnv, isLocalTarget } from "./lib/env";
 
 function log(step: string, ok: boolean, detail?: string): void {
   const mark = ok ? "PASS" : "FAIL";
@@ -63,6 +42,35 @@ async function rpcExists(
   return { exists: true, detail: `${error.code ?? "err"}: ${error.message}` };
 }
 
+/** A denial, with the door that denied it named. */
+const NO_TABLE_PRIVILEGE = /permission denied for (table|relation)/i;
+/** A policy refused the row — the same SQLSTATE as the privilege check above. */
+const RLS_DENIED = /row-level security/i;
+
+/**
+ * Report a statement that must be refused.
+ *
+ * Postgres answers both "no privilege on this table" and "a policy rejected this
+ * row" with 42501, so the code alone cannot tell a closed grant from a working
+ * policy — and migration 0014's claim is specifically the first kind. Checking
+ * the message is what makes the assertion able to fail for the right reason; a
+ * code-only version passes with the default grants restored (#124's lesson).
+ */
+async function denied(
+  label: string,
+  result: { error: { code?: string; message?: string } | null },
+  pattern: RegExp,
+): Promise<boolean> {
+  const error = result.error;
+  if (!error) {
+    log(label, false, "the statement unexpectedly succeeded");
+    return false;
+  }
+  const ok = error.code === "42501" && pattern.test(error.message ?? "");
+  log(label, ok, `code=${error.code ?? "-"} message=${error.message ?? "-"}`);
+  return ok;
+}
+
 async function main(): Promise<void> {
   const env = loadEnvLocal();
   const url = requireEnv(env, "NEXT_PUBLIC_SUPABASE_URL");
@@ -75,6 +83,21 @@ async function main(): Promise<void> {
 
   console.log("=== RFC 0001 confirm/void smoke ===");
   console.log(`project: ${url}`);
+
+  // This script now creates and deletes two accounts, so a hosted target has to
+  // be asked for explicitly — the accident it prevents is a `.env.local` aimed
+  // at the real project turning a local run into one against real users. Same
+  // rule as scripts/smoke-rfc0008-trace.mts.
+  if (!isLocalTarget(url) && env.SMOKE_ALLOW_REMOTE !== "1") {
+    console.log(`
+refusing to run against ${url}
+
+This script creates and deletes two auth accounts plus rows in proposals,
+meal_logs and user_profile. Set SMOKE_ALLOW_REMOTE=1 to target a hosted project
+on purpose (for example to check 0009/0014 in production).
+`);
+    process.exit(2);
+  }
 
   // ── tables ──────────────────────────────────────────────────────────
   for (const table of ["proposals", "meal_logs"] as const) {
@@ -138,6 +161,9 @@ Then re-run:
   log("createUser", true, `id=${userId.slice(0, 8)}…`);
 
   let failed = false;
+  // The stranger is created inside the try and deleted in the finally, so a
+  // failure before it exists must not try to delete it.
+  let strangerId: string | undefined;
   try {
     const browser = createClient(url, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -287,12 +313,117 @@ Then re-run:
       log("missing proposal", status === "not_committable", JSON.stringify(miss));
       if (status !== "not_committable") failed = true;
     }
+
+    // ── 0014: the privilege layer, not just RLS ───────────────────────
+    //
+    // A profile row only exists if this smoke creates one, and a stranger
+    // reading zero rows from an empty table proves nothing. So the owner gets a
+    // row and confirms they can see it first; that read is the positive control
+    // for the three cross-account checks below.
+    const { error: profileSeedErr } = await admin.from("user_profile").insert({
+      user_id: userId,
+      allergies: ["peanut"],
+      medications: [],
+      goal_type: "maintain",
+    });
+    log("seed user_profile row for the owner", !profileSeedErr, profileSeedErr?.message);
+    if (profileSeedErr) failed = true;
+
+    const { data: ownProfile, error: ownProfileErr } = await user
+      .from("user_profile")
+      .select("id")
+      .eq("user_id", userId);
+    log(
+      "owner reads own profile",
+      !ownProfileErr && (ownProfile?.length ?? 0) === 1,
+      ownProfileErr?.message ?? `rows=${ownProfile?.length ?? 0}`,
+    );
+    if (ownProfileErr || (ownProfile?.length ?? 0) !== 1) failed = true;
+
+    const strangerEmail = `smoke-stranger-${randomUUID().slice(0, 8)}@example.com`;
+    const strangerPassword = `Smoke-${randomUUID().slice(0, 12)}aA1!`;
+    const { data: strangerCreated, error: strangerCreateErr } =
+      await admin.auth.admin.createUser({
+        email: strangerEmail,
+        password: strangerPassword,
+        email_confirm: true,
+      });
+    if (strangerCreateErr || !strangerCreated.user) {
+      log("createUser stranger", false, strangerCreateErr?.message ?? "no user");
+      process.exit(1);
+    }
+    strangerId = strangerCreated.user.id;
+
+    const { data: strangerSigned, error: strangerSignErr } = await browser.auth
+      .signInWithPassword({ email: strangerEmail, password: strangerPassword });
+    if (strangerSignErr || !strangerSigned.session) {
+      log("stranger signIn", false, strangerSignErr?.message ?? "no session");
+      process.exit(1);
+    }
+    const stranger = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { Authorization: `Bearer ${strangerSigned.session.access_token}` },
+      },
+    });
+
+    for (const table of ["proposals", "meal_logs", "user_profile"] as const) {
+      const { data, error } = await stranger.from(table).select("id");
+      const rows = data?.length ?? 0;
+      log(
+        `stranger reads ${table}`,
+        !error && rows === 0,
+        error?.message ?? `rows=${rows}`,
+      );
+      if (error || rows !== 0) failed = true;
+    }
+
+    // The other half of 0014: the default grants are gone, so these are refused
+    // by the privilege check rather than by a policy. Both denials are 42501,
+    // which is exactly why the message has to be asserted too — a code-only
+    // check passes with the default grants still in place (#124).
+    failed = !(await denied(
+      "owner cannot delete meal_logs",
+      await user.from("meal_logs").delete().eq("user_id", userId),
+      NO_TABLE_PRIVILEGE,
+    )) || failed;
+
+    failed = !(await denied(
+      "owner cannot update meal_logs",
+      await user.from("meal_logs").update({ food_name: "tampered" }).eq("user_id", userId),
+      NO_TABLE_PRIVILEGE,
+    )) || failed;
+
+    failed = !(await denied(
+      "owner cannot write own profile directly",
+      await user.from("user_profile").insert({ user_id: userId, allergies: [] }),
+      NO_TABLE_PRIVILEGE,
+    )) || failed;
+
+    // Contrast, and the reason the message matters: inserting a proposal is a
+    // *granted* privilege refused by RLS — same SQLSTATE, the other door.
+    failed = !(await denied(
+      "stranger cannot insert a proposal for the owner",
+      await stranger.from("proposals").insert({ ...proposalA, id: `proposal-smoke-x-${randomUUID()}` }),
+      RLS_DENIED,
+    )) || failed;
   } finally {
-    // Cleanup rows then user (service role)
+    // Cleanup rows then users (service role). `user_profile.user_id` has no
+    // foreign key to auth.users (0001), so it is deleted explicitly — otherwise
+    // a smoke run leaves a profile row behind forever.
     await admin.from("meal_logs").delete().eq("user_id", userId);
     await admin.from("proposals").delete().eq("user_id", userId);
+    await admin.from("user_profile").delete().eq("user_id", userId);
+    if (strangerId) await admin.auth.admin.deleteUser(strangerId);
     await admin.auth.admin.deleteUser(userId);
-    log("cleanup user+rows", true);
+
+    // Counted after the deletes rather than asserted as "no error": a cleanup
+    // that removed nothing is also a successful delete statement.
+    for (const table of ["proposals", "meal_logs", "user_profile"] as const) {
+      const { data } = await admin.from(table).select("id").eq("user_id", userId);
+      log(`cleanup ${table} empty`, (data?.length ?? 0) === 0, `rows=${data?.length ?? 0}`);
+    }
+    log("cleanup users", true);
   }
 
   console.log(failed ? "\n=== SMOKE FAILED ===" : "\n=== SMOKE PASSED ===");

@@ -23,56 +23,18 @@
  * accounts behind.
  */
 
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isLocalTarget, loadEnvLocal, requireEnv } from "./lib/env";
 import { turn } from "../src/harness/turn";
 import { Tracer } from "../src/harness/tracer";
 import { SupabaseTraceStore } from "../src/harness/supabaseTraceStore";
 import type { ModelAdapter } from "../src/harness/types";
 
-/**
- * Environment values, with the process environment taking precedence.
- *
- * The other smoke script lets `.env.local` win, which is fine when that file
- * points at the project you mean. Here it matters more: this script creates and
- * deletes test accounts, and a `.env.local` aimed at production would silently
- * turn a local run into one against real users. Passing variables explicitly
- * therefore selects the target.
- */
-function loadEnvLocal(): Record<string, string> {
-  const env: Record<string, string> = { ...process.env } as Record<
-    string,
-    string
-  >;
-  try {
-    for (const line of readFileSync(".env.local", "utf8").split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const i = t.indexOf("=");
-      if (i < 0) continue;
-      const k = t.slice(0, i).trim();
-      if (env[k]) continue;
-      let v = t.slice(i + 1).trim();
-      if (
-        (v.startsWith('"') && v.endsWith('"')) ||
-        (v.startsWith("'") && v.endsWith("'"))
-      ) {
-        v = v.slice(1, -1);
-      }
-      env[k] = v;
-    }
-  } catch {
-    // process.env only
-  }
-  return env;
-}
-
-function requireEnv(env: Record<string, string>, key: string): string {
-  const value = env[key];
-  if (!value) throw new Error(`Missing ${key}`);
-  return value;
-}
+// Environment values come from `loadEnvLocal`, where the **process environment
+// wins**: exporting a variable is how this run is pointed at a target, so a
+// `.env.local` aimed at production cannot silently decide where it goes. The
+// script creates and deletes accounts, which is why that rule matters here.
 
 let failures = 0;
 
@@ -111,7 +73,6 @@ const serviceRoleKey = requireEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
  * for explicitly — the accident it prevents is a `.env.local` aimed at the real
  * project turning a local run into one against production.
  */
-const isLocalTarget = /^https?:\/\/(127\.0\.0\.1|localhost)([:\/]|$)/.test(url);
 if (!isLocalTarget && env.SMOKE_ALLOW_REMOTE !== "1") {
   console.log(`
 refusing to run against ${url}
