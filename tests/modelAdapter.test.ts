@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { DeepSeekAdapter, TIER_TO_MODEL_ID } from "../src/harness/modelAdapter";
+import {
+  DeepSeekAdapter,
+  resolveProviderProfile,
+  TIER_TO_MODEL_ID,
+} from "../src/harness/modelAdapter";
 import type { ToolSchema } from "../src/harness/types";
 
 function okResponse(content: string): Response {
@@ -420,5 +424,111 @@ describe("DeepSeekAdapter", () => {
     // Tool result message
     expect(messages[2].role).toBe("tool");
     expect(messages[2].tool_call_id).toBe("call_abc");
+  });
+});
+
+// ── provider profiles and usage shapes (live-baseline follow-up) ───────────
+//
+// The adapter is the seam that "only this file moves" when the provider changes
+// (CONTEXT.md). Putting the second provider in proved two things worth pinning:
+// the base URL is not the only thing a gateway changes (the model ids are
+// namespaced too), and the prompt-cache split arrives under a different field
+// name — which is not cosmetic, because an unread hit count charges every prompt
+// token at the miss rate.
+
+describe("resolveProviderProfile", () => {
+  it("defaults to the direct DeepSeek endpoint", () => {
+    const profile = resolveProviderProfile({ env: {} });
+    expect(profile.id).toBe("deepseek");
+    expect(profile.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(profile.models).toEqual({ flash: "deepseek-v4-flash", pro: "deepseek-v4-pro" });
+  });
+
+  it("selects a gateway profile by name, including its namespaced model ids", () => {
+    const profile = resolveProviderProfile({
+      env: { NUTRIBUDDY_MODEL_PROVIDER: "commandcode" },
+    });
+    expect(profile.id).toBe("commandcode");
+    expect(profile.apiKeyEnv).toBe("COMMANDCODE_API_KEY");
+    expect(profile.models.flash).toBe("deepseek/deepseek-v4-flash");
+  });
+
+  it("lets the environment override one field at a time", () => {
+    const profile = resolveProviderProfile({
+      env: {
+        NUTRIBUDDY_MODEL_PROVIDER: "commandcode",
+        NUTRIBUDDY_MODEL_FLASH: "cheap-model",
+      },
+    });
+    expect(profile.models.flash).toBe("cheap-model");
+    expect(profile.models.pro).toBe("deepseek/deepseek-v4-pro");
+  });
+
+  it("refuses an unknown provider instead of silently using DeepSeek", () => {
+    expect(() =>
+      resolveProviderProfile({ env: { NUTRIBUDDY_MODEL_PROVIDER: "nope" } }),
+    ).toThrow(/未知的 NUTRIBUDDY_MODEL_PROVIDER/);
+  });
+
+  it("requires a base URL for the custom escape hatch", () => {
+    expect(() =>
+      resolveProviderProfile({ env: { NUTRIBUDDY_MODEL_PROVIDER: "custom" } }),
+    ).toThrow(/NUTRIBUDDY_MODEL_BASE_URL/);
+
+    const profile = resolveProviderProfile({
+      env: {
+        NUTRIBUDDY_MODEL_PROVIDER: "custom",
+        NUTRIBUDDY_MODEL_BASE_URL: "http://localhost:9999/v1",
+      },
+    });
+    expect(profile.id).toBe("custom");
+    expect(profile.pricingSource).toContain("unknown");
+  });
+});
+
+describe("usage parsing across providers", () => {
+  const usageResponse = (usage: Record<string, unknown>) =>
+    new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { role: "assistant", content: "ok" } }],
+        usage,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  async function usageFrom(usage: Record<string, unknown>) {
+    const adapter = new DeepSeekAdapter({
+      apiKey: "k",
+      env: {},
+      fetchImpl: async () => usageResponse(usage),
+    });
+    return (await adapter.generate({ model: "flash", thinking: false, messages: [] })).usage;
+  }
+
+  it("reads DeepSeek's two top-level cache fields", async () => {
+    const usage = await usageFrom({
+      prompt_tokens: 100,
+      completion_tokens: 10,
+      total_tokens: 110,
+      prompt_cache_hit_tokens: 80,
+      prompt_cache_miss_tokens: 20,
+    });
+    expect(usage).toMatchObject({ promptTokens: 100, cacheHitTokens: 80, cacheMissTokens: 20 });
+  });
+
+  it("reads an OpenAI-compatible gateway's nested cached_tokens and derives the miss count", async () => {
+    const usage = await usageFrom({
+      prompt_tokens: 100,
+      completion_tokens: 10,
+      total_tokens: 110,
+      prompt_tokens_details: { cached_tokens: 80 },
+    });
+    expect(usage).toMatchObject({ promptTokens: 100, cacheHitTokens: 80, cacheMissTokens: 20 });
+  });
+
+  it("leaves the split undefined when the provider reports no cache information", async () => {
+    const usage = await usageFrom({ prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 });
+    expect(usage?.cacheHitTokens).toBeUndefined();
+    expect(usage?.cacheMissTokens).toBeUndefined();
   });
 });
