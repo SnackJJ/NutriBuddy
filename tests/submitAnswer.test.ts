@@ -4,6 +4,7 @@ import {
   SUBMIT_ANSWER_TOOL,
   parseSubmitAnswerArgs,
 } from "../src/harness/submitAnswer";
+import { CITATION_QUOTE_MAX_CHARS } from "../src/harness/types";
 
 function expectRecord(value: unknown): Record<string, unknown> {
   expect(value).toBeDefined();
@@ -264,5 +265,79 @@ describe("parseSubmitAnswerArgs", () => {
     expect(result).not.toBeNull();
     expect(result!.foodRefs).toHaveLength(1);
     expect(result!.foodRefs[0].matchType).toBe("alias");
+  });
+});
+
+// ── citations (S4 / RFC 0011 §3.3) ─────────────────────────────────────────
+//
+// The parsing contract: a citation that cannot be checked is dropped rather than
+// repaired, and an answer that cites nothing does not carry an empty array — the
+// gate has to be able to tell "made no evidence claim" from "cited something
+// unverifiable".
+
+describe("submit_answer citations", () => {
+  it("keeps a well-formed citation, including its version", () => {
+    const output = parseSubmitAnswerArgs({
+      prose: "Vitamin K intake should stay steady on warfarin.",
+      foodRefs: [],
+      ruleRefs: [],
+      citations: [
+        {
+          sectionId: "ods-vitamin-k#vitamin-k-interactions-with-medications-warfarin-coumadin-an",
+          sourceId: "ods-vitamin-k@2024",
+          docVersion: "ods-vitamin-k@2024",
+          quote: "Vitamin K is not known to interact with warfarin in a dangerous way.",
+        },
+      ],
+    });
+
+    expect(output?.citations).toHaveLength(1);
+    expect(output?.citations?.[0].sourceId).toBe("ods-vitamin-k@2024");
+  });
+
+  it("drops a malformed citation instead of inventing the missing field", () => {
+    const output = parseSubmitAnswerArgs({
+      prose: "Cited badly.",
+      foodRefs: [],
+      ruleRefs: [],
+      citations: [
+        { sectionId: "x#y", sourceId: "x@1" },
+        { sourceId: "x@1", docVersion: "x@1" },
+        "not an object",
+        { sectionId: "x#y", sourceId: "", docVersion: "x@1" },
+      ],
+    });
+
+    expect(output?.citations).toBeUndefined();
+    expect(output?.prose).toBe("Cited badly.");
+  });
+
+  it("caps a quote at the documented limit", () => {
+    const output = parseSubmitAnswerArgs({
+      prose: "Long quote.",
+      foodRefs: [],
+      ruleRefs: [],
+      citations: [
+        {
+          sectionId: "x#y",
+          sourceId: "x@1",
+          docVersion: "x@1",
+          quote: "z".repeat(CITATION_QUOTE_MAX_CHARS + 50),
+        },
+      ],
+    });
+
+    expect(output?.citations?.[0].quote).toHaveLength(CITATION_QUOTE_MAX_CHARS);
+  });
+
+  it("omits the field entirely when nothing survives parsing", () => {
+    const output = parseSubmitAnswerArgs({
+      prose: "No citations here.",
+      foodRefs: [],
+      ruleRefs: [],
+    });
+    expect(output).not.toBeNull();
+    expect(output?.citations).toBeUndefined();
+    expect(Object.keys(output ?? {})).not.toContain("citations");
   });
 });

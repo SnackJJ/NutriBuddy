@@ -245,6 +245,36 @@ export interface RuleRef {
 }
 
 /**
+ * A pointer into the evidence corpus (RFC 0011 §3.3).
+ *
+ * It carries the document version the model saw on purpose: an answer that cites
+ * a section is making a claim about a specific revision of a specific document,
+ * and the citation gate checks exactly that (registry membership, active status,
+ * version match, and membership in this turn's evidence set). Nothing here
+ * supplies a number, an entity or a write — ADR 0004 keeps the evidence layer out
+ * of all three.
+ */
+export interface CitationRef {
+  /** `<source_id>#<section slug>`; the citable unit. */
+  readonly sectionId: string;
+  /** The document the section belongs to, e.g. `ods-vitamind@2024`. */
+  readonly sourceId: string;
+  /** Version the model was shown; a mismatch is a stripped citation, not a crash. */
+  readonly docVersion: string;
+  /** Optional short quotation, capped at {@link CITATION_QUOTE_MAX_CHARS}. */
+  readonly quote?: string;
+}
+
+/**
+ * Upper bound on a quoted span (RFC 0011 §8.3).
+ *
+ * A citation is a pointer with a receipt, not a copy of the document: past a
+ * couple of sentences the "quote" is a reproduction, which is both a size problem
+ * and the wrong claim about what a citation is for.
+ */
+export const CITATION_QUOTE_MAX_CHARS = 240;
+
+/**
  * Final answer contract: prose plus structured references that gates can
  * verify without parsing free text.
  */
@@ -252,4 +282,11 @@ export interface TypedOutput {
   readonly prose: string;
   readonly foodRefs: readonly FoodRef[];
   readonly ruleRefs: readonly RuleRef[];
+  /**
+   * Evidence citations (RFC 0011 §3.3). Optional and additive: an answer that
+   * makes no claim about why it is right needs none, and a missing field must
+   * never be read as "cited nothing on purpose" by a gate that cannot tell the
+   * difference.
+   */
+  readonly citations?: readonly CitationRef[];
 }

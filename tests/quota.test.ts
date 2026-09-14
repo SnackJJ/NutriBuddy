@@ -457,13 +457,17 @@ describe("route wiring (#99, #103)", () => {
     // RFC 0010 §3.3: refusal is runtime control, not agent behaviour. If the
     // harness learned about quota, STOP_REASONS and SCHEMA_VERSION would be
     // changing for an ops policy — this is the assertion that they do not.
+    // Word-boundary, not substring: the harness may legitimately use the English
+    // word "quotation" (the citation contract does), and a check that cannot tell
+    // a vocabulary leak from a longer word would push the harness's own comments
+    // around for no reason.
     for (const file of [
       "src/harness/turn.ts",
       "src/harness/loop.ts",
       "src/harness/traceStore.ts",
       "src/harness/types.ts",
     ]) {
-      expect(fs.readFileSync(file, "utf-8").toLowerCase()).not.toContain("quota");
+      expect(/quota/i.test(fs.readFileSync(file, "utf-8"))).toBe(false);
     }
   });
 });

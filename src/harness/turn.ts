@@ -45,8 +45,15 @@ import type { TraceStore } from "./traceStore";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
-/** Bump minor for compatible additions, major for breaking event-shape changes. */
-export const SCHEMA_VERSION = "1.9.0";
+/**
+ * Bump minor for compatible additions, major for breaking event-shape changes.
+ *
+ * 1.10.0 adds two optional fields (RFC 0011 §3.3/§3.4): `TypedOutput.citations`
+ * and `TurnStartEvent.evidenceSet`. Both are additive, so a reader of 1.9.0
+ * events stays correct — which is the point of the minor bump and the reason the
+ * new fields land *before* the assertions that use them.
+ */
+export const SCHEMA_VERSION = "1.10.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -120,6 +127,12 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
   readonly catalogVersion?: string;
   /** Version of the user profile constraints used in this turn (issue #51). */
   readonly profileVersion?: string;
+  /**
+   * Evidence the turn may cite (RFC 0011 §3.4). Absent means "no corpus is
+   * wired", which the citation gate reads as fail-closed: no citation is legal
+   * in a turn whose evidence set nobody recorded.
+   */
+  readonly evidenceSet?: TurnEvidenceSet;
   /**
    * Trace port (RFC 0008 §3.2). turn() appends every event before yielding it,
    * which is the only place the stream can be persisted in seq order: seq is
@@ -206,6 +219,32 @@ export interface TurnGateVerdictEvent extends TurnEvent {
   readonly evidence: string;
   /** Stable tool-gate reason code (RFC 0002); required for checkpoint "tool". */
   readonly reasonCode?: string;
+  /**
+   * Whether this block ends the turn's attempt budget (RFC 0011 §3.5).
+   *
+   * A citation that failed provenance is stripped and earns a `block` verdict —
+   * but it must **not** consume the shared regenerate budget: the answer's numbers
+   * and allergens are unaffected by a bad citation, and refusing it entirely would
+   * be the failure mode the RFC's severity split exists to avoid. Recording that
+   * distinction as data (instead of "checkName happens to be citation_provenance")
+   * is what keeps a future implementer from wiring the wrong tier into the budget.
+   */
+  readonly terminal?: boolean;
+}
+
+/**
+ * The evidence a turn was allowed to cite (RFC 0011 §3.4).
+ *
+ * Recorded on the turn rather than kept in memory because two things depend on it
+ * being replayable: the citation gate checks membership against it, and a replay
+ * of an old turn has to be able to recompute that verdict offline. It is also the
+ * field V1.1's retrieval results fold into, without the gate's meaning changing.
+ */
+export interface TurnEvidenceSet {
+  /** Corpus snapshot version, so a trace names the corpus it was judged against. */
+  readonly sourceVersion: string;
+  /** Section ids available this turn: V1.0's pinned set, later retrieval hits too. */
+  readonly sectionIds: readonly string[];
 }
 
 export interface TurnStartEvent extends TurnEvent {
@@ -215,6 +254,8 @@ export interface TurnStartEvent extends TurnEvent {
   readonly catalogVersion?: string;
   /** Version of the user profile constraints used in this turn (issue #51). */
   readonly profileVersion?: string;
+  /** Evidence available to this turn; absent when no corpus is wired. */
+  readonly evidenceSet?: TurnEvidenceSet;
 }
 
 export interface TurnStepEvent extends TurnEvent {
@@ -284,6 +325,10 @@ function createTurnStartEvent(
     input,
     catalogVersion: ports.catalogVersion,
     profileVersion: ports.profileVersion,
+    // Omitted rather than defaulted to an empty set: "no evidence was assembled"
+    // and "evidence was assembled and it was empty" are different, and only the
+    // second one is a configured turn.
+    ...(ports.evidenceSet ? { evidenceSet: ports.evidenceSet } : {}),
   };
 }
 

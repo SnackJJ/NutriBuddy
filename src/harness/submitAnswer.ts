@@ -4,7 +4,14 @@
 // loop 自身识别此工具调用并终止回合，携带从 args 解析出的 TypedOutput。
 // 这样可以打通实时模型的 TypedOutput → 输出闸门路径。
 
-import type { FoodRef, RuleRef, ToolSchema, TypedOutput } from "./types";
+import {
+  CITATION_QUOTE_MAX_CHARS,
+  type CitationRef,
+  type FoodRef,
+  type RuleRef,
+  type ToolSchema,
+  type TypedOutput,
+} from "./types";
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
@@ -22,7 +29,9 @@ export const SUBMIT_ANSWER_SCHEMA: ToolSchema = {
       "Submit the final answer with structured food references and advisory rule citations. " +
       "Always use this tool to deliver your final response. Provide your full prose response " +
       "in the 'prose' field, cite every food you recommend in 'foodRefs' with its catalog " +
-      "foodId, and cite every applicable safety rule in 'ruleRefs'.",
+      "foodId, cite every applicable safety rule in 'ruleRefs', and — when you claim what " +
+      "authoritative guidance says — cite the evidence section it came from in 'citations' " +
+      "using only the section ids listed in the current evidence set.",
     parameters: {
       type: "object",
       properties: {
@@ -76,6 +85,36 @@ export const SUBMIT_ANSWER_SCHEMA: ToolSchema = {
               },
             },
             required: ["ruleId", "summary"],
+          },
+        },
+        citations: {
+          type: "array",
+          description:
+            "Evidence citations for any claim about what guidance says. Each entry is a " +
+            "section id from the current evidence set, with the document id and version " +
+            "it belongs to. Omit entries you cannot resolve to a section id — an " +
+            "unresolvable citation is stripped by the gate and weakens the answer.",
+          items: {
+            type: "object",
+            properties: {
+              sectionId: {
+                type: "string",
+                description: "Section id exactly as listed in the evidence set.",
+              },
+              sourceId: {
+                type: "string",
+                description: "Document id the section belongs to.",
+              },
+              docVersion: {
+                type: "string",
+                description: "Document version you were shown.",
+              },
+              quote: {
+                type: "string",
+                description: `Optional short quotation (at most ${CITATION_QUOTE_MAX_CHARS} characters).`,
+              },
+            },
+            required: ["sectionId", "sourceId", "docVersion"],
           },
         },
       },
@@ -184,11 +223,61 @@ export function parseSubmitAnswerArgs(
   const prose = typeof args.prose === "string" ? args.prose : "";
   const foodRefs = parseArrayItems(args.foodRefs, parseFoodRef);
   const ruleRefs = parseArrayItems(args.ruleRefs, parseRuleRef);
+  const citations = parseArrayItems(args.citations, parseCitation);
 
   // If no prose at all, return null so caller can fall back to content
-  if (prose.length === 0 && foodRefs.length === 0 && ruleRefs.length === 0) {
+  if (
+    prose.length === 0 &&
+    foodRefs.length === 0 &&
+    ruleRefs.length === 0 &&
+    citations.length === 0
+  ) {
     return null;
   }
 
-  return { prose, foodRefs, ruleRefs };
+  return {
+    prose,
+    foodRefs,
+    ruleRefs,
+    // Only present when the model actually cited something: an empty array would
+    // make "cited nothing" indistinguishable from "does not know how to cite",
+    // and the citation gate needs that distinction to stay fail-closed without
+    // punishing answers that simply have no evidence claim to make.
+    ...(citations.length > 0 ? { citations } : {}),
+  };
+}
+
+/**
+ * One citation, parsed defensively.
+ *
+ * Malformed entries are dropped here rather than repaired: a citation missing its
+ * document id cannot be checked, and inventing one would be the gate verifying a
+ * claim the model never made. The gate still re-checks everything this keeps,
+ * because being parseable is not the same as being true.
+ */
+function parseCitation(value: unknown): CitationRef | null {
+  if (!isRecord(value)) return null;
+  const sectionId = value.sectionId;
+  const sourceId = value.sourceId;
+  const docVersion = value.docVersion;
+  if (
+    typeof sectionId !== "string" ||
+    typeof sourceId !== "string" ||
+    typeof docVersion !== "string" ||
+    sectionId.length === 0 ||
+    sourceId.length === 0 ||
+    docVersion.length === 0
+  ) {
+    return null;
+  }
+
+  const quote = typeof value.quote === "string" ? value.quote.trim() : "";
+  return {
+    sectionId,
+    sourceId,
+    docVersion,
+    ...(quote.length > 0
+      ? { quote: quote.slice(0, CITATION_QUOTE_MAX_CHARS) }
+      : {}),
+  };
 }
