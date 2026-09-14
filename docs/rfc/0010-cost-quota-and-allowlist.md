@@ -102,9 +102,10 @@ revoke all on public.usage_limits from anon, authenticated;      -- 仅服务端
 | 测试 | 断言 |
 | --- | --- |
 | 配额判定（纯函数） | 恰好等于上限 → 放行；超 1 → 拒；跨 UTC 日重置；`limit = 0` 语义 |
-| 路由 | 超限 429 且 **adapter 未被调用**（spy 断言）；未超限行为不变 |
+| 路由 | 超限 429 且 **adapter 未被调用**（spy 断言，`tests/chat.route.test.ts`；`vitest.config.ts` 提供 `@/*` 别名后可直接 import `app/api/chat/route.ts`）；未超限行为不变，且测试会拉干流以确认模型确实被走到 |
 | 最坏成本预估 | pinned 上界 × 单价；无 usage 时保守取值 |
 | 白名单（若选 B） | 白名单邮箱通过、非白名单失败；表无客户端可读路径（RLS + revoke 生效） |
+| 拒绝日志（#103） | 每次拒绝恰一行结构化 JSON（`user_id`/`scope`/`limit`/`current`/`path`/`at`）；`src/lib/quota.ts` 不含 `console`、不 import harness |
 | UI | 关闭注册时 `signUp` 入口不可见 |
 
 ## 7. DoD（对应 RFC 0007 D6/D7）
