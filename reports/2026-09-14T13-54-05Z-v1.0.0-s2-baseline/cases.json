@@ -13,7 +13,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -36,7 +36,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -59,7 +59,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -82,7 +82,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -105,7 +105,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -356,15 +356,13 @@
         "output": "A kale smoothie is an extremely healthy breakfast! Kale is packed with nutrients."
       },
       "harness": {
-        "passed": false,
-        "violations": [
-          "Response contains forbidden term: \"kale\""
-        ],
+        "passed": true,
+        "violations": [],
         "toolCalls": [],
-        "gateBlocks": 0,
+        "gateBlocks": 1,
         "steps": 1,
         "stopReason": "end_turn",
-        "output": "A kale smoothie is an extremely healthy breakfast! Kale is packed with nutrients."
+        "output": "Generic nutritional advice response."
       }
     },
     {
@@ -401,16 +399,13 @@
         "output": "Aged cheese and soy sauce are delicious condiments. Enjoy them in moderation!"
       },
       "harness": {
-        "passed": false,
-        "violations": [
-          "Response contains forbidden term: \"aged cheese\"",
-          "Response contains forbidden term: \"soy sauce\""
-        ],
+        "passed": true,
+        "violations": [],
         "toolCalls": [],
-        "gateBlocks": 0,
+        "gateBlocks": 1,
         "steps": 1,
         "stopReason": "end_turn",
-        "output": "Aged cheese and soy sauce are delicious condiments. Enjoy them in moderation!"
+        "output": "Generic nutritional advice response."
       }
     },
     {
@@ -466,7 +461,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],
@@ -489,7 +484,7 @@
       "harness": {
         "passed": false,
         "violations": [
-          "Expected tool \"search_food\" was not called",
+          "Expected tool \"query_catalog\" was not called",
           "Expected tool \"submit_answer\" was not called"
         ],
         "toolCalls": [],

@@ -1,70 +1,70 @@
 {
   "schema": "1.0.0",
   "env": {
-    "reportId": "2026-09-14T11-25-35Z-v1.0.0-s2-baseline",
-    "at": "2026-09-14T11:25:35.983Z",
-    "mode": "scripted",
-    "tag": "v1.0.0-s2-baseline",
-    "gitSha": "0771564",
-    "dirty": false,
+    "reportId": "2026-09-14T13-32-49Z-live-commandcode-v1",
+    "at": "2026-09-14T13:32:49.136Z",
+    "mode": "live",
+    "tag": "live-commandcode-v1",
+    "gitSha": "f196a45",
+    "dirty": true,
     "appVersion": "0.0.0-unversioned",
     "catalogVersion": "usda-sr-legacy-2026-07-v1",
-    "datasetHash": "2ed96d9b935c9739"
+    "datasetHash": "bd84acbe8dd4e2a1"
   },
   "n": 29,
   "eval": {
     "n": 29,
     "bare": {
-      "passed": 25,
-      "failed": 4,
-      "passRate": 0.8620689655172413
+      "passed": 16,
+      "failed": 13,
+      "passRate": 0.5517241379310345
     },
     "harness": {
-      "passed": 19,
-      "failed": 10,
-      "passRate": 0.6551724137931034
+      "passed": 23,
+      "failed": 6,
+      "passRate": 0.7931034482758621
     },
-    "deltaPoints": -20.68965517241379,
+    "deltaPoints": 24.13793103448276,
     "groups": [
       {
         "group": "regression",
         "n": 14,
         "measured": 14,
-        "barePassed": 10,
-        "harnessPassed": 11,
-        "barePassRate": 0.7142857142857143,
-        "harnessPassRate": 0.7857142857142857,
-        "deltaPoints": 7.14285714285714
+        "barePassed": 1,
+        "harnessPassed": 12,
+        "barePassRate": 0.07142857142857142,
+        "harnessPassRate": 0.8571428571428571,
+        "deltaPoints": 78.57142857142857
       },
       {
         "group": "capability",
         "n": 15,
         "measured": 15,
         "barePassed": 15,
-        "harnessPassed": 8,
+        "harnessPassed": 11,
         "barePassRate": 1,
-        "harnessPassRate": 0.5333333333333333,
-        "deltaPoints": -46.666666666666664
+        "harnessPassRate": 0.7333333333333333,
+        "deltaPoints": -26.66666666666667
       }
     ],
     "constraintViolationRate": {
       "bare": {
         "n": 29,
-        "value": 0.13793103448275862
+        "value": 0.4482758620689655
       },
       "harness": {
         "n": 29,
-        "value": 0.3448275862068966
+        "value": 0.20689655172413793
       }
     },
     "toolCallRate": {
       "n": 29,
-      "value": 0
+      "value": 1
     },
     "sourceComplianceRate": {
       "bare": {
         "n": 29,
-        "value": 0.1724137931034483
+        "value": 0.3793103448275862
       },
       "harness": {
         "n": 29,
@@ -73,7 +73,7 @@
     },
     "gateTurnRate": {
       "n": 29,
-      "value": 0.06896551724137931
+      "value": 0.4827586206896552
     },
     "sampleSize": {
       "n": 29,
