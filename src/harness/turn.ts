@@ -42,6 +42,12 @@ import {
   type ToolOutcome,
 } from "./toolOutcome";
 import type { TraceStore } from "./traceStore";
+import {
+  checkCitations,
+  citationEvidence,
+  stripInvalidCitations,
+  type CitationRegistry,
+} from "./citationGate";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -133,6 +139,12 @@ export interface TurnPorts extends Omit<RunTurnInput, "userInput"> {
    * in a turn whose evidence set nobody recorded.
    */
   readonly evidenceSet?: TurnEvidenceSet;
+  /**
+   * Registry lookup for the citation check (RFC 0011 §3.5). Absent means the
+   * registry is unavailable, which the gate reads as fail-closed: no citation
+   * survives a turn that could not check it.
+   */
+  readonly citationRegistry?: CitationRegistry;
   /**
    * Trace port (RFC 0008 §3.2). turn() appends every event before yielding it,
    * which is the only place the stream can be persisted in seq order: seq is
@@ -297,7 +309,7 @@ type EventMetadata = Pick<TurnEvent, "schema" | "seq" | "timestamp">;
 type NextEventMetadata = () => EventMetadata;
 type GateVerdictEventDetails = Pick<
   TurnGateVerdictEvent,
-  "checkpoint" | "verdict" | "checkName" | "evidence" | "reasonCode"
+  "checkpoint" | "verdict" | "checkName" | "evidence" | "reasonCode" | "terminal"
 >;
 type CommitGateVerdict = Omit<GateVerdictEventDetails, "checkpoint">;
 
@@ -543,6 +555,11 @@ const OUTPUT_LEXICAL_BACKSTOP_CHECK = "output_lexical_backstop";
 const OUTPUT_NUMERIC_PROVENANCE_CHECK = "output_numeric_provenance";
 const OUTPUT_ADVISORY_STRUCTURE_CHECK = "output_advisory_structure";
 const OUTPUT_GATE_SUMMARY_CHECK = "post_gate_output_check";
+/**
+ * Tier-1 verdict name (RFC 0011 §3.5). It carries `terminal: false`, which is how
+ * the regenerate budget knows to ignore it.
+ */
+const OUTPUT_CITATION_PROVENANCE_CHECK = "citation_provenance";
 const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
 function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
@@ -766,6 +783,58 @@ function createLexicalBackstopCheck(
     check.reasons,
     NO_SAFETY_VIOLATIONS_EVIDENCE,
   );
+}
+
+/**
+ * Run the four citation conditions and strip what fails them.
+ *
+ * Returns a verdict only when there was something to judge: a turn with no
+ * citations gets no event, because "nothing to check" is not a result worth
+ * putting in the trace — a turn whose citations were all stripped does get one,
+ * since the stripping is exactly what a reader needs to see.
+ */
+async function runCitationCheck(
+  result: TurnResult,
+  ports: TurnPorts,
+): Promise<{ output: TypedOutput | undefined; verdict?: GateVerdictEventDetails }> {
+  const citations = result.output?.citations ?? [];
+  if (citations.length === 0) return { output: result.output };
+
+  let entries: Awaited<ReturnType<CitationRegistry["entries"]>> | undefined;
+  let unavailableReason: string | undefined;
+  if (!ports.citationRegistry) {
+    unavailableReason = "no registry port is wired";
+  } else {
+    try {
+      entries = await ports.citationRegistry.entries(
+        citations.map((citation) => citation.sectionId),
+      );
+    } catch (err) {
+      // A registry that cannot be read is not a reason to keep the citations:
+      // the answer still stands, its evidence claim does not.
+      unavailableReason = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const check = checkCitations({
+    output: result.output,
+    evidenceSet: ports.evidenceSet,
+    entries,
+    unavailableReason,
+  });
+
+  return {
+    output: stripInvalidCitations(result.output, check),
+    verdict: {
+      checkpoint: "output",
+      // A block verdict that is not terminal: the answer's other checks keep their
+      // own verdicts and the regenerate budget is untouched.
+      verdict: "block",
+      checkName: OUTPUT_CITATION_PROVENANCE_CHECK,
+      evidence: citationEvidence(check),
+      terminal: false,
+    },
+  };
 }
 
 function createNumericProvenanceCheck(
@@ -1251,6 +1320,19 @@ async function* runUtteranceTurn(
     // All checks (entity, lexical backstop, numeric provenance, advisory
     // structure) run together at the turn boundary with one retry budget
     // and one combined feedback message. The inner loop no longer re-gates.
+
+    // ── Tier-1: citation provenance (RFC 0011 §3.5) ──────────────────
+    //
+    // Stripped before the other checks run, on purpose: the lexical backstop
+    // (tier-2) has to see the answer as it will actually be delivered, and a
+    // citation that is about to be removed must not be able to satisfy it.
+    const citationCheck = await runCitationCheck(result, ports);
+    if (citationCheck.verdict) {
+      yield createGateVerdictEvent(citationCheck.verdict, nextMetadata);
+    }
+    if (citationCheck.output !== result.output) {
+      result = { ...result, output: citationCheck.output };
+    }
 
     const outputGateChecks = collectOutputGateChecks(
       result,
