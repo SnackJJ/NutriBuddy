@@ -48,6 +48,7 @@ import {
   stripInvalidCitations,
   type CitationRegistry,
 } from "./citationGate";
+import { checkCitationAssertions } from "./citationAssertion";
 
 export type { FoodRef, RuleRef, TypedOutput } from "./types";
 
@@ -567,6 +568,12 @@ const OUTPUT_GATE_SUMMARY_CHECK = "post_gate_output_check";
  * the regenerate budget knows to ignore it.
  */
 const OUTPUT_CITATION_PROVENANCE_CHECK = "citation_provenance";
+/**
+ * Tier-2 verdict name: a block that **does** feed the regenerate budget, because
+ * an answer that claims authority without naming a source has to be rewritten
+ * rather than trimmed (RFC 0011 §3.5/§3.6).
+ */
+const OUTPUT_CITATION_ASSERTION_CHECK = "citation_assertion";
 const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
 function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
@@ -1347,6 +1354,24 @@ async function* runUtteranceTurn(
       observations,
       conflicts,
       ports.catalog,
+    );
+
+    // ── Tier-2: authority claimed, evidence absent (RFC 0011 §3.6) ────
+    //
+    // Added after the provenance strip, so it sees the citations that will
+    // actually be delivered. This one is terminal, unlike the strip above: an
+    // answer whose only authority is "the guidelines say so" has to be rewritten,
+    // not trimmed.
+    const assertionCheck = checkCitationAssertions(result.output);
+    outputGateChecks.push(
+      createOutputGateCheck(
+        OUTPUT_CITATION_ASSERTION_CHECK,
+        assertionCheck.passed,
+        assertionCheck.reasons,
+        assertionCheck.matched.length === 0
+          ? "No authority claim without a source"
+          : `Authority claim(s) carried ${result.output?.citations?.length ?? 0} citation(s)`,
+      ),
     );
 
     for (const check of outputGateChecks) {

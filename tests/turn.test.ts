@@ -222,12 +222,15 @@ describe("turn (utterance)", () => {
 
     const { events, result } = await collect(turn(input, ports));
 
+    // Five output-side verdicts now: the four original checks plus the citation
+    // assertion backstop (RFC 0011 §3.6), then the commit verdict.
     expect(events.map((event) => event.type)).toEqual([
       "turn_start",
       "gate_verdict",
       "step",
       "step",
       "model_call",
+      "gate_verdict",
       "gate_verdict",
       "gate_verdict",
       "turn_end",
@@ -838,16 +841,12 @@ describe("turn cross-vocabulary (CLI + eval share)", () => {
     const endEvent = expectTerminalEvent(events);
 
     expect(result).toEqual(endEvent.result);
-    expect(events.map((event) => event.type)).toEqual([
-      "turn_start",
-      "gate_verdict",
-      "step",
-      "step",
-      "model_call",
-      "gate_verdict",
-      "gate_verdict",
-      "turn_end",
-    ]);
+    expect(events.at(-1)?.type).toBe("turn_end");
+    // The stream's shape, without pinning every verdict: the output side gained a
+    // check in S4 (citation assertion), and a test that fails on each new gate
+    // stops being about draining.
+    expect(events.filter((event) => event.type === "gate_verdict").length).toBeGreaterThanOrEqual(3);
+    expect(events.map((event) => event.type)[0]).toBe("turn_start");
   });
 
   it("terminal TurnEndEvent shape is compatible with CLI display and eval scoring", async () => {
@@ -1355,12 +1354,14 @@ describe("gate verdict events", () => {
 
     const { events } = await collect(turn(input, ports));
 
-    const outputVerdict = expectGateVerdict(events, "output");
+    const outputVerdict = gateVerdicts(events).find(
+      (event) => event.checkName === "post_gate_output_check",
+    );
     const commitVerdict = expectGateVerdict(events, "commit");
 
-    expect(outputVerdict.verdict).toBe("pass");
-    expect(outputVerdict.checkName).toBe("post_gate_output_check");
-    expect(outputVerdict.evidence.length).toBeGreaterThan(0);
+    expect(outputVerdict?.verdict).toBe("pass");
+    expect(outputVerdict?.checkName).toBe("post_gate_output_check");
+    expect(outputVerdict?.evidence.length ?? 0).toBeGreaterThan(0);
     expect(commitVerdict.verdict).toBe("pass");
     expect(commitVerdict.checkName).toBe("commit_gate_check");
     expect(commitVerdict.evidence.length).toBeGreaterThan(0);
@@ -1536,10 +1537,12 @@ describe("gate verdict events", () => {
 
       expect(result.stopReason).toBe("write_proposal");
 
-      const outputVerdict = expectGateVerdict(events, "output");
-      expect(outputVerdict.verdict).toBe("pass");
-      expect(outputVerdict.evidence).toContain("Write proposal emitted");
-      expect(outputVerdict.evidence).toContain("user confirmation");
+      const outputVerdict = gateVerdicts(events).find(
+        (event) => event.checkName === "post_gate_output_check",
+      );
+      expect(outputVerdict?.verdict).toBe("pass");
+      expect(outputVerdict?.evidence).toContain("Write proposal emitted");
+      expect(outputVerdict?.evidence).toContain("user confirmation");
     });
 
     it("commit gate verdict documents missing meal ledger mutation on write-proposal", async () => {
