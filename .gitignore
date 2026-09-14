@@ -24,6 +24,9 @@ dist/
 # tracer event-sourcing output (runtime artifact, one JSONL per session)
 traces/
 
+# trace exports (health data, even when redacted — never committed)
+exports/
+
 # continuous-learning local artifacts
 instinct-*.md
 

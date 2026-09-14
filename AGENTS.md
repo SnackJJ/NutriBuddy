@@ -44,6 +44,7 @@ npm run typecheck
 npm run verify:migrations # 空库重放检查（需 Docker + psql，会 db reset 本地栈）
 npm run smoke:confirm    # live Supabase confirm/void (needs .env.local)
 npm run smoke:trace      # D9: trace write door closed + cross-account reads (needs .env.local)
+npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏，`--with-text` 仅本地调试）
 npm run eval
 ```
 

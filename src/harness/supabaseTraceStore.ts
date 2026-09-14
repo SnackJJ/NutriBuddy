@@ -180,10 +180,15 @@ function numeric(value: unknown): number | undefined {
   return undefined;
 }
 
-const TURN_COLUMNS =
+/**
+ * Exported because the operator export path (#91) reads the same rows: two
+ * copies of the column list would drift silently, and a missing column shows up
+ * as `undefined` rather than as an error.
+ */
+export const TURN_COLUMNS =
   "id, user_id, input_kind, schema_version, started_at, app_version, finished_at, stop_reason, steps, cost_usd, latency_ms";
 
-function toTurnSummary(row: Record<string, unknown>): TurnSummary {
+export function toTurnSummary(row: Record<string, unknown>): TurnSummary {
   return {
     turnId: String(row.id),
     userId: String(row.user_id),
