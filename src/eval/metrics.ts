@@ -11,6 +11,7 @@
 // 每条 case 可独立评分，聚合为整体指标。
 
 import type { BareResult, HarnessResult, EvalExpected, EvalSummary } from "./types";
+import { rateMetrics } from "./summary";
 import { checkPostGate, type UserContext } from "../harness/gate";
 import {
   checkMustCallTools,
@@ -107,43 +108,34 @@ export function scoreHarness(
 
 // ─── Aggregation ──────────────────────────────────────────────────────────
 
-/** 从 bare + harness 结果集计算汇总指标。 */
+/**
+ * The six metrics the console report has always shown.
+ *
+ * The arithmetic lives in `rateMetrics` (summary.ts) because the report
+ * artifact needs the same six numbers with their sample sizes attached; this
+ * function is the legacy flat shape, where "no data" collapses to 0 as it always
+ * has. Two implementations of one metric name is exactly the drift RFC 0009 §4
+ * discipline 3 exists to prevent.
+ */
 export function computeMetrics(
   bareResults: readonly BareResult[],
   harnessResults: readonly HarnessResult[],
 ): EvalSummary {
-  const total = bareResults.length;
-
-  const barePassed = bareResults.filter((r) => r.passed).length;
-  const harnessPassed = harnessResults.filter((r) => r.passed).length;
-
-  const bareViolated = bareResults.filter((r) => r.violations.length > 0).length;
-  const harnessViolated = harnessResults.filter((r) => r.violations.length > 0).length;
-
-  const harnessWithTools = harnessResults.filter((r) => r.toolCalls.length > 0).length;
-  const harnessWithGateBlocks = harnessResults.filter((r) => r.gateBlocks > 0).length;
-
-  // 来源合规率：bare 回复中含引用/来源标记的比例（软指标）
-  const bareWithSource = bareResults.filter((r) =>
-    /\[source\]|source:|according to|USDA|NIH|ODS/i.test(r.response),
-  ).length;
-  const harnessWithSource = harnessResults.filter((r) =>
-    /\[source\]|source:|according to|USDA|NIH|ODS/i.test(r.response),
-  ).length;
+  const rates = rateMetrics(bareResults, harnessResults);
 
   return {
-    total,
-    barePassRate: total > 0 ? barePassed / total : 0,
-    harnessPassRate: total > 0 ? harnessPassed / total : 0,
+    total: rates.n,
+    barePassRate: rates.barePassRate ?? 0,
+    harnessPassRate: rates.harnessPassRate ?? 0,
     constraintViolationRate: {
-      bare: total > 0 ? bareViolated / total : 0,
-      harness: total > 0 ? harnessViolated / total : 0,
+      bare: rates.constraintViolationRate.bare.value ?? 0,
+      harness: rates.constraintViolationRate.harness.value ?? 0,
     },
-    toolCallRate: total > 0 ? harnessWithTools / total : 0,
+    toolCallRate: rates.toolCallRate.value ?? 0,
     sourceComplianceRate: {
-      bare: total > 0 ? bareWithSource / total : 0,
-      harness: total > 0 ? harnessWithSource / total : 0,
+      bare: rates.sourceComplianceRate.bare.value ?? 0,
+      harness: rates.sourceComplianceRate.harness.value ?? 0,
     },
-    gateTurnRate: total > 0 ? harnessWithGateBlocks / total : 0,
+    gateTurnRate: rates.gateTurnRate.value ?? 0,
   };
 }
