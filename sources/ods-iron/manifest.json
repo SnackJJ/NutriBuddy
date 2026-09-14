@@ -1,0 +1,234 @@
+{
+  "id": "ods-iron",
+  "title": "Iron — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-iron@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "6796305dc5811632906a9fb37d3cb58d02a64ae9cff5523c4c9b202662d06e9c",
+  "sectionCount": 27,
+  "sections": [
+    {
+      "sectionId": "ods-iron#iron",
+      "sectionPath": "Iron",
+      "heading": "Iron",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-iron#iron-introduction",
+      "sectionPath": "Iron / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "9c9f3186782730d4",
+      "chars": 3750
+    },
+    {
+      "sectionId": "ods-iron#iron-recommended-intakes",
+      "sectionPath": "Iron / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "809a07688a623a0c",
+      "chars": 1719
+    },
+    {
+      "sectionId": "ods-iron#iron-sources-of-iron-food",
+      "sectionPath": "Iron / Sources of Iron / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "8b774541500a17f7",
+      "chars": 2546
+    },
+    {
+      "sectionId": "ods-iron#iron-sources-of-iron-dietary-supplements",
+      "sectionPath": "Iron / Sources of Iron / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "94d882360c9e8989",
+      "chars": 1953
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-intakes-and-status",
+      "sectionPath": "Iron / Iron Intakes and Status",
+      "heading": "Iron Intakes and Status",
+      "ordinal": 6,
+      "contentHash": "86df8ced996f6734",
+      "chars": 2193
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-deficiency",
+      "sectionPath": "Iron / Iron Deficiency",
+      "heading": "Iron Deficiency",
+      "ordinal": 7,
+      "contentHash": "1f0010cd7e5fc80c",
+      "chars": 2308
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy",
+      "heading": "Groups at Risk of Iron Inadequacy",
+      "ordinal": 8,
+      "contentHash": "c371630f9f37f341",
+      "chars": 84
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-pregnant-women",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / Pregnant women",
+      "heading": "Pregnant women",
+      "ordinal": 9,
+      "contentHash": "c82d7c7b1f881694",
+      "chars": 400
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-infants-and-young-chi",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / Infants and young children",
+      "heading": "Infants and young children",
+      "ordinal": 10,
+      "contentHash": "c8d4dc6d53fa42c6",
+      "chars": 549
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-women-with-heavy-mens",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / Women with heavy menstrual bleeding",
+      "heading": "Women with heavy menstrual bleeding",
+      "ordinal": 11,
+      "contentHash": "48de164e01762c07",
+      "chars": 570
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-frequent-blood-donors",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / Frequent blood donors",
+      "heading": "Frequent blood donors",
+      "ordinal": 12,
+      "contentHash": "be4a24b59ea74db2",
+      "chars": 942
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-people-with-cancer",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / People with cancer",
+      "heading": "People with cancer",
+      "ordinal": 13,
+      "contentHash": "25c16310b58020cc",
+      "chars": 545
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-people-who-have-gastr",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / People who have gastrointestinal disorders or have had gastrointestinal surgery",
+      "heading": "People who have gastrointestinal disorders or have had gastrointestinal surgery",
+      "ordinal": 14,
+      "contentHash": "3f6abd0300287907",
+      "chars": 592
+    },
+    {
+      "sectionId": "ods-iron#iron-groups-at-risk-of-iron-inadequacy-people-with-heart-fai",
+      "sectionPath": "Iron / Groups at Risk of Iron Inadequacy / People with heart failure",
+      "heading": "People with heart failure",
+      "ordinal": 15,
+      "contentHash": "8eec37a051f3dd34",
+      "chars": 469
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-and-health",
+      "sectionPath": "Iron / Iron and Health",
+      "heading": "Iron and Health",
+      "ordinal": 16,
+      "contentHash": "dd32abfff3eecfaa",
+      "chars": 129
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-and-health-iron-deficiency-anemia-in-pregnant-wome",
+      "sectionPath": "Iron / Iron and Health / Iron deficiency anemia in pregnant women",
+      "heading": "Iron deficiency anemia in pregnant women",
+      "ordinal": 17,
+      "contentHash": "d9384b6d9449c5c3",
+      "chars": 3098
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-and-health-iron-deficiency-anemia-in-infants-and-t",
+      "sectionPath": "Iron / Iron and Health / Iron deficiency anemia in infants and toddlers",
+      "heading": "Iron deficiency anemia in infants and toddlers",
+      "ordinal": 18,
+      "contentHash": "2ad9de9d441c69c8",
+      "chars": 5158
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-and-health-anemia-of-chronic-disease",
+      "sectionPath": "Iron / Iron and Health / Anemia of chronic disease",
+      "heading": "Anemia of chronic disease",
+      "ordinal": 19,
+      "contentHash": "741f9bbd9657ae68",
+      "chars": 3111
+    },
+    {
+      "sectionId": "ods-iron#iron-health-risks-from-excessive-iron",
+      "sectionPath": "Iron / Health Risks from Excessive Iron",
+      "heading": "Health Risks from Excessive Iron",
+      "ordinal": 20,
+      "contentHash": "5a98dce007d124e3",
+      "chars": 3968
+    },
+    {
+      "sectionId": "ods-iron#iron-interactions-with-medications",
+      "sectionPath": "Iron / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 21,
+      "contentHash": "4a7d47cca99a5f5f",
+      "chars": 275
+    },
+    {
+      "sectionId": "ods-iron#iron-interactions-with-medications-levodopa",
+      "sectionPath": "Iron / Interactions with Medications / Levodopa",
+      "heading": "Levodopa",
+      "ordinal": 22,
+      "contentHash": "8fac950a826ecac9",
+      "chars": 449
+    },
+    {
+      "sectionId": "ods-iron#iron-interactions-with-medications-levothyroxine",
+      "sectionPath": "Iron / Interactions with Medications / Levothyroxine",
+      "heading": "Levothyroxine",
+      "ordinal": 23,
+      "contentHash": "0439b7ab2c6c31af",
+      "chars": 498
+    },
+    {
+      "sectionId": "ods-iron#iron-interactions-with-medications-proton-pump-inhibitors",
+      "sectionPath": "Iron / Interactions with Medications / Proton pump inhibitors",
+      "heading": "Proton pump inhibitors",
+      "ordinal": 24,
+      "contentHash": "3bc60b93499f0b05",
+      "chars": 529
+    },
+    {
+      "sectionId": "ods-iron#iron-iron-and-healthful-diets",
+      "sectionPath": "Iron / Iron and Healthful Diets",
+      "heading": "Iron and Healthful Diets",
+      "ordinal": 25,
+      "contentHash": "12fd853e6cf8aefa",
+      "chars": 1354
+    },
+    {
+      "sectionId": "ods-iron#iron-references",
+      "sectionPath": "Iron / References",
+      "heading": "References",
+      "ordinal": 26,
+      "contentHash": "eb6c878efa20f956",
+      "chars": 19254
+    },
+    {
+      "sectionId": "ods-iron#iron-disclaimer",
+      "sectionPath": "Iron / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 27,
+      "contentHash": "79b6c76b10901ec6",
+      "chars": 665
+    }
+  ]
+}

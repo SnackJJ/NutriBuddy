@@ -6,6 +6,10 @@
 
 运行时本地食品与营养事实目录。数据来自 USDA FoodData Central snapshot ingestion，但运行时不调用 USDA API。Catalog 提供 food id、per-100g 营养值、allergen tags、aliases、portion aliases 和 snapshot version。
 
+## Citation（引用）
+
+答案里指向权威原文的结构化指针：`sectionId` + `sourceId` + `docVersion`（可选短引文）。引用**只**来自本轮可用证据集，且必须能在 source registry 中查到、状态为 active、版本一致；校验不通过的引用被确定性剥离而不是整体拒答。引用不携带营养数字，也不参与任何安全判定（见 `docs/adr/0004`）。
+
 ## Gates（闸）
 
 确定性检查点，包括 input gate、tool gate、output gate、commit gate。每个 gate 都必须产出 typed verdict event；安全属性不能依赖随机 LLM judge。
@@ -25,6 +29,10 @@ agent 可创建但不可直接提交的 immutable 写入提案。`log_meal` 只�
 ## Resolver（食品解析器）
 
 Catalog 下的确定性解析器。解析顺序为 exact match → alias table → fuzzy threshold。模型可以提出字符串，但不能 mint food id；多候选、低置信或未知食物必须返回 typed miss 并要求 clarification。
+
+## Source registry（依据登记表）
+
+依据层的数据模型：`sources`（文档级：publisher、URL、license、doc version、生效日期、active/superseded/archived 状态、权威级别、content hash）与 `source_sections`（章节级：section id、章节路径、锚点、序数、正文 hash、是否属于钉住集）。语料是**版本化快照**，与 catalog 同一套哲学：内容未变则跳过摄入，变更则 upsert 并把旧版本标 `superseded`（不删——历史 trace 可能引用它）。V1.0 不做检索，运行时只读钉住集。
 
 ## Trajectory（轨迹）
 

@@ -102,6 +102,8 @@ Coverage: the curated ~50-food set ships as the first snapshot through the same 
 
 Freshness: nutrition facts move on the scale of years. Quarterly snapshot refresh with tag re-review. The catalog snapshot version pins per release and lands in every turn-start event, so any trace reproduces against its data.
 
+**Evidence corpus** (`docs/adr/0004`, `docs/rfc/0011`): the same snapshot philosophy applies to advisory text. A `source registry` holds one row per document (id, publisher, URL, license, doc version, effective date, archive status, authority level, content hash) and one row per section (`sectionId`, section path, anchor, ordinal, text hash). Ingestion normalizes committed files under `sources/<source-id>/` into those rows, skips unchanged content hashes and marks changed ones `superseded` rather than deleting them — an old trace may cite an old document version. The runtime reads sections through the registry, and every turn records both the corpus version and the section ids it was allowed to cite, so a citation is checkable and a replay is reproducible. Only US federal government works are ingested (§105 public domain); the license field is per source and the determination is recorded with the evidence URL.
+
 ### Multi-User
 
 Authenticated identity enters the turn once, at the seam. Profile fetch, executor binding, proposal scoping, and event-log keying all derive from it. The user id is never a model-fillable parameter, which makes cross-tenant queries unrepresentable — the unmintable-food-id principle applied to identity. Another user's constraints are the wrong gate inputs, so isolation is a safety property, not only a privacy one (C1).
@@ -124,7 +126,7 @@ Prior art to follow: the CodeScorer's assertion style over trace events, the inj
 
 ## Out of Scope
 
-- **Knowledge RAG** (NIH/USDA corpus) — richness, not correctness; no safety property depends on it. In scope: Phase 5, on user-visible answer-quality demand.
+- ~~**Knowledge RAG** (NIH/USDA corpus)~~ — **in scope as an evidence layer only** (`docs/adr/0004`, Accepted 2026-09-14): the registry supplies "why this advice holds" with citable source text, and never supplies numbers, entities or writes. V1.0 ships the registry, the corpus snapshot, a pinned evidence set and structural citation checks; retrieval itself is V1.1 (`docs/rfc/0011`).
 - **Context compaction** — observation caps suffice at eight steps. Phase 5, on context telemetry.
 - **Autonomous writes for exact-match proposals** — Phase 5, when edit rate per match type reads near zero. Fuzzy-resolved writes: never autonomous.
 - **Free-SQL fallback under role grants** — likely never: template velocity outruns query diversity on a three-table schema, and free SQL launders plausible-wrong queries through clean execution. Reconsider only on sustained no-template rate.
@@ -149,3 +151,5 @@ Dependency-derived; the PRD's M-boundaries do not survive contact with the seam.
 **Phase 4 — Surfaces and tenancy.** Scope: web chat driving the seam, step-event streaming, confirm/edit UI, profile management as the sole constraint write path, auth, row-level security, per-session trace scoping, nightly live eval. Gate: adversarial cross-tenant template attempts return nothing by construction, profile changes appear only via the validated path, and the nightly live run is green. Position: the seam already proved behavior headlessly, so surfaces add reach rather than logic, and tenancy hardening binds to sessions that exist only with a surface.
 
 **Phase 5 — Metric-gated extensions.** Scope: the out-of-scope pool. Gate: each admission cites its recorded trigger and event-log evidence. Position: contingent work sequences after the instruments that decide it, and Phases 0–4 install exactly those instruments.
+
+**Phase 6 — Evidence layer.** Scope: source registry and corpus snapshot, pinned evidence set in the context, structural citation checks in the output gate, citation rendering. Gate: every citation in a live answer resolves to an active registry row whose version matches, and a citation outside the turn's evidence set is stripped with a typed verdict rather than answered. Position: it lands after the trace and the gates exist, because "which evidence was available in this turn" is only answerable once turns are recorded — admitted by `docs/adr/0004`, not by the Phase 5 trigger pool.

@@ -1,0 +1,194 @@
+{
+  "id": "ods-vitamin-k",
+  "title": "Vitamin K — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminK-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminK-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-vitamin-k@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "06c6f2bf1f19c833809877252e339798cde8297bd86bde85b784a9010e582004",
+  "sectionCount": 22,
+  "sections": [
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k",
+      "sectionPath": "Vitamin K",
+      "heading": "Vitamin K",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-introduction",
+      "sectionPath": "Vitamin K / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "44f97f6f26fcb4d7",
+      "chars": 4443
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-recommended-intakes",
+      "sectionPath": "Vitamin K / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "2a0ab456b638307b",
+      "chars": 1679
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-sources-of-vitamin-k-food",
+      "sectionPath": "Vitamin K / Sources of Vitamin K / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "5cddfb527ea2f78c",
+      "chars": 2981
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-sources-of-vitamin-k-dietary-supplements",
+      "sectionPath": "Vitamin K / Sources of Vitamin K / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "73fbdc4eb53fc34c",
+      "chars": 1139
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-intakes-and-status",
+      "sectionPath": "Vitamin K / Vitamin K Intakes and Status",
+      "heading": "Vitamin K Intakes and Status",
+      "ordinal": 6,
+      "contentHash": "3f196fcf32ed53e2",
+      "chars": 1180
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-deficiency",
+      "sectionPath": "Vitamin K / Vitamin K Deficiency",
+      "heading": "Vitamin K Deficiency",
+      "ordinal": 7,
+      "contentHash": "bf2f8d9d9fdc1651",
+      "chars": 1038
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-groups-at-risk-of-vitamin-k-inadequacy",
+      "sectionPath": "Vitamin K / Groups at Risk of Vitamin K Inadequacy",
+      "heading": "Groups at Risk of Vitamin K Inadequacy",
+      "ordinal": 8,
+      "contentHash": "6fb3b333843e215b",
+      "chars": 85
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-groups-at-risk-of-vitamin-k-inadequacy-newborns-no",
+      "sectionPath": "Vitamin K / Groups at Risk of Vitamin K Inadequacy / Newborns not treated with vitamin K at birth",
+      "heading": "Newborns not treated with vitamin K at birth",
+      "ordinal": 9,
+      "contentHash": "0b0de03fc1033175",
+      "chars": 1009
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-groups-at-risk-of-vitamin-k-inadequacy-people-with",
+      "sectionPath": "Vitamin K / Groups at Risk of Vitamin K Inadequacy / People with malabsorption disorders",
+      "heading": "People with malabsorption disorders",
+      "ordinal": 10,
+      "contentHash": "0ec57ab3bbcb70fe",
+      "chars": 453
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-and-health",
+      "sectionPath": "Vitamin K / Vitamin K and Health",
+      "heading": "Vitamin K and Health",
+      "ordinal": 11,
+      "contentHash": "bdd7d1b577a87794",
+      "chars": 117
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-and-health-osteoporosis",
+      "sectionPath": "Vitamin K / Vitamin K and Health / Osteoporosis",
+      "heading": "Osteoporosis",
+      "ordinal": 12,
+      "contentHash": "4cd68d622aa03b55",
+      "chars": 3735
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-and-health-coronary-heart-disease",
+      "sectionPath": "Vitamin K / Vitamin K and Health / Coronary heart disease",
+      "heading": "Coronary heart disease",
+      "ordinal": 13,
+      "contentHash": "3638501dbfda7161",
+      "chars": 2915
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-health-risks-from-excessive-vitamin-k",
+      "sectionPath": "Vitamin K / Health Risks from Excessive Vitamin K",
+      "heading": "Health Risks from Excessive Vitamin K",
+      "ordinal": 14,
+      "contentHash": "fa7c33badd84043f",
+      "chars": 252
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications",
+      "sectionPath": "Vitamin K / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 15,
+      "contentHash": "eceb7b88a9aa8a97",
+      "chars": 296
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-warfarin-coumadin-an",
+      "sectionPath": "Vitamin K / Interactions with Medications / Warfarin (Coumadin) and similar anticoagulants",
+      "heading": "Warfarin (Coumadin) and similar anticoagulants",
+      "ordinal": 16,
+      "contentHash": "40dac70f99aa4d0b",
+      "chars": 578
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-antibiotics",
+      "sectionPath": "Vitamin K / Interactions with Medications / Antibiotics",
+      "heading": "Antibiotics",
+      "ordinal": 17,
+      "contentHash": "cf1a9d1a9b5f590b",
+      "chars": 451
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-bile-acid-sequestran",
+      "sectionPath": "Vitamin K / Interactions with Medications / Bile acid sequestrants",
+      "heading": "Bile acid sequestrants",
+      "ordinal": 18,
+      "contentHash": "a2d3ebe086bff704",
+      "chars": 452
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-interactions-with-medications-orlistat",
+      "sectionPath": "Vitamin K / Interactions with Medications / Orlistat",
+      "heading": "Orlistat",
+      "ordinal": 19,
+      "contentHash": "fb270852aca87bf7",
+      "chars": 595
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-vitamin-k-and-healthful-diets",
+      "sectionPath": "Vitamin K / Vitamin K and Healthful Diets",
+      "heading": "Vitamin K and Healthful Diets",
+      "ordinal": 20,
+      "contentHash": "4b0132907f7e1f0d",
+      "chars": 1263
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-references",
+      "sectionPath": "Vitamin K / References",
+      "heading": "References",
+      "ordinal": 21,
+      "contentHash": "8ddf58a49e560bdc",
+      "chars": 9315
+    },
+    {
+      "sectionId": "ods-vitamin-k#vitamin-k-disclaimer",
+      "sectionPath": "Vitamin K / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 22,
+      "contentHash": "83c86d7671722d95",
+      "chars": 664
+    }
+  ]
+}

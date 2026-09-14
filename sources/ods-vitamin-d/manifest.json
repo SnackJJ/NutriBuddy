@@ -1,0 +1,370 @@
+{
+  "id": "ods-vitamin-d",
+  "title": "Vitamin D — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices (NIH site policies: NIH content is a U.S. government work)",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-vitamin-d@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "687cbc1331ed0b595de897b98a366f488f939f3a5f9d6ffad6bb9414a7bdffde",
+  "sectionCount": 44,
+  "sections": [
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d",
+      "sectionPath": "Vitamin D",
+      "heading": "Vitamin D",
+      "ordinal": 1,
+      "contentHash": "b3ed54fc514303c9",
+      "chars": 203
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-introduction",
+      "sectionPath": "Vitamin D / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "4fa744a42f859c8e",
+      "chars": 3628
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-introduction-serum-concentrations-of-25-oh-d-and-h",
+      "sectionPath": "Vitamin D / Introduction / Serum concentrations of 25(OH)D and health",
+      "heading": "Serum concentrations of 25(OH)D and health",
+      "ordinal": 3,
+      "contentHash": "ca234e9e844202c5",
+      "chars": 1718
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-recommended-intakes",
+      "sectionPath": "Vitamin D / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 4,
+      "contentHash": "9e9fa61ffd9c8edf",
+      "chars": 2791
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-sources-of-vitamin-d-food",
+      "sectionPath": "Vitamin D / Sources of Vitamin D / Food",
+      "heading": "Food",
+      "ordinal": 5,
+      "contentHash": "576376265e04bbf2",
+      "chars": 3461
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-sources-of-vitamin-d-sun-exposure",
+      "sectionPath": "Vitamin D / Sources of Vitamin D / Sun exposure",
+      "heading": "Sun exposure",
+      "ordinal": 6,
+      "contentHash": "488d811f41a448f4",
+      "chars": 2243
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-sources-of-vitamin-d-dietary-supplements",
+      "sectionPath": "Vitamin D / Sources of Vitamin D / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 7,
+      "contentHash": "170fe1196a295337",
+      "chars": 1235
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-intakes-and-status",
+      "sectionPath": "Vitamin D / Vitamin D Intakes and Status",
+      "heading": "Vitamin D Intakes and Status",
+      "ordinal": 8,
+      "contentHash": "3a0acbc1b2ee72bd",
+      "chars": 3060
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-deficiency",
+      "sectionPath": "Vitamin D / Vitamin D Deficiency",
+      "heading": "Vitamin D Deficiency",
+      "ordinal": 9,
+      "contentHash": "22e0fe379e64bda3",
+      "chars": 3117
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy",
+      "heading": "Groups at Risk of Vitamin D Inadequacy",
+      "ordinal": 10,
+      "contentHash": "7eaa7cbdd11d3d9b",
+      "chars": 419
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-breastfed-i",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / Breastfed infants",
+      "heading": "Breastfed infants",
+      "ordinal": 11,
+      "contentHash": "caa0b7afab66a879",
+      "chars": 1363
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-older-adult",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / Older adults",
+      "heading": "Older adults",
+      "ordinal": 12,
+      "contentHash": "1425b688a3cbc719",
+      "chars": 315
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with limited sun exposure",
+      "heading": "People with limited sun exposure",
+      "ordinal": 13,
+      "contentHash": "644ae8c9842a68a1",
+      "chars": 476
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with dark skin",
+      "heading": "People with dark skin",
+      "ordinal": 14,
+      "contentHash": "2302d978304a3823",
+      "chars": 559
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with conditions that limit fat absorption",
+      "heading": "People with conditions that limit fat absorption",
+      "ordinal": 15,
+      "contentHash": "6171f9e5ebaa3666",
+      "chars": 647
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-groups-at-risk-of-vitamin-d-inadequacy-people-with",
+      "sectionPath": "Vitamin D / Groups at Risk of Vitamin D Inadequacy / People with obesity or who have undergone gastric bypass surgery",
+      "heading": "People with obesity or who have undergone gastric bypass surgery",
+      "ordinal": 16,
+      "contentHash": "5b4388ec412d85f5",
+      "chars": 1055
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health",
+      "sectionPath": "Vitamin D / Vitamin D and Health",
+      "heading": "Vitamin D and Health",
+      "ordinal": 17,
+      "contentHash": "d6766f495376c38a",
+      "chars": 1485
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis",
+      "heading": "Bone health and osteoporosis",
+      "ordinal": 18,
+      "contentHash": "85d3dfcb3e5921e2",
+      "chars": 1536
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Clinical trial evidence on older adults",
+      "heading": "Clinical trial evidence on older adults",
+      "ordinal": 19,
+      "contentHash": "c07ffb22569bb8ae",
+      "chars": 3297
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Vitamin D supplements for bone health in minority populations",
+      "heading": "Vitamin D supplements for bone health in minority populations",
+      "ordinal": 20,
+      "contentHash": "26d94e97dc7694ca",
+      "chars": 1070
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Vitamin D supplements and muscle function",
+      "heading": "Vitamin D supplements and muscle function",
+      "ordinal": 21,
+      "contentHash": "b5eca74edb74396e",
+      "chars": 996
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-bone-health-and-osteoporosis-",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Bone health and osteoporosis / Conclusions about vitamin D supplements and bone health",
+      "heading": "Conclusions about vitamin D supplements and bone health",
+      "ordinal": 22,
+      "contentHash": "a1ec38864eb3e866",
+      "chars": 297
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer",
+      "heading": "Cancer",
+      "ordinal": 23,
+      "contentHash": "b59e17f4e9732ebb",
+      "chars": 466
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-total-cancer-incidence",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Total cancer incidence and mortality",
+      "heading": "Total cancer incidence and mortality",
+      "ordinal": 24,
+      "contentHash": "df87ed044834bfcd",
+      "chars": 3392
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-breast-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Breast cancer",
+      "heading": "Breast cancer",
+      "ordinal": 25,
+      "contentHash": "36376a6c304f5ee8",
+      "chars": 805
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-colorectal-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Colorectal cancer",
+      "heading": "Colorectal cancer",
+      "ordinal": 26,
+      "contentHash": "6c5abc9cf9abfa85",
+      "chars": 1685
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-lung-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Lung cancer",
+      "heading": "Lung cancer",
+      "ordinal": 27,
+      "contentHash": "dfc25d1cb12376c3",
+      "chars": 297
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-pancreatic-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Pancreatic cancer",
+      "heading": "Pancreatic cancer",
+      "ordinal": 28,
+      "contentHash": "6a0403b0d6f7e547",
+      "chars": 903
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-prostate-cancer",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Prostate cancer",
+      "heading": "Prostate cancer",
+      "ordinal": 29,
+      "contentHash": "0c7c18edd17785ad",
+      "chars": 3081
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cancer-conclusions-about-vita",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cancer / Conclusions about vitamin D and cancer",
+      "heading": "Conclusions about vitamin D and cancer",
+      "ordinal": 30,
+      "contentHash": "d5f4f6fddbee5af0",
+      "chars": 641
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-cardiovascular-disease",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Cardiovascular disease",
+      "heading": "Cardiovascular disease",
+      "ordinal": 31,
+      "contentHash": "87740fed6b2b6b75",
+      "chars": 5208
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-depression",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Depression",
+      "heading": "Depression",
+      "ordinal": 32,
+      "contentHash": "3dde338f55eb736a",
+      "chars": 2890
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-multiple-sclerosis",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Multiple sclerosis",
+      "heading": "Multiple sclerosis",
+      "ordinal": 33,
+      "contentHash": "86102207a96bf3a0",
+      "chars": 3068
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-type-2-diabetes",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Type 2 diabetes",
+      "heading": "Type 2 diabetes",
+      "ordinal": 34,
+      "contentHash": "fee1eb27916bf4e1",
+      "chars": 4735
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-health-weight-loss",
+      "sectionPath": "Vitamin D / Vitamin D and Health / Weight loss",
+      "heading": "Weight loss",
+      "ordinal": 35,
+      "contentHash": "db457c4621d6bc12",
+      "chars": 1382
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-health-risks-from-excessive-vitamin-d",
+      "sectionPath": "Vitamin D / Health Risks from Excessive Vitamin D",
+      "heading": "Health Risks from Excessive Vitamin D",
+      "ordinal": 36,
+      "contentHash": "706fcedb0e354a95",
+      "chars": 2721
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-interactions-with-medications",
+      "sectionPath": "Vitamin D / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 37,
+      "contentHash": "c59f62867a6dc924",
+      "chars": 254
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-interactions-with-medications-orlistat",
+      "sectionPath": "Vitamin D / Interactions with Medications / Orlistat",
+      "heading": "Orlistat",
+      "ordinal": 38,
+      "contentHash": "cd1fd050b1164433",
+      "chars": 194
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-interactions-with-medications-statins",
+      "sectionPath": "Vitamin D / Interactions with Medications / Statins",
+      "heading": "Statins",
+      "ordinal": 39,
+      "contentHash": "f54b0e1fb245f6d8",
+      "chars": 453
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-interactions-with-medications-steroids",
+      "sectionPath": "Vitamin D / Interactions with Medications / Steroids",
+      "heading": "Steroids",
+      "ordinal": 40,
+      "contentHash": "a296bd90fbc10b88",
+      "chars": 426
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-interactions-with-medications-thiazide-diuretics",
+      "sectionPath": "Vitamin D / Interactions with Medications / Thiazide diuretics",
+      "heading": "Thiazide diuretics",
+      "ordinal": 41,
+      "contentHash": "96c2ccc6c3f8439b",
+      "chars": 353
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-vitamin-d-and-healthful-diets",
+      "sectionPath": "Vitamin D / Vitamin D and Healthful Diets",
+      "heading": "Vitamin D and Healthful Diets",
+      "ordinal": 42,
+      "contentHash": "2ceaeb0518e045d2",
+      "chars": 1429
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-references",
+      "sectionPath": "Vitamin D / References",
+      "heading": "References",
+      "ordinal": 43,
+      "contentHash": "e5d1f645e114ee5c",
+      "chars": 37013
+    },
+    {
+      "sectionId": "ods-vitamin-d#vitamin-d-disclaimer",
+      "sectionPath": "Vitamin D / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 44,
+      "contentHash": "7180af5f6655983f",
+      "chars": 663
+    }
+  ]
+}

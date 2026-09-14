@@ -1,0 +1,218 @@
+{
+  "id": "ods-vitamin-c",
+  "title": "Vitamin C — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminC-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminC-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-vitamin-c@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "333c8b6fd25f5612592c3b6f4a3c4376dff0b7cb68ef5b3495a92682f19de041",
+  "sectionCount": 25,
+  "sections": [
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c",
+      "sectionPath": "Vitamin C",
+      "heading": "Vitamin C",
+      "ordinal": 1,
+      "contentHash": "d1e1afe0fac20e0e",
+      "chars": 203
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-introduction",
+      "sectionPath": "Vitamin C / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "ec845bcd7433ff0d",
+      "chars": 3107
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-recommended-intakes",
+      "sectionPath": "Vitamin C / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "905bf1ea223b4091",
+      "chars": 1682
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-sources-of-vitamin-c-food",
+      "sectionPath": "Vitamin C / Sources of Vitamin C / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "addbd7f6b55ea7ab",
+      "chars": 1647
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-sources-of-vitamin-c-dietary-supplements",
+      "sectionPath": "Vitamin C / Sources of Vitamin C / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "c49ac20502140e60",
+      "chars": 1195
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-intakes-and-status",
+      "sectionPath": "Vitamin C / Vitamin C Intakes and Status",
+      "heading": "Vitamin C Intakes and Status",
+      "ordinal": 6,
+      "contentHash": "84cced239dbe33ea",
+      "chars": 1318
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-deficiency",
+      "sectionPath": "Vitamin C / Vitamin C Deficiency",
+      "heading": "Vitamin C Deficiency",
+      "ordinal": 7,
+      "contentHash": "f369f30de57aa4ea",
+      "chars": 1769
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-groups-at-risk-of-vitamin-c-inadequacy",
+      "sectionPath": "Vitamin C / Groups at Risk of Vitamin C Inadequacy",
+      "heading": "Groups at Risk of Vitamin C Inadequacy",
+      "ordinal": 8,
+      "contentHash": "d06921754d2fcae3",
+      "chars": 267
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-groups-at-risk-of-vitamin-c-inadequacy-smokers-and",
+      "sectionPath": "Vitamin C / Groups at Risk of Vitamin C Inadequacy / Smokers and passive smokers",
+      "heading": "Smokers and passive smokers",
+      "ordinal": 9,
+      "contentHash": "1025ec56bfb0e81d",
+      "chars": 536
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-groups-at-risk-of-vitamin-c-inadequacy-infants-fed",
+      "sectionPath": "Vitamin C / Groups at Risk of Vitamin C Inadequacy / Infants fed evaporated or boiled milk",
+      "heading": "Infants fed evaporated or boiled milk",
+      "ordinal": 10,
+      "contentHash": "c7e7d4d7bbe6b1b2",
+      "chars": 369
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-groups-at-risk-of-vitamin-c-inadequacy-individuals",
+      "sectionPath": "Vitamin C / Groups at Risk of Vitamin C Inadequacy / Individuals with limited food variety",
+      "heading": "Individuals with limited food variety",
+      "ordinal": 11,
+      "contentHash": "b284468a726ecbe9",
+      "chars": 518
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-groups-at-risk-of-vitamin-c-inadequacy-people-with",
+      "sectionPath": "Vitamin C / Groups at Risk of Vitamin C Inadequacy / People with malabsorption and certain chronic diseases",
+      "heading": "People with malabsorption and certain chronic diseases",
+      "ordinal": 12,
+      "contentHash": "947df6207072948b",
+      "chars": 366
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health",
+      "sectionPath": "Vitamin C / Vitamin C and Health",
+      "heading": "Vitamin C and Health",
+      "ordinal": 13,
+      "contentHash": "b1abfb568bf16e7e",
+      "chars": 414
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health-cancer-prevention",
+      "sectionPath": "Vitamin C / Vitamin C and Health / Cancer prevention",
+      "heading": "Cancer prevention",
+      "ordinal": 14,
+      "contentHash": "b5bd1428cd59b7df",
+      "chars": 5009
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health-cancer-treatment",
+      "sectionPath": "Vitamin C / Vitamin C and Health / Cancer treatment",
+      "heading": "Cancer treatment",
+      "ordinal": 15,
+      "contentHash": "4d296f91c061fa20",
+      "chars": 2303
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health-cardiovascular-disease",
+      "sectionPath": "Vitamin C / Vitamin C and Health / Cardiovascular disease",
+      "heading": "Cardiovascular disease",
+      "ordinal": 16,
+      "contentHash": "acf35a0452bd097c",
+      "chars": 5543
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health-age-related-macular-degenerat",
+      "sectionPath": "Vitamin C / Vitamin C and Health / Age-related macular degeneration and cataracts",
+      "heading": "Age-related macular degeneration and cataracts",
+      "ordinal": 17,
+      "contentHash": "dc7d5b07a29fdc99",
+      "chars": 4007
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-health-the-common-cold",
+      "sectionPath": "Vitamin C / Vitamin C and Health / The common cold",
+      "heading": "The common cold",
+      "ordinal": 18,
+      "contentHash": "a9bdbe787940c46e",
+      "chars": 1773
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-health-risks-from-excessive-vitamin-c",
+      "sectionPath": "Vitamin C / Health Risks from Excessive Vitamin C",
+      "heading": "Health Risks from Excessive Vitamin C",
+      "ordinal": 19,
+      "contentHash": "327c19a82b1cf56f",
+      "chars": 3043
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-interactions-with-medications",
+      "sectionPath": "Vitamin C / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 20,
+      "contentHash": "eb8154a9dbdc1679",
+      "chars": 251
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-interactions-with-medications-chemotherapy-and-rad",
+      "sectionPath": "Vitamin C / Interactions with Medications / Chemotherapy and radiation",
+      "heading": "Chemotherapy and radiation",
+      "ordinal": 21,
+      "contentHash": "5e68a1f8b6062f5d",
+      "chars": 1025
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-interactions-with-medications-3-hydroxy-3-methylgl",
+      "sectionPath": "Vitamin C / Interactions with Medications / 3-hydroxy-3-methylglutaryl coenzyme A reductase inhibitors (statins)",
+      "heading": "3-hydroxy-3-methylglutaryl coenzyme A reductase inhibitors (statins)",
+      "ordinal": 22,
+      "contentHash": "513e84f31725fdd6",
+      "chars": 399
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-vitamin-c-and-healthful-diets",
+      "sectionPath": "Vitamin C / Vitamin C and Healthful Diets",
+      "heading": "Vitamin C and Healthful Diets",
+      "ordinal": 23,
+      "contentHash": "410d5eee01b0578f",
+      "chars": 1260
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-references",
+      "sectionPath": "Vitamin C / References",
+      "heading": "References",
+      "ordinal": 24,
+      "contentHash": "7d359f924c3c0c98",
+      "chars": 18672
+    },
+    {
+      "sectionId": "ods-vitamin-c#vitamin-c-disclaimer",
+      "sectionPath": "Vitamin C / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 25,
+      "contentHash": "8a4968c3c4a3018e",
+      "chars": 664
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "id": "ods-potassium",
+  "title": "Potassium — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Potassium-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Potassium-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-potassium@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "4fbe8bf0fd52dd10316bae61eafa0ad2ce80fe4dd50cd95c59a3b939d065eb44",
+  "sectionCount": 26,
+  "sections": [
+    {
+      "sectionId": "ods-potassium#potassium",
+      "sectionPath": "Potassium",
+      "heading": "Potassium",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-potassium#potassium-introduction",
+      "sectionPath": "Potassium / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "946dfdefc6d97497",
+      "chars": 3165
+    },
+    {
+      "sectionId": "ods-potassium#potassium-recommended-intakes",
+      "sectionPath": "Potassium / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "50aca90c29f29ae0",
+      "chars": 2362
+    },
+    {
+      "sectionId": "ods-potassium#potassium-sources-of-potassium-food",
+      "sectionPath": "Potassium / Sources of Potassium / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "8be371fd62c4cbe4",
+      "chars": 1857
+    },
+    {
+      "sectionId": "ods-potassium#potassium-sources-of-potassium-dietary-supplements",
+      "sectionPath": "Potassium / Sources of Potassium / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "b0e9d9e5f3827193",
+      "chars": 2579
+    },
+    {
+      "sectionId": "ods-potassium#potassium-sources-of-potassium-salt-substitutes",
+      "sectionPath": "Potassium / Sources of Potassium / Salt substitutes",
+      "heading": "Salt substitutes",
+      "ordinal": 6,
+      "contentHash": "e81489e1f04571a5",
+      "chars": 480
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-intakes-and-status",
+      "sectionPath": "Potassium / Potassium Intakes and Status",
+      "heading": "Potassium Intakes and Status",
+      "ordinal": 7,
+      "contentHash": "f5a2d377ed59ae44",
+      "chars": 1274
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-deficiency",
+      "sectionPath": "Potassium / Potassium Deficiency",
+      "heading": "Potassium Deficiency",
+      "ordinal": 8,
+      "contentHash": "86829f6b6d8a2d97",
+      "chars": 2068
+    },
+    {
+      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy",
+      "sectionPath": "Potassium / Groups at Risk of Potassium Inadequacy",
+      "heading": "Groups at Risk of Potassium Inadequacy",
+      "ordinal": 9,
+      "contentHash": "684774dfb7124884",
+      "chars": 199
+    },
+    {
+      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy-people-with",
+      "sectionPath": "Potassium / Groups at Risk of Potassium Inadequacy / People with inflammatory bowel diseases",
+      "heading": "People with inflammatory bowel diseases",
+      "ordinal": 10,
+      "contentHash": "b789b8f72aab910f",
+      "chars": 395
+    },
+    {
+      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy-people-who-",
+      "sectionPath": "Potassium / Groups at Risk of Potassium Inadequacy / People who use certain medications, including diuretics and laxatives",
+      "heading": "People who use certain medications, including diuretics and laxatives",
+      "ordinal": 11,
+      "contentHash": "18b364f725b61648",
+      "chars": 412
+    },
+    {
+      "sectionId": "ods-potassium#potassium-groups-at-risk-of-potassium-inadequacy-people-with",
+      "sectionPath": "Potassium / Groups at Risk of Potassium Inadequacy / People with pica",
+      "heading": "People with pica",
+      "ordinal": 12,
+      "contentHash": "8e1756e843c2baf0",
+      "chars": 352
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-health",
+      "sectionPath": "Potassium / Potassium and Health",
+      "heading": "Potassium and Health",
+      "ordinal": 13,
+      "contentHash": "3d55ef8374887385",
+      "chars": 296
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-health-hypertension-and-stroke",
+      "sectionPath": "Potassium / Potassium and Health / Hypertension and stroke",
+      "heading": "Hypertension and stroke",
+      "ordinal": 14,
+      "contentHash": "8d042af99b7f5cd4",
+      "chars": 6499
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-health-kidney-stones",
+      "sectionPath": "Potassium / Potassium and Health / Kidney stones",
+      "heading": "Kidney stones",
+      "ordinal": 15,
+      "contentHash": "0fdd922924e4825d",
+      "chars": 2853
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-health-bone-health",
+      "sectionPath": "Potassium / Potassium and Health / Bone health",
+      "heading": "Bone health",
+      "ordinal": 16,
+      "contentHash": "6361069b21126d81",
+      "chars": 2937
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-health-blood-glucose-control-and-typ",
+      "sectionPath": "Potassium / Potassium and Health / Blood glucose control and type 2 diabetes",
+      "heading": "Blood glucose control and type 2 diabetes",
+      "ordinal": 17,
+      "contentHash": "4a1ed88a73985637",
+      "chars": 2921
+    },
+    {
+      "sectionId": "ods-potassium#potassium-health-risks-from-excessive-potassium-dietary-pota",
+      "sectionPath": "Potassium / Health Risks from Excessive Potassium / Dietary potassium",
+      "heading": "Dietary potassium",
+      "ordinal": 18,
+      "contentHash": "458428b931367a28",
+      "chars": 1513
+    },
+    {
+      "sectionId": "ods-potassium#potassium-health-risks-from-excessive-potassium-potassium-fr",
+      "sectionPath": "Potassium / Health Risks from Excessive Potassium / Potassium from dietary supplements, salt substitutes, and medications",
+      "heading": "Potassium from dietary supplements, salt substitutes, and medications",
+      "ordinal": 19,
+      "contentHash": "1fb7bab1ba63772b",
+      "chars": 748
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications",
+      "sectionPath": "Potassium / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 20,
+      "contentHash": "1b1398a4f0736855",
+      "chars": 268
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-angiotensin-converti",
+      "sectionPath": "Potassium / Interactions with Medications / Angiotensin converting enzyme inhibitors and angiotensin receptor blockers",
+      "heading": "Angiotensin converting enzyme inhibitors and angiotensin receptor blockers",
+      "ordinal": 21,
+      "contentHash": "95fd56a7f12c4328",
+      "chars": 611
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-potassium-sparing-di",
+      "sectionPath": "Potassium / Interactions with Medications / Potassium-sparing diuretics",
+      "heading": "Potassium-sparing diuretics",
+      "ordinal": 22,
+      "contentHash": "c635ad5bb4a07211",
+      "chars": 353
+    },
+    {
+      "sectionId": "ods-potassium#potassium-interactions-with-medications-loop-and-thiazide-di",
+      "sectionPath": "Potassium / Interactions with Medications / Loop and thiazide diuretics",
+      "heading": "Loop and thiazide diuretics",
+      "ordinal": 23,
+      "contentHash": "962aec5ed6002cdb",
+      "chars": 387
+    },
+    {
+      "sectionId": "ods-potassium#potassium-potassium-and-healthful-diets",
+      "sectionPath": "Potassium / Potassium and Healthful Diets",
+      "heading": "Potassium and Healthful Diets",
+      "ordinal": 24,
+      "contentHash": "e000161973d41347",
+      "chars": 1277
+    },
+    {
+      "sectionId": "ods-potassium#potassium-references",
+      "sectionPath": "Potassium / References",
+      "heading": "References",
+      "ordinal": 25,
+      "contentHash": "f5107a1f13042345",
+      "chars": 13913
+    },
+    {
+      "sectionId": "ods-potassium#potassium-disclaimer",
+      "sectionPath": "Potassium / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 26,
+      "contentHash": "f2dc1beaddcd7ffe",
+      "chars": 662
+    }
+  ]
+}

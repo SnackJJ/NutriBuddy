@@ -1,0 +1,370 @@
+{
+  "id": "ods-omega-3",
+  "title": "Omega-3 Fatty Acids — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Omega3FattyAcids-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Omega3FattyAcids-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-omega-3@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "65dc492c6b886ba04aa550cd61f0fd0dfb86a801b3b9fa8a439b1184d6f10fe1",
+  "sectionCount": 44,
+  "sections": [
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids",
+      "sectionPath": "Omega-3 Fatty Acids",
+      "heading": "Omega-3 Fatty Acids",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-introduction",
+      "sectionPath": "Omega-3 Fatty Acids / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "b8a52f98e8ee745c",
+      "chars": 6172
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-recommended-intakes",
+      "sectionPath": "Omega-3 Fatty Acids / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "53e4612fb8ff29a2",
+      "chars": 1928
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-sources-of-omega-3s-food",
+      "sectionPath": "Omega-3 Fatty Acids / Sources of Omega-3s / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "5444ccab2742b048",
+      "chars": 2215
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-sources-of-omega-3s-dietary-supplements",
+      "sectionPath": "Omega-3 Fatty Acids / Sources of Omega-3s / Dietary Supplements",
+      "heading": "Dietary Supplements",
+      "ordinal": 5,
+      "contentHash": "f0acd3ba82d33e8e",
+      "chars": 2221
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3-intakes-and-status",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3 Intakes and Status",
+      "heading": "Omega-3 Intakes and Status",
+      "ordinal": 6,
+      "contentHash": "6aceeb4fd3b7b5d0",
+      "chars": 1196
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3-deficiency",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3 Deficiency",
+      "heading": "Omega-3 Deficiency",
+      "ordinal": 7,
+      "contentHash": "8a455ffe2c7c96e3",
+      "chars": 395
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-groups-at-risk-of-omega-3-inadequacy",
+      "sectionPath": "Omega-3 Fatty Acids / Groups at Risk of Omega-3 Inadequacy",
+      "heading": "Groups at Risk of Omega-3 Inadequacy",
+      "ordinal": 8,
+      "contentHash": "c50a9aed5938bcc3",
+      "chars": 811
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health",
+      "heading": "Omega-3s and Health",
+      "ordinal": 9,
+      "contentHash": "53b68dfc6210b9ec",
+      "chars": 1069
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors",
+      "heading": "Cardiovascular disease and cardiovascular disease risk factors",
+      "ordinal": 10,
+      "contentHash": "a1c7421cde0c838c",
+      "chars": 725
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Initial clinical research",
+      "heading": "Initial clinical research",
+      "ordinal": 11,
+      "contentHash": "6cc34ae8dfc36cfc",
+      "chars": 3112
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recent clinical trials",
+      "heading": "Recent clinical trials",
+      "ordinal": 12,
+      "contentHash": "32672799e022c1c1",
+      "chars": 4160
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Possible reasons for conflicting findings",
+      "heading": "Possible reasons for conflicting findings",
+      "ordinal": 13,
+      "contentHash": "ea1919d537f26f10",
+      "chars": 1784
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recent reviews and meta-analyses",
+      "heading": "Recent reviews and meta-analyses",
+      "ordinal": 14,
+      "contentHash": "70488bed16aba69a",
+      "chars": 1610
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Recommendations from the American Heart Association and the Dietary Guidelines for Americans",
+      "heading": "Recommendations from the American Heart Association and the Dietary Guidelines for Americans",
+      "ordinal": 15,
+      "contentHash": "7e0d4f1c5574ac16",
+      "chars": 1823
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cardiovascular-disea",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cardiovascular disease and cardiovascular disease risk factors / Conclusions about omega-3s and CVD",
+      "heading": "Conclusions about omega-3s and CVD",
+      "ordinal": 16,
+      "contentHash": "5de9689471d46f7e",
+      "chars": 965
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment",
+      "heading": "Infant health and neurodevelopment",
+      "ordinal": 17,
+      "contentHash": "2d6d6989a69fa405",
+      "chars": 492
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Evidence from observational research",
+      "heading": "Evidence from observational research",
+      "ordinal": 18,
+      "contentHash": "26c5fd3f3be2eb74",
+      "chars": 1478
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Randomized controlled trials of omega-3 supplementation",
+      "heading": "Randomized controlled trials of omega-3 supplementation",
+      "ordinal": 19,
+      "contentHash": "9bfef22cb2b5b1be",
+      "chars": 2551
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Agency for Healthcare Research and Quality report ",
+      "heading": "Agency for Healthcare Research and Quality report ",
+      "ordinal": 20,
+      "contentHash": "d088d22b17a816ce",
+      "chars": 675
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-infant-health-and-ne",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Infant health and neurodevelopment / Recommendations from the Dietary Guidelines for Americans",
+      "heading": "Recommendations from the Dietary Guidelines for Americans",
+      "ordinal": 21,
+      "contentHash": "f993609576466897",
+      "chars": 1174
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention",
+      "heading": "Cancer prevention",
+      "ordinal": 22,
+      "contentHash": "9fc6ee61660dba2f",
+      "chars": 1491
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention-br",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention / Breast cancer",
+      "heading": "Breast cancer",
+      "ordinal": 23,
+      "contentHash": "601a3342545b673b",
+      "chars": 1609
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention-co",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention / Colorectal cancer",
+      "heading": "Colorectal cancer",
+      "ordinal": 24,
+      "contentHash": "cbcba5d743688b45",
+      "chars": 2647
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention-pr",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention / Prostate cancer",
+      "heading": "Prostate cancer",
+      "ordinal": 25,
+      "contentHash": "f58161f8575db8be",
+      "chars": 4794
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention-ot",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention / Other cancers",
+      "heading": "Other cancers",
+      "ordinal": 26,
+      "contentHash": "7b6138375af8a33a",
+      "chars": 1199
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-cancer-prevention-su",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Cancer prevention / Summary",
+      "heading": "Summary",
+      "ordinal": 27,
+      "contentHash": "793c9106db9e4388",
+      "chars": 496
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-alzheimer-rsquo-s-di",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Alzheimer&rsquo;s disease, dementia, and cognitive function",
+      "heading": "Alzheimer&rsquo;s disease, dementia, and cognitive function",
+      "ordinal": 28,
+      "contentHash": "b4912f25c5a20365",
+      "chars": 5014
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-age-related-macular-",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Age-Related Macular Degeneration",
+      "heading": "Age-Related Macular Degeneration",
+      "ordinal": 29,
+      "contentHash": "acb2cb939c010ebc",
+      "chars": 2906
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-dry-eye-disease",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Dry eye disease",
+      "heading": "Dry eye disease",
+      "ordinal": 30,
+      "contentHash": "05c418580719516e",
+      "chars": 4630
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-rheumatoid-arthritis",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Rheumatoid arthritis",
+      "heading": "Rheumatoid arthritis",
+      "ordinal": 31,
+      "contentHash": "3e5f42d0c9d3c028",
+      "chars": 3401
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions",
+      "heading": "Other conditions",
+      "ordinal": 32,
+      "contentHash": "28485b20c4c60928",
+      "chars": 233
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-dep",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Depression",
+      "heading": "Depression",
+      "ordinal": 33,
+      "contentHash": "8b378a9700255bb7",
+      "chars": 477
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-inf",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Inflammatory bowel disease",
+      "heading": "Inflammatory bowel disease",
+      "ordinal": 34,
+      "contentHash": "ad7fd2482a587a87",
+      "chars": 456
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-att",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Attention-deficit/hyperactivity disorder ",
+      "heading": "Attention-deficit/hyperactivity disorder ",
+      "ordinal": 35,
+      "contentHash": "4c3e31aa54fadf6c",
+      "chars": 561
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-chi",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Childhood allergies",
+      "heading": "Childhood allergies",
+      "ordinal": 36,
+      "contentHash": "e6938942f0d383e0",
+      "chars": 862
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-cys",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Cystic fibrosis",
+      "heading": "Cystic fibrosis",
+      "ordinal": 37,
+      "contentHash": "8c26960fac397336",
+      "chars": 384
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-health-other-conditions-sum",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Health / Other conditions / Summary",
+      "heading": "Summary",
+      "ordinal": 38,
+      "contentHash": "b85212732605b888",
+      "chars": 88
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-safety-of-omega-3s",
+      "sectionPath": "Omega-3 Fatty Acids / Safety of Omega-3s",
+      "heading": "Safety of Omega-3s",
+      "ordinal": 39,
+      "contentHash": "73bf22ca29688718",
+      "chars": 1744
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-interactions-with-medications",
+      "sectionPath": "Omega-3 Fatty Acids / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 40,
+      "contentHash": "16f11623e754b7be",
+      "chars": 258
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-interactions-with-medications-warfarin-c",
+      "sectionPath": "Omega-3 Fatty Acids / Interactions with Medications / Warfarin (Coumadin) and similar anticoagulants",
+      "heading": "Warfarin (Coumadin) and similar anticoagulants",
+      "ordinal": 41,
+      "contentHash": "8f846367d43351d6",
+      "chars": 854
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-omega-3s-and-healthful-diets",
+      "sectionPath": "Omega-3 Fatty Acids / Omega-3s and Healthful Diets",
+      "heading": "Omega-3s and Healthful Diets",
+      "ordinal": 42,
+      "contentHash": "92b56aeae53eabfe",
+      "chars": 1976
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-references",
+      "sectionPath": "Omega-3 Fatty Acids / References",
+      "heading": "References",
+      "ordinal": 43,
+      "contentHash": "c4e2e460af5599ac",
+      "chars": 43076
+    },
+    {
+      "sectionId": "ods-omega-3#omega-3-fatty-acids-disclaimer",
+      "sectionPath": "Omega-3 Fatty Acids / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 44,
+      "contentHash": "e170aebd8a13e9d0",
+      "chars": 667
+    }
+  ]
+}

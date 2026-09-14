@@ -1,0 +1,82 @@
+{
+  "id": "dga-2020-2025",
+  "title": "Dietary Guidelines for Americans, 2020-2025 — official home",
+  "publisher": "USDA / HHS Office of Disease Prevention and Health Promotion",
+  "url": "https://web.archive.org/web/2024id_/https://www.dietaryguidelines.gov/",
+  "originalUrl": "https://www.dietaryguidelines.gov/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.hhs.gov/web/policies/index.html (HHS site policies); the DGA is a joint USDA/HHS publication",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "dga-2020-2025@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "3ca1a0938ea2be7b2de32ef99bbf0a8d581d2de08527e3e0a890905de207acc6",
+  "sectionCount": 8,
+  "sections": [
+    {
+      "sectionId": "dga-2020-2025#preamble",
+      "sectionPath": "Preamble",
+      "heading": null,
+      "ordinal": 1,
+      "contentHash": "b8ad44cbb24f47db",
+      "chars": 1816
+    },
+    {
+      "sectionId": "dga-2020-2025#we-want-to-hear-from-you",
+      "sectionPath": "We want to hear from you!",
+      "heading": "We want to hear from you!",
+      "ordinal": 2,
+      "contentHash": "6299d06677ba9c89",
+      "chars": 255
+    },
+    {
+      "sectionId": "dga-2020-2025#check-out-the-2020-2025-edition-make-every-bite-count-here-s",
+      "sectionPath": "Check out the 2020-2025 Edition! / Make Every Bite Count! Here’s how:",
+      "heading": "Make Every Bite Count! Here’s how:",
+      "ordinal": 3,
+      "contentHash": "0bb9a0cba91537f3",
+      "chars": 20
+    },
+    {
+      "sectionId": "dga-2020-2025#check-out-the-2020-2025-edition-key-resources",
+      "sectionPath": "Check out the 2020-2025 Edition! / Key Resources",
+      "heading": "Key Resources",
+      "ordinal": 4,
+      "contentHash": "f40212da04378ad4",
+      "chars": 181
+    },
+    {
+      "sectionId": "dga-2020-2025#about-the-guidelines-past-and-present-previous-editions",
+      "sectionPath": "About the Guidelines: Past and Present / Previous Editions",
+      "heading": "Previous Editions",
+      "ordinal": 5,
+      "contentHash": "d317d7408dcb43bf",
+      "chars": 96
+    },
+    {
+      "sectionId": "dga-2020-2025#about-the-guidelines-past-and-present-the-latest",
+      "sectionPath": "About the Guidelines: Past and Present / The Latest",
+      "heading": "The Latest",
+      "ordinal": 6,
+      "contentHash": "43700b147a93ba7c",
+      "chars": 140
+    },
+    {
+      "sectionId": "dga-2020-2025#about-the-guidelines-past-and-present-stay-updated",
+      "sectionPath": "About the Guidelines: Past and Present / Stay Updated",
+      "heading": "Stay Updated",
+      "ordinal": 7,
+      "contentHash": "fa4b8d2e24943a64",
+      "chars": 64
+    },
+    {
+      "sectionId": "dga-2020-2025#about-the-guidelines-past-and-present-questions",
+      "sectionPath": "About the Guidelines: Past and Present / Questions?",
+      "heading": "Questions?",
+      "ordinal": 8,
+      "contentHash": "f94359f8551e5587",
+      "chars": 58
+    }
+  ]
+}

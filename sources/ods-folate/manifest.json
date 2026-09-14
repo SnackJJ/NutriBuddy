@@ -1,0 +1,250 @@
+{
+  "id": "ods-folate",
+  "title": "Folate — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Folate-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Folate-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-folate@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "b74b51f7a362f8f206b2e28e18ad4357c50087162a33dec12786c4b1b243eb32",
+  "sectionCount": 29,
+  "sections": [
+    {
+      "sectionId": "ods-folate#folate",
+      "sectionPath": "Folate",
+      "heading": "Folate",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-folate#folate-introduction",
+      "sectionPath": "Folate / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "6d65f726c1a4936c",
+      "chars": 3757
+    },
+    {
+      "sectionId": "ods-folate#folate-recommended-intakes",
+      "sectionPath": "Folate / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "ef139b7c16de3b3b",
+      "chars": 2193
+    },
+    {
+      "sectionId": "ods-folate#folate-sources-of-folate-food",
+      "sectionPath": "Folate / Sources of Folate / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "47ac3676e20d46d4",
+      "chars": 2390
+    },
+    {
+      "sectionId": "ods-folate#folate-sources-of-folate-dietary-supplements",
+      "sectionPath": "Folate / Sources of Folate / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "f1bddc0e11374ce5",
+      "chars": 1107
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-intakes-and-status",
+      "sectionPath": "Folate / Folate Intakes and Status",
+      "heading": "Folate Intakes and Status",
+      "ordinal": 6,
+      "contentHash": "aca7809b42cb2073",
+      "chars": 2602
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-deficiency",
+      "sectionPath": "Folate / Folate Deficiency",
+      "heading": "Folate Deficiency",
+      "ordinal": 7,
+      "contentHash": "c4088c3c1a793b86",
+      "chars": 1016
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy",
+      "heading": "Groups at Risk of Folate Inadequacy",
+      "ordinal": 8,
+      "contentHash": "b68784e3fd5a3675",
+      "chars": 194
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy-people-with-alcoh",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy / People with alcohol use disorder",
+      "heading": "People with alcohol use disorder",
+      "ordinal": 9,
+      "contentHash": "c1fb0c65318fec1a",
+      "chars": 711
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy-women-of-childbea",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy / Women of childbearing age",
+      "heading": "Women of childbearing age",
+      "ordinal": 10,
+      "contentHash": "a5da474109ef669c",
+      "chars": 438
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy-pregnant-women",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy / Pregnant women",
+      "heading": "Pregnant women",
+      "ordinal": 11,
+      "contentHash": "b5b1af7e03082ce4",
+      "chars": 530
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy-people-with-malab",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy / People with malabsorptive disorders",
+      "heading": "People with malabsorptive disorders",
+      "ordinal": 12,
+      "contentHash": "16f964ccafe0ca70",
+      "chars": 494
+    },
+    {
+      "sectionId": "ods-folate#folate-groups-at-risk-of-folate-inadequacy-people-with-an-mt",
+      "sectionPath": "Folate / Groups at Risk of Folate Inadequacy / People with an MTHFR polymorphism",
+      "heading": "People with an MTHFR polymorphism",
+      "ordinal": 13,
+      "contentHash": "5cdc1fc09aacac24",
+      "chars": 1058
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health",
+      "sectionPath": "Folate / Folate and Health",
+      "heading": "Folate and Health",
+      "ordinal": 14,
+      "contentHash": "4eac49edd864414a",
+      "chars": 319
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-autism-spectrum-disorder",
+      "sectionPath": "Folate / Folate and Health / Autism spectrum disorder",
+      "heading": "Autism spectrum disorder",
+      "ordinal": 15,
+      "contentHash": "967673620bf2c33d",
+      "chars": 4301
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-cancer",
+      "sectionPath": "Folate / Folate and Health / Cancer",
+      "heading": "Cancer",
+      "ordinal": 16,
+      "contentHash": "9d1b2d386e54d2a1",
+      "chars": 7793
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-cardiovascular-disease-and-stroke",
+      "sectionPath": "Folate / Folate and Health / Cardiovascular disease and stroke",
+      "heading": "Cardiovascular disease and stroke",
+      "ordinal": 17,
+      "contentHash": "b41643e6aec00f21",
+      "chars": 3800
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-dementia-cognitive-function-and-alz",
+      "sectionPath": "Folate / Folate and Health / Dementia, cognitive function, and Alzheimer&rsquo;s disease",
+      "heading": "Dementia, cognitive function, and Alzheimer&rsquo;s disease",
+      "ordinal": 18,
+      "contentHash": "10cccb0c32e6210b",
+      "chars": 4546
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-depression",
+      "sectionPath": "Folate / Folate and Health / Depression",
+      "heading": "Depression",
+      "ordinal": 19,
+      "contentHash": "3501b0072894652c",
+      "chars": 5996
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-neural-tube-defects",
+      "sectionPath": "Folate / Folate and Health / Neural tube defects",
+      "heading": "Neural tube defects",
+      "ordinal": 20,
+      "contentHash": "d7621e8186853cd2",
+      "chars": 3778
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-health-preterm-birth-congenital-heart-defe",
+      "sectionPath": "Folate / Folate and Health / Preterm birth, congenital heart defects, and other congenital anomalies",
+      "heading": "Preterm birth, congenital heart defects, and other congenital anomalies",
+      "ordinal": 21,
+      "contentHash": "24183da3515314b1",
+      "chars": 1771
+    },
+    {
+      "sectionId": "ods-folate#folate-health-risks-from-excessive-folate",
+      "sectionPath": "Folate / Health Risks from Excessive Folate",
+      "heading": "Health Risks from Excessive Folate",
+      "ordinal": 22,
+      "contentHash": "0a4001c0c0666013",
+      "chars": 3067
+    },
+    {
+      "sectionId": "ods-folate#folate-interactions-with-medications",
+      "sectionPath": "Folate / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 23,
+      "contentHash": "f890b60ee735ba19",
+      "chars": 218
+    },
+    {
+      "sectionId": "ods-folate#folate-interactions-with-medications-methotrexate",
+      "sectionPath": "Folate / Interactions with Medications / Methotrexate",
+      "heading": "Methotrexate",
+      "ordinal": 24,
+      "contentHash": "9f1a9915e6cc2694",
+      "chars": 463
+    },
+    {
+      "sectionId": "ods-folate#folate-interactions-with-medications-antiepileptic-medicatio",
+      "sectionPath": "Folate / Interactions with Medications / Antiepileptic medications",
+      "heading": "Antiepileptic medications",
+      "ordinal": 25,
+      "contentHash": "c9df92718d60110e",
+      "chars": 479
+    },
+    {
+      "sectionId": "ods-folate#folate-interactions-with-medications-sulfasalazine",
+      "sectionPath": "Folate / Interactions with Medications / Sulfasalazine",
+      "heading": "Sulfasalazine",
+      "ordinal": 26,
+      "contentHash": "0bd2b006c1a350be",
+      "chars": 339
+    },
+    {
+      "sectionId": "ods-folate#folate-folate-and-healthful-diets",
+      "sectionPath": "Folate / Folate and Healthful Diets",
+      "heading": "Folate and Healthful Diets",
+      "ordinal": 27,
+      "contentHash": "3b951a42b1b466b8",
+      "chars": 1356
+    },
+    {
+      "sectionId": "ods-folate#folate-references",
+      "sectionPath": "Folate / References",
+      "heading": "References",
+      "ordinal": 28,
+      "contentHash": "a529f2b62d5a4c9b",
+      "chars": 33140
+    },
+    {
+      "sectionId": "ods-folate#folate-disclaimer",
+      "sectionPath": "Folate / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 29,
+      "contentHash": "5f124da067fb32a3",
+      "chars": 667
+    }
+  ]
+}

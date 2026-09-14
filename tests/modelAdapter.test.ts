@@ -450,7 +450,10 @@ describe("resolveProviderProfile", () => {
     });
     expect(profile.id).toBe("commandcode");
     expect(profile.apiKeyEnv).toBe("COMMANDCODE_API_KEY");
-    expect(profile.models.flash).toBe("deepseek/deepseek-v4-flash");
+    expect(profile.models.flash).toBe("deepseek/deepseek-v4.1-flash");
+    // The gateway carries v4.1 as flash only, so pro stays on v4 — asserted so a
+    // future unilateral bump of both tiers fails here rather than at a 400.
+    expect(profile.models.pro).toBe("deepseek/deepseek-v4-pro");
   });
 
   it("lets the environment override one field at a time", () => {

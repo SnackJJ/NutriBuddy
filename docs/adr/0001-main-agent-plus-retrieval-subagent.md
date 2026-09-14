@@ -1,6 +1,8 @@
 # 主 agent + 单一检索 subagent
 
 > 2026-07-05 更新：`docs/ADD.md` 是当前架构 source of truth。本 ADR 仍约束“不要按领域拆多 agent”；知识检索 subagent 也已从 M2 固定项改为 metric-gated extension。
+>
+> 2026-09-14 更新：知识 RAG 已由 `docs/adr/0004` 纳入范围（仅依据层），因此本文"检索闸保持关闭"的表述部分失效。**拓扑结论不变** —— 依据层不需要 subagent（V1.0 不检索，V1.1 检索也按机制而非主题成立）。
 
 NutriBuddy 采用「主 agent + 单一检索 subagent」拓扑,不做按领域划分的专家 agent 团(膳食/补剂/运动营养师等)。
 

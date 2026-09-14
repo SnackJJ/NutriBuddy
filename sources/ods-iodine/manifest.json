@@ -1,0 +1,258 @@
+{
+  "id": "ods-iodine",
+  "title": "Iodine — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Iodine-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Iodine-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-iodine@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "0f3f6758fe35c0dfcc436ef79d2683d95f08823bc2c268cffb9a8269d4330d77",
+  "sectionCount": 30,
+  "sections": [
+    {
+      "sectionId": "ods-iodine#iodine",
+      "sectionPath": "Iodine",
+      "heading": "Iodine",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-iodine#iodine-introduction",
+      "sectionPath": "Iodine / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "9870d26ff560fa8c",
+      "chars": 2945
+    },
+    {
+      "sectionId": "ods-iodine#iodine-recommended-intakes",
+      "sectionPath": "Iodine / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "91fdc864b507fa4a",
+      "chars": 1730
+    },
+    {
+      "sectionId": "ods-iodine#iodine-sources-of-iodine-food",
+      "sectionPath": "Iodine / Sources of Iodine / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "189198c3846c81e3",
+      "chars": 3071
+    },
+    {
+      "sectionId": "ods-iodine#iodine-sources-of-iodine-iodized-salt",
+      "sectionPath": "Iodine / Sources of Iodine / Iodized salt",
+      "heading": "Iodized salt",
+      "ordinal": 5,
+      "contentHash": "7dbdff381d9356b7",
+      "chars": 1199
+    },
+    {
+      "sectionId": "ods-iodine#iodine-sources-of-iodine-dietary-supplements",
+      "sectionPath": "Iodine / Sources of Iodine / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 6,
+      "contentHash": "e5d7b424ae188ad2",
+      "chars": 776
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-intakes-and-status-iodine-intakes",
+      "sectionPath": "Iodine / Iodine Intakes and Status / Iodine intakes",
+      "heading": "Iodine intakes",
+      "ordinal": 7,
+      "contentHash": "a5f96de4dc1c293e",
+      "chars": 1064
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-intakes-and-status-iodine-status-of-the-genera",
+      "sectionPath": "Iodine / Iodine Intakes and Status / Iodine status of the general U.S. population",
+      "heading": "Iodine status of the general U.S. population",
+      "ordinal": 8,
+      "contentHash": "ade823526acdee15",
+      "chars": 2845
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-intakes-and-status-iodine-status-of-u-s-pregna",
+      "sectionPath": "Iodine / Iodine Intakes and Status / Iodine status of U.S. pregnant women",
+      "heading": "Iodine status of U.S. pregnant women",
+      "ordinal": 9,
+      "contentHash": "daeab54456f62a12",
+      "chars": 1461
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-deficiency",
+      "sectionPath": "Iodine / Iodine Deficiency",
+      "heading": "Iodine Deficiency",
+      "ordinal": 10,
+      "contentHash": "f7afbc219a792197",
+      "chars": 2205
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy",
+      "heading": "Groups at Risk of Iodine Inadequacy",
+      "ordinal": 11,
+      "contentHash": "cd2b6b6e941019bb",
+      "chars": 694
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy-people-who-do-not",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy / People who do not use iodized salt",
+      "heading": "People who do not use iodized salt",
+      "ordinal": 12,
+      "contentHash": "d405236fe45ca732",
+      "chars": 294
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy-pregnant-women",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy / Pregnant women",
+      "heading": "Pregnant women",
+      "ordinal": 13,
+      "contentHash": "710d0a24af0a544d",
+      "chars": 346
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy-vegans-and-people",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy / Vegans and people who eat few or no dairy products, seafood, and eggs",
+      "heading": "Vegans and people who eat few or no dairy products, seafood, and eggs",
+      "ordinal": 14,
+      "contentHash": "866bce764f458c3b",
+      "chars": 262
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy-people-living-in-",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy / People living in regions with iodine-deficient soils",
+      "heading": "People living in regions with iodine-deficient soils",
+      "ordinal": 15,
+      "contentHash": "3969d1bbcb69cb60",
+      "chars": 415
+    },
+    {
+      "sectionId": "ods-iodine#iodine-groups-at-risk-of-iodine-inadequacy-people-with-margi",
+      "sectionPath": "Iodine / Groups at Risk of Iodine Inadequacy / People with marginal iodine status who eat foods containing goitrogens",
+      "heading": "People with marginal iodine status who eat foods containing goitrogens",
+      "ordinal": 16,
+      "contentHash": "70eea00a700b04c9",
+      "chars": 644
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health",
+      "sectionPath": "Iodine / Iodine and Health",
+      "heading": "Iodine and Health",
+      "ordinal": 17,
+      "contentHash": "01a6f0db47850553",
+      "chars": 543
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health-fetal-and-infant-development",
+      "sectionPath": "Iodine / Iodine and Health / Fetal and infant development",
+      "heading": "Fetal and infant development",
+      "ordinal": 18,
+      "contentHash": "f2f871fea505e9fb",
+      "chars": 5854
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health-cognitive-function-during-childhood",
+      "sectionPath": "Iodine / Iodine and Health / Cognitive function during childhood",
+      "heading": "Cognitive function during childhood",
+      "ordinal": 19,
+      "contentHash": "0a2577fef6d80f1e",
+      "chars": 1547
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health-fibrocystic-breast-disease",
+      "sectionPath": "Iodine / Iodine and Health / Fibrocystic breast disease",
+      "heading": "Fibrocystic breast disease",
+      "ordinal": 20,
+      "contentHash": "4e938b86d3210eff",
+      "chars": 1956
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health-radiation-induced-thyroid-cancer",
+      "sectionPath": "Iodine / Iodine and Health / Radiation-induced thyroid cancer",
+      "heading": "Radiation-induced thyroid cancer",
+      "ordinal": 21,
+      "contentHash": "fa511dfd68e6e04f",
+      "chars": 1197
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-health-low-iodine-diets-for-radioactive-io",
+      "sectionPath": "Iodine / Iodine and Health / Low iodine diets for radioactive iodine treatment",
+      "heading": "Low iodine diets for radioactive iodine treatment",
+      "ordinal": 22,
+      "contentHash": "6cfb6151a4970942",
+      "chars": 4689
+    },
+    {
+      "sectionId": "ods-iodine#iodine-health-risks-from-excessive-iodine",
+      "sectionPath": "Iodine / Health Risks from Excessive Iodine",
+      "heading": "Health Risks from Excessive Iodine",
+      "ordinal": 23,
+      "contentHash": "bc4d3c590b3bcb61",
+      "chars": 1532
+    },
+    {
+      "sectionId": "ods-iodine#iodine-interactions-with-medications",
+      "sectionPath": "Iodine / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 24,
+      "contentHash": "91a666b780ae6421",
+      "chars": 245
+    },
+    {
+      "sectionId": "ods-iodine#iodine-interactions-with-medications-antithyroid-medications",
+      "sectionPath": "Iodine / Interactions with Medications / Antithyroid medications",
+      "heading": "Antithyroid medications",
+      "ordinal": 25,
+      "contentHash": "4a60aa3c9a376bab",
+      "chars": 215
+    },
+    {
+      "sectionId": "ods-iodine#iodine-interactions-with-medications-angiotensin-converting-",
+      "sectionPath": "Iodine / Interactions with Medications / Angiotensin-converting enzyme inhibitors",
+      "heading": "Angiotensin-converting enzyme inhibitors",
+      "ordinal": 26,
+      "contentHash": "1744a632627aa84b",
+      "chars": 316
+    },
+    {
+      "sectionId": "ods-iodine#iodine-interactions-with-medications-potassium-sparing-diure",
+      "sectionPath": "Iodine / Interactions with Medications / Potassium-sparing diuretics",
+      "heading": "Potassium-sparing diuretics",
+      "ordinal": 27,
+      "contentHash": "7a6f2a5b8ceadcf6",
+      "chars": 163
+    },
+    {
+      "sectionId": "ods-iodine#iodine-iodine-and-healthful-diets",
+      "sectionPath": "Iodine / Iodine and Healthful Diets",
+      "heading": "Iodine and Healthful Diets",
+      "ordinal": 28,
+      "contentHash": "6ab98c7619f2c360",
+      "chars": 1207
+    },
+    {
+      "sectionId": "ods-iodine#iodine-references",
+      "sectionPath": "Iodine / References",
+      "heading": "References",
+      "ordinal": 29,
+      "contentHash": "1e56789b7b2cdf41",
+      "chars": 17606
+    },
+    {
+      "sectionId": "ods-iodine#iodine-disclaimer",
+      "sectionPath": "Iodine / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 30,
+      "contentHash": "3520bbe5b3e3abfc",
+      "chars": 666
+    }
+  ]
+}

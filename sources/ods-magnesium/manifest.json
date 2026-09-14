@@ -1,0 +1,234 @@
+{
+  "id": "ods-magnesium",
+  "title": "Magnesium — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-magnesium@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "3dc2033cc45e6bd814aa19c55d231be43623d3006aead701b14e67ab9112985e",
+  "sectionCount": 27,
+  "sections": [
+    {
+      "sectionId": "ods-magnesium#magnesium",
+      "sectionPath": "Magnesium",
+      "heading": "Magnesium",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-introduction",
+      "sectionPath": "Magnesium / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "d53d282ce1e75eea",
+      "chars": 2484
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-recommended-intakes",
+      "sectionPath": "Magnesium / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "42d52a1e7afad679",
+      "chars": 1504
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-sources-of-magnesium-food",
+      "sectionPath": "Magnesium / Sources of Magnesium / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "99306ad27e18868a",
+      "chars": 1612
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-sources-of-magnesium-dietary-supplements",
+      "sectionPath": "Magnesium / Sources of Magnesium / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "cf5789b610716b48",
+      "chars": 868
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-sources-of-magnesium-medicines",
+      "sectionPath": "Magnesium / Sources of Magnesium / Medicines",
+      "heading": "Medicines",
+      "ordinal": 6,
+      "contentHash": "c2f537fec088dd00",
+      "chars": 684
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-intakes-and-status",
+      "sectionPath": "Magnesium / Magnesium Intakes and Status",
+      "heading": "Magnesium Intakes and Status",
+      "ordinal": 7,
+      "contentHash": "73c77bc51583b052",
+      "chars": 1266
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-deficiency",
+      "sectionPath": "Magnesium / Magnesium Deficiency",
+      "heading": "Magnesium Deficiency",
+      "ordinal": 8,
+      "contentHash": "020f3c78893439a4",
+      "chars": 813
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy",
+      "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy",
+      "heading": "Groups at Risk of Magnesium Inadequacy",
+      "ordinal": 9,
+      "contentHash": "be9bf48939abbf36",
+      "chars": 398
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with",
+      "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / People with gastrointestinal diseases",
+      "heading": "People with gastrointestinal diseases",
+      "ordinal": 10,
+      "contentHash": "030c34cc7c010095",
+      "chars": 318
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with",
+      "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / People with type 2 diabetes",
+      "heading": "People with type 2 diabetes",
+      "ordinal": 11,
+      "contentHash": "218de0579094ec34",
+      "chars": 267
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-people-with",
+      "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / People with alcohol dependence",
+      "heading": "People with alcohol dependence",
+      "ordinal": 12,
+      "contentHash": "5cb1f9eadb3a9e6f",
+      "chars": 507
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-groups-at-risk-of-magnesium-inadequacy-older-adult",
+      "sectionPath": "Magnesium / Groups at Risk of Magnesium Inadequacy / Older adults",
+      "heading": "Older adults",
+      "ordinal": 13,
+      "contentHash": "f09838133229ab22",
+      "chars": 372
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-health",
+      "sectionPath": "Magnesium / Magnesium and Health",
+      "heading": "Magnesium and Health",
+      "ordinal": 14,
+      "contentHash": "6a48367ffd2150b1",
+      "chars": 309
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-health-hypertension-and-cardiovascul",
+      "sectionPath": "Magnesium / Magnesium and Health / Hypertension and cardiovascular disease",
+      "heading": "Hypertension and cardiovascular disease",
+      "ordinal": 15,
+      "contentHash": "01a3d92dcc330ad2",
+      "chars": 4566
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-health-type-2-diabetes",
+      "sectionPath": "Magnesium / Magnesium and Health / Type 2 diabetes",
+      "heading": "Type 2 diabetes",
+      "ordinal": 16,
+      "contentHash": "07011c37c8dd00a2",
+      "chars": 3603
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-health-osteoporosis",
+      "sectionPath": "Magnesium / Magnesium and Health / Osteoporosis",
+      "heading": "Osteoporosis",
+      "ordinal": 17,
+      "contentHash": "60a52036c236dedc",
+      "chars": 1310
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-health-migraine-headaches",
+      "sectionPath": "Magnesium / Magnesium and Health / Migraine headaches",
+      "heading": "Migraine headaches",
+      "ordinal": 18,
+      "contentHash": "7272526227f41830",
+      "chars": 1084
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-health-risks-from-excessive-magnesium",
+      "sectionPath": "Magnesium / Health Risks from Excessive Magnesium",
+      "heading": "Health Risks from Excessive Magnesium",
+      "ordinal": 19,
+      "contentHash": "cdede5956c7b54e5",
+      "chars": 1832
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-interactions-with-medications",
+      "sectionPath": "Magnesium / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 20,
+      "contentHash": "2a7dd0ae52f322a5",
+      "chars": 283
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-interactions-with-medications-bisphosphonates",
+      "sectionPath": "Magnesium / Interactions with Medications / Bisphosphonates",
+      "heading": "Bisphosphonates",
+      "ordinal": 21,
+      "contentHash": "e6234bb903c7d7ee",
+      "chars": 282
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-interactions-with-medications-antibiotics",
+      "sectionPath": "Magnesium / Interactions with Medications / Antibiotics",
+      "heading": "Antibiotics",
+      "ordinal": 22,
+      "contentHash": "ad9c4a5d65ce34a2",
+      "chars": 340
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-interactions-with-medications-diuretics",
+      "sectionPath": "Magnesium / Interactions with Medications / Diuretics",
+      "heading": "Diuretics",
+      "ordinal": 23,
+      "contentHash": "36d8a0cbf2010ca5",
+      "chars": 406
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-interactions-with-medications-proton-pump-inhibito",
+      "sectionPath": "Magnesium / Interactions with Medications / Proton pump inhibitors",
+      "heading": "Proton pump inhibitors",
+      "ordinal": 24,
+      "contentHash": "cc21e9d75e0122cc",
+      "chars": 645
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-magnesium-and-healthful-diets",
+      "sectionPath": "Magnesium / Magnesium and Healthful Diets",
+      "heading": "Magnesium and Healthful Diets",
+      "ordinal": 25,
+      "contentHash": "4a2c95102f0c4cff",
+      "chars": 1425
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-references",
+      "sectionPath": "Magnesium / References",
+      "heading": "References",
+      "ordinal": 26,
+      "contentHash": "954ccd7a673f6e9b",
+      "chars": 10611
+    },
+    {
+      "sectionId": "ods-magnesium#magnesium-disclaimer",
+      "sectionPath": "Magnesium / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 27,
+      "contentHash": "f2dc1beaddcd7ffe",
+      "chars": 662
+    }
+  ]
+}

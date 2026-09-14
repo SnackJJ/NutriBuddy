@@ -1,6 +1,11 @@
 # 知识 RAG 纳入项目范围
 
-> 状态：**Proposed**（2026-07-26）。本 ADR 修改 `docs/ADD.md` §Out of Scope 的一处判定，并部分打开 ADR 0001 / ADR 0003 关闭的检索闸。接受后需同步更新 ADD 与 `CONTEXT.md`。
+> 状态：**Accepted**（2026-07-26 提出，2026-09-14 接受）。
+> 本 ADR 修改 `docs/ADD.md` §Out of Scope 的一处判定，并部分打开 ADR 0001 / ADR 0003 关闭的检索闸；`docs/ADD.md`（§Out of Scope / §Data Pipeline / §Phases）与 `CONTEXT.md`（Source registry / Citation）已同步。
+>
+> **落地分期**：本 ADR 写的是知识 RAG 的完整形态（§6 含 `tsvector` + `pgvector` + RRF 混合检索），但实现按 `docs/rfc/0011` 分两期 —— **V1.0 只做依据层**（source registry + 语料快照 + 钉住证据集 + 引用四条件检查），**检索本身属 V1.1**。把 ADR 的"在范围内"读成"V1.0 就要检索"是本条分期明确排除的读法，理由见 RFC 0011 §1：V1.0 的任何"按相关性挑证据"都是把检索偷偷放进来。
+>
+> 接受时的补充证据（`docs/rfc/0009` / S2 live 基线）：确定性闸与轨迹已经能产出可复现的数字，依据层要回答的是"这个建议为什么成立"，而不是补正确性 —— 与 §2 的前提一致。
 
 ## 背景
 

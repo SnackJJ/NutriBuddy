@@ -1,0 +1,258 @@
+{
+  "id": "ods-zinc",
+  "title": "Zinc — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Zinc-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Zinc-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-zinc@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "cfc093c820cfb5440fc6b0fee0c217aad2a0132fef6cecadc9e7224b1e16c0d2",
+  "sectionCount": 30,
+  "sections": [
+    {
+      "sectionId": "ods-zinc#zinc",
+      "sectionPath": "Zinc",
+      "heading": "Zinc",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-zinc#zinc-introduction",
+      "sectionPath": "Zinc / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "8aa94b55a26c92cc",
+      "chars": 2134
+    },
+    {
+      "sectionId": "ods-zinc#zinc-recommended-intakes",
+      "sectionPath": "Zinc / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "34efb9f4b7fb129b",
+      "chars": 1290
+    },
+    {
+      "sectionId": "ods-zinc#zinc-sources-of-zinc-food",
+      "sectionPath": "Zinc / Sources of Zinc / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "9e2de95b56f6d58f",
+      "chars": 2088
+    },
+    {
+      "sectionId": "ods-zinc#zinc-sources-of-zinc-dietary-supplements",
+      "sectionPath": "Zinc / Sources of Zinc / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "04a969decdc5509e",
+      "chars": 920
+    },
+    {
+      "sectionId": "ods-zinc#zinc-sources-of-zinc-other-sources",
+      "sectionPath": "Zinc / Sources of Zinc / Other sources",
+      "heading": "Other sources",
+      "ordinal": 6,
+      "contentHash": "fd88eb3bfbfc5e96",
+      "chars": 758
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-intakes-and-status",
+      "sectionPath": "Zinc / Zinc Intakes and Status",
+      "heading": "Zinc Intakes and Status",
+      "ordinal": 7,
+      "contentHash": "482f09b786f13ed7",
+      "chars": 2041
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-deficiency",
+      "sectionPath": "Zinc / Zinc Deficiency",
+      "heading": "Zinc Deficiency",
+      "ordinal": 8,
+      "contentHash": "9b4a061b35929dc9",
+      "chars": 1197
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy",
+      "heading": "Groups at Risk of Zinc Inadequacy",
+      "ordinal": 9,
+      "contentHash": "5f755a62469916d6",
+      "chars": 80
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-people-with-gastroint",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / People with gastrointestinal disorders or who have had bariatric surgery",
+      "heading": "People with gastrointestinal disorders or who have had bariatric surgery",
+      "ordinal": 10,
+      "contentHash": "94870b689d2c434d",
+      "chars": 1066
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-vegetarians-especiall",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / Vegetarians (especially vegans)",
+      "heading": "Vegetarians (especially vegans)",
+      "ordinal": 11,
+      "contentHash": "8ba71d5f1e45cd60",
+      "chars": 843
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-people-who-are-pregna",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / People who are pregnant or lactating",
+      "heading": "People who are pregnant or lactating",
+      "ordinal": 12,
+      "contentHash": "6be0bdf0ce46d269",
+      "chars": 1072
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-older-infants-who-are",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / Older infants who are exclusively breastfed",
+      "heading": "Older infants who are exclusively breastfed",
+      "ordinal": 13,
+      "contentHash": "455eb20de6354e01",
+      "chars": 423
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-children-with-sickle-",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / Children with sickle cell disease",
+      "heading": "Children with sickle cell disease",
+      "ordinal": 14,
+      "contentHash": "0571503564ef63b4",
+      "chars": 619
+    },
+    {
+      "sectionId": "ods-zinc#zinc-groups-at-risk-of-zinc-inadequacy-people-with-alcohol-u",
+      "sectionPath": "Zinc / Groups at Risk of Zinc Inadequacy / People with alcohol use disorder",
+      "heading": "People with alcohol use disorder",
+      "ordinal": 15,
+      "contentHash": "8cf6f5f3b205b575",
+      "chars": 367
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health",
+      "sectionPath": "Zinc / Zinc and Health",
+      "heading": "Zinc and Health",
+      "ordinal": 16,
+      "contentHash": "c13bdc88c250a329",
+      "chars": 380
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-the-common-cold",
+      "sectionPath": "Zinc / Zinc and Health / The common cold",
+      "heading": "The common cold",
+      "ordinal": 17,
+      "contentHash": "7c145f5a4f2e4a79",
+      "chars": 3126
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-pneumonia-in-children",
+      "sectionPath": "Zinc / Zinc and Health / Pneumonia in children",
+      "heading": "Pneumonia in children",
+      "ordinal": 18,
+      "contentHash": "e7e067fecfe0a90f",
+      "chars": 1499
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-hiv-in-children-and-adults",
+      "sectionPath": "Zinc / Zinc and Health / HIV in children and adults",
+      "heading": "HIV in children and adults",
+      "ordinal": 19,
+      "contentHash": "9bfd666aba595570",
+      "chars": 2916
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-childhood-acute-diarrhea",
+      "sectionPath": "Zinc / Zinc and Health / Childhood acute diarrhea",
+      "heading": "Childhood acute diarrhea",
+      "ordinal": 20,
+      "contentHash": "b21752227d177468",
+      "chars": 2739
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-age-related-macular-degeneration",
+      "sectionPath": "Zinc / Zinc and Health / Age-related macular degeneration",
+      "heading": "Age-related macular degeneration",
+      "ordinal": 21,
+      "contentHash": "3e638fbf436ae458",
+      "chars": 2537
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-health-type-2-diabetes",
+      "sectionPath": "Zinc / Zinc and Health / Type 2 diabetes",
+      "heading": "Type 2 diabetes",
+      "ordinal": 22,
+      "contentHash": "d1cb8ff089cdce85",
+      "chars": 5192
+    },
+    {
+      "sectionId": "ods-zinc#zinc-health-risks-from-excessive-zinc",
+      "sectionPath": "Zinc / Health Risks from Excessive Zinc",
+      "heading": "Health Risks from Excessive Zinc",
+      "ordinal": 23,
+      "contentHash": "faa324f7950f006a",
+      "chars": 1248
+    },
+    {
+      "sectionId": "ods-zinc#zinc-interactions-with-medications",
+      "sectionPath": "Zinc / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 24,
+      "contentHash": "2ad13ae468793439",
+      "chars": 306
+    },
+    {
+      "sectionId": "ods-zinc#zinc-interactions-with-medications-antibiotics",
+      "sectionPath": "Zinc / Interactions with Medications / Antibiotics",
+      "heading": "Antibiotics",
+      "ordinal": 25,
+      "contentHash": "90dbc2618f261f77",
+      "chars": 396
+    },
+    {
+      "sectionId": "ods-zinc#zinc-interactions-with-medications-penicillamine",
+      "sectionPath": "Zinc / Interactions with Medications / Penicillamine",
+      "heading": "Penicillamine",
+      "ordinal": 26,
+      "contentHash": "6d872f5b7c933c4b",
+      "chars": 236
+    },
+    {
+      "sectionId": "ods-zinc#zinc-interactions-with-medications-diuretics",
+      "sectionPath": "Zinc / Interactions with Medications / Diuretics",
+      "heading": "Diuretics",
+      "ordinal": 27,
+      "contentHash": "1a966523d36677ae",
+      "chars": 242
+    },
+    {
+      "sectionId": "ods-zinc#zinc-zinc-and-healthful-diets",
+      "sectionPath": "Zinc / Zinc and Healthful Diets",
+      "heading": "Zinc and Healthful Diets",
+      "ordinal": 28,
+      "contentHash": "b8ba8be0639c17db",
+      "chars": 1268
+    },
+    {
+      "sectionId": "ods-zinc#zinc-references",
+      "sectionPath": "Zinc / References",
+      "heading": "References",
+      "ordinal": 29,
+      "contentHash": "2326646fd38856b6",
+      "chars": 20189
+    },
+    {
+      "sectionId": "ods-zinc#zinc-disclaimer",
+      "sectionPath": "Zinc / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 30,
+      "contentHash": "ab697ab809eacbe2",
+      "chars": 668
+    }
+  ]
+}

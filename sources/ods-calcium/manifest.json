@@ -1,0 +1,282 @@
+{
+  "id": "ods-calcium",
+  "title": "Calcium — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Calcium-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/Calcium-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-calcium@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "325c88ef5fd6fe23781e5c003364a54dd1c40bf9398eda5e8303e0d58c87e941",
+  "sectionCount": 33,
+  "sections": [
+    {
+      "sectionId": "ods-calcium#calcium",
+      "sectionPath": "Calcium",
+      "heading": "Calcium",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-calcium#calcium-introduction",
+      "sectionPath": "Calcium / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "587e28df1a9b7361",
+      "chars": 3140
+    },
+    {
+      "sectionId": "ods-calcium#calcium-recommended-intakes",
+      "sectionPath": "Calcium / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "aa40fe4e7c6bec30",
+      "chars": 1686
+    },
+    {
+      "sectionId": "ods-calcium#calcium-sources-of-calcium-food",
+      "sectionPath": "Calcium / Sources of Calcium / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "9283d1f147bb2ac5",
+      "chars": 2151
+    },
+    {
+      "sectionId": "ods-calcium#calcium-sources-of-calcium-dietary-supplements",
+      "sectionPath": "Calcium / Sources of Calcium / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "d43e3c803aaa2286",
+      "chars": 2431
+    },
+    {
+      "sectionId": "ods-calcium#calcium-sources-of-calcium-medicines",
+      "sectionPath": "Calcium / Sources of Calcium / Medicines",
+      "heading": "Medicines",
+      "ordinal": 6,
+      "contentHash": "5beb1e9744051adb",
+      "chars": 257
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-intakes-and-status",
+      "sectionPath": "Calcium / Calcium Intakes and Status",
+      "heading": "Calcium Intakes and Status",
+      "ordinal": 7,
+      "contentHash": "19d754522bc32a34",
+      "chars": 1401
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-deficiency",
+      "sectionPath": "Calcium / Calcium Deficiency",
+      "heading": "Calcium Deficiency",
+      "ordinal": 8,
+      "contentHash": "c7e0971d2c1f3b51",
+      "chars": 1912
+    },
+    {
+      "sectionId": "ods-calcium#calcium-groups-at-risk-of-calcium-inadequacy",
+      "sectionPath": "Calcium / Groups at Risk of Calcium Inadequacy",
+      "heading": "Groups at Risk of Calcium Inadequacy",
+      "ordinal": 9,
+      "contentHash": "fcd7b402576b70a0",
+      "chars": 71
+    },
+    {
+      "sectionId": "ods-calcium#calcium-groups-at-risk-of-calcium-inadequacy-postmenopausal-",
+      "sectionPath": "Calcium / Groups at Risk of Calcium Inadequacy / Postmenopausal women",
+      "heading": "Postmenopausal women",
+      "ordinal": 10,
+      "contentHash": "26229c5755e2dc6a",
+      "chars": 759
+    },
+    {
+      "sectionId": "ods-calcium#calcium-groups-at-risk-of-calcium-inadequacy-individuals-who",
+      "sectionPath": "Calcium / Groups at Risk of Calcium Inadequacy / Individuals who avoid dairy products",
+      "heading": "Individuals who avoid dairy products",
+      "ordinal": 11,
+      "contentHash": "fce1c1f8d81b9fc0",
+      "chars": 891
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health",
+      "sectionPath": "Calcium / Calcium and Health",
+      "heading": "Calcium and Health",
+      "ordinal": 12,
+      "contentHash": "c5deef94cc5c035a",
+      "chars": 218
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-bone-health-in-older-adults",
+      "sectionPath": "Calcium / Calcium and Health / Bone health in older adults",
+      "heading": "Bone health in older adults",
+      "ordinal": 13,
+      "contentHash": "13981a0381211d68",
+      "chars": 859
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-bone-health-in-older-adults-bone-",
+      "sectionPath": "Calcium / Calcium and Health / Bone health in older adults / Bone mineral density",
+      "heading": "Bone mineral density",
+      "ordinal": 14,
+      "contentHash": "8a6dcc81440f9904",
+      "chars": 2875
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-bone-health-in-older-adults-fract",
+      "sectionPath": "Calcium / Calcium and Health / Bone health in older adults / Fractures",
+      "heading": "Fractures",
+      "ordinal": 15,
+      "contentHash": "607e19aa2ad9670b",
+      "chars": 2591
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cancer",
+      "sectionPath": "Calcium / Calcium and Health / Cancer",
+      "heading": "Cancer",
+      "ordinal": 16,
+      "contentHash": "fae71dc65ee78c3c",
+      "chars": 228
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cancer-all-cancer-incidence-and-m",
+      "sectionPath": "Calcium / Calcium and Health / Cancer / All-cancer incidence and mortality",
+      "heading": "All-cancer incidence and mortality",
+      "ordinal": 17,
+      "contentHash": "b148e75bfb8c51b7",
+      "chars": 3438
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cancer-colorectal-cancer",
+      "sectionPath": "Calcium / Calcium and Health / Cancer / Colorectal cancer",
+      "heading": "Colorectal cancer",
+      "ordinal": 18,
+      "contentHash": "f8369d8ab0c7c59e",
+      "chars": 2073
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cancer-other-cancers",
+      "sectionPath": "Calcium / Calcium and Health / Cancer / Other cancers",
+      "heading": "Other cancers",
+      "ordinal": 19,
+      "contentHash": "b3c0c0ce2019fd91",
+      "chars": 2324
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cancer-conclusion",
+      "sectionPath": "Calcium / Calcium and Health / Cancer / Conclusion",
+      "heading": "Conclusion",
+      "ordinal": 20,
+      "contentHash": "4f6c0793b1bb7444",
+      "chars": 237
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-cardiovascular-disease",
+      "sectionPath": "Calcium / Calcium and Health / Cardiovascular disease",
+      "heading": "Cardiovascular disease",
+      "ordinal": 21,
+      "contentHash": "90b76d060e7e6962",
+      "chars": 6155
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-preeclampsia",
+      "sectionPath": "Calcium / Calcium and Health / Preeclampsia",
+      "heading": "Preeclampsia",
+      "ordinal": 22,
+      "contentHash": "6c02254e8e6e7fa5",
+      "chars": 2726
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-weight-management",
+      "sectionPath": "Calcium / Calcium and Health / Weight management",
+      "heading": "Weight management",
+      "ordinal": 23,
+      "contentHash": "9ac55a9e50664785",
+      "chars": 2187
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-health-metabolic-syndrome",
+      "sectionPath": "Calcium / Calcium and Health / Metabolic syndrome",
+      "heading": "Metabolic syndrome",
+      "ordinal": 24,
+      "contentHash": "f48d5924fc13327a",
+      "chars": 2020
+    },
+    {
+      "sectionId": "ods-calcium#calcium-health-risks-from-excessive-calcium",
+      "sectionPath": "Calcium / Health Risks from Excessive Calcium",
+      "heading": "Health Risks from Excessive Calcium",
+      "ordinal": 25,
+      "contentHash": "9887f79eced27ad8",
+      "chars": 1424
+    },
+    {
+      "sectionId": "ods-calcium#calcium-interactions-with-medications",
+      "sectionPath": "Calcium / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 26,
+      "contentHash": "f044d9697ac810e4",
+      "chars": 306
+    },
+    {
+      "sectionId": "ods-calcium#calcium-interactions-with-medications-dolutegravir",
+      "sectionPath": "Calcium / Interactions with Medications / Dolutegravir",
+      "heading": "Dolutegravir",
+      "ordinal": 27,
+      "contentHash": "8d2cd3310a3ae942",
+      "chars": 403
+    },
+    {
+      "sectionId": "ods-calcium#calcium-interactions-with-medications-levothyroxine",
+      "sectionPath": "Calcium / Interactions with Medications / Levothyroxine",
+      "heading": "Levothyroxine",
+      "ordinal": 28,
+      "contentHash": "6828d4212421e4ab",
+      "chars": 371
+    },
+    {
+      "sectionId": "ods-calcium#calcium-interactions-with-medications-lithium",
+      "sectionPath": "Calcium / Interactions with Medications / Lithium",
+      "heading": "Lithium",
+      "ordinal": 29,
+      "contentHash": "c6b13a9c03b2ff57",
+      "chars": 189
+    },
+    {
+      "sectionId": "ods-calcium#calcium-interactions-with-medications-quinolone-antibiotics",
+      "sectionPath": "Calcium / Interactions with Medications / Quinolone antibiotics",
+      "heading": "Quinolone antibiotics",
+      "ordinal": 30,
+      "contentHash": "3e410ee399fa6f81",
+      "chars": 305
+    },
+    {
+      "sectionId": "ods-calcium#calcium-calcium-and-healthful-diets",
+      "sectionPath": "Calcium / Calcium and Healthful Diets",
+      "heading": "Calcium and Healthful Diets",
+      "ordinal": 31,
+      "contentHash": "adcb70705174bcdd",
+      "chars": 1388
+    },
+    {
+      "sectionId": "ods-calcium#calcium-references",
+      "sectionPath": "Calcium / References",
+      "heading": "References",
+      "ordinal": 32,
+      "contentHash": "cd7120a3d07a651f",
+      "chars": 23215
+    },
+    {
+      "sectionId": "ods-calcium#calcium-disclaimer",
+      "sectionPath": "Calcium / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 33,
+      "contentHash": "50e9c5daf9071e1f",
+      "chars": 663
+    }
+  ]
+}

@@ -1,0 +1,234 @@
+{
+  "id": "ods-vitamin-b12",
+  "title": "Vitamin B12 — Fact Sheet for Health Professionals",
+  "publisher": "NIH Office of Dietary Supplements",
+  "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminB12-HealthProfessional/",
+  "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminB12-HealthProfessional/",
+  "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+  "licenseEvidence": "https://www.nih.gov/web-policies-notices",
+  "licenseCheckedAt": "2026-09-14",
+  "licenseFlags": [],
+  "authorityLevel": 1,
+  "docVersion": "ods-vitamin-b12@2024",
+  "fetchedAt": "2026-09-14T14:33:51.161Z",
+  "sha256": "ea0a275d1c03092673f5753b0d4ecf0b645b59f5fff69efd705a660134790b13",
+  "sectionCount": 27,
+  "sections": [
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12",
+      "sectionPath": "Vitamin B12",
+      "heading": "Vitamin B12",
+      "ordinal": 1,
+      "contentHash": "a49af7d7c47d0fc2",
+      "chars": 109
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-introduction",
+      "sectionPath": "Vitamin B12 / Introduction",
+      "heading": "Introduction",
+      "ordinal": 2,
+      "contentHash": "2b0adbfcf2076b2e",
+      "chars": 3417
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-recommended-intakes",
+      "sectionPath": "Vitamin B12 / Recommended Intakes",
+      "heading": "Recommended Intakes",
+      "ordinal": 3,
+      "contentHash": "76b5c4f478936a46",
+      "chars": 1591
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-sources-of-vitamin-b12-food",
+      "sectionPath": "Vitamin B12 / Sources of Vitamin B12 / Food",
+      "heading": "Food",
+      "ordinal": 4,
+      "contentHash": "c7d3bd77389387db",
+      "chars": 1974
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-sources-of-vitamin-b12-dietary-supplements",
+      "sectionPath": "Vitamin B12 / Sources of Vitamin B12 / Dietary supplements",
+      "heading": "Dietary supplements",
+      "ordinal": 5,
+      "contentHash": "2244911e6f133e44",
+      "chars": 1297
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-sources-of-vitamin-b12-prescription-medications",
+      "sectionPath": "Vitamin B12 / Sources of Vitamin B12 / Prescription medications",
+      "heading": "Prescription medications",
+      "ordinal": 6,
+      "contentHash": "4e94e8a154d6301b",
+      "chars": 840
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-intakes-and-status",
+      "sectionPath": "Vitamin B12 / Vitamin B12 Intakes and Status",
+      "heading": "Vitamin B12 Intakes and Status",
+      "ordinal": 7,
+      "contentHash": "0c1672b854edb52d",
+      "chars": 1723
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-deficiency",
+      "sectionPath": "Vitamin B12 / Vitamin B12 Deficiency",
+      "heading": "Vitamin B12 Deficiency",
+      "ordinal": 8,
+      "contentHash": "ad9da9b90aa044c3",
+      "chars": 3367
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy",
+      "heading": "Groups at Risk of Vitamin B12 Inadequacy",
+      "ordinal": 9,
+      "contentHash": "2fb3acc6d88282f8",
+      "chars": 77
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-older-a",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Older adults",
+      "heading": "Older adults",
+      "ordinal": 10,
+      "contentHash": "c1df48ac5f0d53a9",
+      "chars": 1080
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Individuals with pernicious anemia",
+      "heading": "Individuals with pernicious anemia",
+      "ordinal": 11,
+      "contentHash": "9a5c7b40e09f3e09",
+      "chars": 778
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Individuals with gastrointestinal disorders",
+      "heading": "Individuals with gastrointestinal disorders",
+      "ordinal": 12,
+      "contentHash": "a382aaf0f7bab7bd",
+      "chars": 680
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-individ",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Individuals who have had gastrointestinal surgery",
+      "heading": "Individuals who have had gastrointestinal surgery",
+      "ordinal": 13,
+      "contentHash": "032f5c65abd85aec",
+      "chars": 600
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-vegetar",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Vegetarians",
+      "heading": "Vegetarians",
+      "ordinal": 14,
+      "contentHash": "10ffdf5d9c9a57f2",
+      "chars": 455
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-groups-at-risk-of-vitamin-b12-inadequacy-infants",
+      "sectionPath": "Vitamin B12 / Groups at Risk of Vitamin B12 Inadequacy / Infants of vegan women",
+      "heading": "Infants of vegan women",
+      "ordinal": 15,
+      "contentHash": "5ead82b7327a591f",
+      "chars": 770
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-health",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Health",
+      "heading": "Vitamin B12 and Health",
+      "ordinal": 16,
+      "contentHash": "1e02d1feda57c2a6",
+      "chars": 187
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-health-cancer",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Health / Cancer",
+      "heading": "Cancer",
+      "ordinal": 17,
+      "contentHash": "70084e0f8998b2e5",
+      "chars": 3795
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-health-cardiovascular-disease-an",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Health / Cardiovascular disease and stroke",
+      "heading": "Cardiovascular disease and stroke",
+      "ordinal": 18,
+      "contentHash": "60e25e3f20a0060e",
+      "chars": 1770
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-health-dementia-and-cognitive-fu",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Health / Dementia and cognitive function",
+      "heading": "Dementia and cognitive function",
+      "ordinal": 19,
+      "contentHash": "b2c6d5acaafca717",
+      "chars": 3615
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-health-energy-and-endurance",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Health / Energy and endurance",
+      "heading": "Energy and endurance",
+      "ordinal": 20,
+      "contentHash": "fe70adedba75027e",
+      "chars": 287
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-health-risks-from-excessive-vitamin-b12",
+      "sectionPath": "Vitamin B12 / Health Risks from Excessive Vitamin B12",
+      "heading": "Health Risks from Excessive Vitamin B12",
+      "ordinal": 21,
+      "contentHash": "7ceb0b222108f6e9",
+      "chars": 211
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-interactions-with-medications",
+      "sectionPath": "Vitamin B12 / Interactions with Medications",
+      "heading": "Interactions with Medications",
+      "ordinal": 22,
+      "contentHash": "22f1813adddd5f5c",
+      "chars": 327
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-interactions-with-medications-gastric-acid-inhib",
+      "sectionPath": "Vitamin B12 / Interactions with Medications / Gastric acid inhibitors",
+      "heading": "Gastric acid inhibitors",
+      "ordinal": 23,
+      "contentHash": "d86ab753ccc2b7f1",
+      "chars": 463
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-interactions-with-medications-metformin",
+      "sectionPath": "Vitamin B12 / Interactions with Medications / Metformin",
+      "heading": "Metformin",
+      "ordinal": 24,
+      "contentHash": "ba9a24595dda2d13",
+      "chars": 206
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-vitamin-b12-and-healthful-diets",
+      "sectionPath": "Vitamin B12 / Vitamin B12 and Healthful Diets",
+      "heading": "Vitamin B12 and Healthful Diets",
+      "ordinal": 25,
+      "contentHash": "a18bd2c15101b3e1",
+      "chars": 1317
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-references",
+      "sectionPath": "Vitamin B12 / References",
+      "heading": "References",
+      "ordinal": 26,
+      "contentHash": "517d5a05713ce128",
+      "chars": 21577
+    },
+    {
+      "sectionId": "ods-vitamin-b12#vitamin-b12-disclaimer",
+      "sectionPath": "Vitamin B12 / Disclaimer",
+      "heading": "Disclaimer",
+      "ordinal": 27,
+      "contentHash": "c2f2c41c883ecd6f",
+      "chars": 664
+    }
+  ]
+}

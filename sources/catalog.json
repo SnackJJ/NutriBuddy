@@ -1,0 +1,135 @@
+{
+  "note": "依据语料的抓取清单。license 判定见 sources/README.md；fetch 走 url 字段（ODS 走 Wayback，因为 ods.od.nih.gov 有 Cloudflare 挑战）。authorityLevel 越小越权威：1 = 联邦卫生机构的专业版事实说明/官方指南，2 = 同一机构的面向公众版本。 注意：health.gov 的 DGA 落地页是 Drupal 导航壳（13 个 <p>，正文在 PDF 里），因此 DGA 走 dietaryguidelines.gov 的 Wayback 快照；32MB 的 PDF 本体不进仓库（PDF 抽取需要额外依赖，且体积不适合入库）。",
+  "sources": [
+    {
+      "id": "ods-vitamin-d",
+      "title": "Vitamin D — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices (NIH site policies: NIH content is a U.S. government work)"
+    },
+    {
+      "id": "ods-vitamin-b12",
+      "title": "Vitamin B12 — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminB12-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminB12-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-iron",
+      "title": "Iron — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-calcium",
+      "title": "Calcium — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Calcium-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Calcium-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-omega-3",
+      "title": "Omega-3 Fatty Acids — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Omega3FattyAcids-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Omega3FattyAcids-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-magnesium",
+      "title": "Magnesium — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-potassium",
+      "title": "Potassium — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Potassium-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Potassium-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-zinc",
+      "title": "Zinc — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Zinc-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Zinc-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-folate",
+      "title": "Folate — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Folate-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Folate-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-vitamin-c",
+      "title": "Vitamin C — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminC-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminC-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-vitamin-k",
+      "title": "Vitamin K — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/VitaminK-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/VitaminK-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "ods-iodine",
+      "title": "Iodine — Fact Sheet for Health Professionals",
+      "publisher": "NIH Office of Dietary Supplements",
+      "url": "https://web.archive.org/web/2024id_/https://ods.od.nih.gov/factsheets/Iodine-HealthProfessional/",
+      "originalUrl": "https://ods.od.nih.gov/factsheets/Iodine-HealthProfessional/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.nih.gov/web-policies-notices"
+    },
+    {
+      "id": "dga-2020-2025",
+      "title": "Dietary Guidelines for Americans, 2020-2025 — official home",
+      "publisher": "USDA / HHS Office of Disease Prevention and Health Promotion",
+      "url": "https://web.archive.org/web/2024id_/https://www.dietaryguidelines.gov/",
+      "originalUrl": "https://www.dietaryguidelines.gov/",
+      "authorityLevel": 1,
+      "license": "U.S. federal government work — public domain (17 U.S.C. §105)",
+      "licenseEvidence": "https://www.hhs.gov/web/policies/index.html (HHS site policies); the DGA is a joint USDA/HHS publication"
+    }
+  ]
+}
