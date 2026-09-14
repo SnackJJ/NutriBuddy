@@ -364,7 +364,10 @@ async function main(): Promise<number> {
       // stripped from the sections.
       const flags = scanLicenseFlags(decodeEntities(html.replace(/<[^>]+>/g, " ")));
       const snapshot = waybackTimestamp(source.url);
-      const docVersion = snapshot ? `${source.id}@${snapshot}` : `${source.id}@${licenseCheckedAt}`;
+      // Just the version. The registry row id is `<slug>@<docVersion>`, so
+      // prefixing the slug here produced `ods-x@ods-x@2024` — correct-looking and
+      // wrong, and the sort of thing only a human reading a row would notice.
+      const docVersion = snapshot ?? licenseCheckedAt;
 
       const manifest: Manifest = {
         id: source.id,

@@ -23,16 +23,17 @@ const SECTION_B = "ods-potassium#potassium-interactions-with-medications-potassi
 
 const ACTIVE_ENTRY: CitationRegistryEntry = {
   sectionId: SECTION_A,
-  sourceId: "ods-vitamin-k@2024",
-  docVersion: "ods-vitamin-k@2024",
+  // Document identity without the version: the version has its own field.
+  sourceId: "ods-vitamin-k",
+  docVersion: "2024",
   status: "active",
 };
 
 function citation(overrides: Partial<CitationRef> = {}): CitationRef {
   return {
     sectionId: SECTION_A,
-    sourceId: "ods-vitamin-k@2024",
-    docVersion: "ods-vitamin-k@2024",
+    sourceId: "ods-vitamin-k",
+    docVersion: "2024",
     ...overrides,
   };
 }
@@ -84,25 +85,25 @@ describe("checkCitations", () => {
 
   it("strips a version mismatch and names both versions", () => {
     const result = checkCitations({
-      output: output([citation({ docVersion: "ods-vitamin-k@2023" })]),
+      output: output([citation({ docVersion: "2023" })]),
       evidenceSet: EVIDENCE,
       entries: [ACTIVE_ENTRY],
     });
 
-    expect(result.stripped[0].reason).toContain("cited ods-vitamin-k@2023");
-    expect(result.stripped[0].reason).toContain("registry has ods-vitamin-k@2024");
+    expect(result.stripped[0].reason).toContain("cited 2023");
+    expect(result.stripped[0].reason).toContain("registry has 2024");
   });
 
   it("strips a section the turn was never allowed to see", () => {
     const result = checkCitations({
-      output: output([citation({ sectionId: SECTION_B, sourceId: "ods-potassium@2024", docVersion: "ods-potassium@2024" })]),
+      output: output([citation({ sectionId: SECTION_B, sourceId: "ods-potassium", docVersion: "2024" })]),
       evidenceSet: { ...EVIDENCE, sectionIds: [SECTION_A] },
       entries: [
         ACTIVE_ENTRY,
         {
           sectionId: SECTION_B,
-          sourceId: "ods-potassium@2024",
-          docVersion: "ods-potassium@2024",
+          sourceId: "ods-potassium",
+          docVersion: "2024",
           status: "active",
         },
       ],
@@ -282,6 +283,10 @@ describe("citation stripping inside a turn (#109)", () => {
     );
     if (citationVerdict?.type !== "gate_verdict") throw new Error("no citation verdict");
     expect(citationVerdict.evidence).toContain("verified");
+    // A verdict has to agree with its own evidence: "block" next to "verified"
+    // is how readers learn to ignore verdicts.
+    expect(citationVerdict.verdict).toBe("pass");
+    expect(citationVerdict.terminal).toBe(false);
     expect(result.output?.citations).toHaveLength(1);
   });
 

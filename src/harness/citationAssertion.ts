@@ -18,7 +18,7 @@
 // is a semantic judgement, and this gate is deterministic — "does the answer
 // claim a source and name one" is the question that can be answered here.
 
-import type { TypedOutput } from "./types";
+import type { CitationRef } from "./types";
 
 /**
  * Phrases that assert authority.
@@ -58,20 +58,24 @@ export interface CitationAssertionResult {
  * A citation that survived the provenance check satisfies this; the field being
  * absent, empty, or stripped to nothing does not.
  */
-export function checkCitationAssertions(
-  output: TypedOutput | undefined,
-): CitationAssertionResult {
-  if (!output) return { passed: true, matched: [], reasons: [] };
+export interface CitationAssertionInput {
+  /** The prose the user will read — from the typed output, or from the reply. */
+  readonly prose: string;
+  readonly citations: readonly CitationRef[] | undefined;
+}
 
+export function checkCitationAssertions(
+  input: CitationAssertionInput,
+): CitationAssertionResult {
   const matched: string[] = [];
   for (const phrase of ASSERTION_PHRASES) {
-    const hit = phrase.exec(output.prose);
+    const hit = phrase.exec(input.prose);
     if (hit) matched.push(hit[0]);
   }
 
   if (matched.length === 0) return { passed: true, matched: [], reasons: [] };
 
-  const citations = output.citations ?? [];
+  const citations = input.citations ?? [];
   if (citations.length > 0) return { passed: true, matched, reasons: [] };
 
   return {

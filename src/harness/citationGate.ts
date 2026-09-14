@@ -39,6 +39,7 @@ export interface CitationRegistry {
 /** What the registry knows about one section. */
 export interface CitationRegistryEntry {
   readonly sectionId: string;
+  /** Document identity, e.g. `ods-vitamind` — the version lives in its own field. */
   readonly sourceId: string;
   readonly docVersion: string;
   readonly status: "active" | "superseded" | "archived";

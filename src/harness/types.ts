@@ -257,7 +257,16 @@ export interface RuleRef {
 export interface CitationRef {
   /** `<source_id>#<section slug>`; the citable unit. */
   readonly sectionId: string;
-  /** The document the section belongs to, e.g. `ods-vitamind@2024`. */
+  /**
+   * The document the section belongs to, e.g. `ods-vitamind` — its stable
+   * identity, *without* the version.
+   *
+   * Kept separate from {@link docVersion} because the two are different facts,
+   * and because a field that repeats the version inside the id is a field a model
+   * will get half right: the first live turn cited `ods-vitamin-k` for a document
+   * whose registry id was `ods-vitamin-k@2024`, and every citation was stripped
+   * for a formatting reason rather than a substantive one.
+   */
   readonly sourceId: string;
   /** Version the model was shown; a mismatch is a stripped citation, not a crash. */
   readonly docVersion: string;

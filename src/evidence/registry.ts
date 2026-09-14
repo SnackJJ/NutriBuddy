@@ -22,14 +22,20 @@ export function createSupabaseCitationRegistry(client: SupabaseClient): Citation
       if (sectionIds.length === 0) return [];
       const { data, error } = await client
         .from("source_sections")
-        .select("id, source_id, sources!inner(doc_version, status)")
+        .select("id, sources!inner(slug, doc_version, status)")
         .in("id", [...sectionIds]);
       if (error) throw new Error(`citation registry read failed: ${error.message}`);
 
       return (data ?? []).flatMap((row: Record<string, unknown>) => {
-        const source = row.sources as
-          | { readonly doc_version?: unknown; readonly status?: unknown }
+        // PostgREST returns a to-one embed as an object, while its generated
+        // types describe an array; both shapes are handled because taking [0] of
+        // an object is silently `undefined` — which reads as "unknown section"
+        // and would strip every citation without an error.
+        const embedded = row.sources as
+          | { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }
+          | readonly { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }[]
           | undefined;
+        const source = Array.isArray(embedded) ? embedded[0] : embedded;
         if (!source) return [];
         const status = String(source.status);
         if (status !== "active" && status !== "superseded" && status !== "archived") {
@@ -38,7 +44,7 @@ export function createSupabaseCitationRegistry(client: SupabaseClient): Citation
         return [
           {
             sectionId: String(row.id),
-            sourceId: String(row.source_id),
+            sourceId: String(source.slug),
             docVersion: String(source.doc_version),
             status,
           } satisfies CitationRegistryEntry,
@@ -56,13 +62,15 @@ interface PinnedRow {
   readonly ordinal: number;
   readonly text: string;
   readonly anchor: string | null;
-  // PostgREST types a to-one embed as an array; the value is one object at
-  // runtime, which the flatMap below tolerates either way.
+  /**
+   * The to-one embed. PostgREST returns one object here, while supabase-js's
+   * generated types describe an array — both shapes are handled, because getting
+   * this wrong is silent: `sources[0]` on an object is `undefined`, and the
+   * loader then reports an empty pinned set rather than an error.
+   */
   readonly sources:
-    | readonly {
-        readonly doc_version?: unknown;
-        readonly status?: unknown;
-      }[]
+    | { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }
+    | readonly { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }[]
     | undefined;
 }
 
@@ -115,19 +123,19 @@ export async function loadPinnedEvidence(
   const { data: pinnedRows, error: pinnedError } = await client
     .from("source_sections")
     .select(
-      "id, source_id, section_path, heading, ordinal, text, anchor, sources!inner(doc_version, status)",
+      "id, source_id, section_path, heading, ordinal, text, anchor, sources!inner(slug, doc_version, status)",
     )
     .eq("pinned", true);
   if (pinnedError) throw new Error(`pinned sections read failed: ${pinnedError.message}`);
 
   const sections: EvidenceSection[] = (pinnedRows ?? []).flatMap(
     (row: PinnedRow) => {
-      const source = row.sources?.[0];
+      const source = Array.isArray(row.sources) ? row.sources[0] : row.sources;
       if (!source || String(source.status) !== "active") return [];
       return [
         {
           id: String(row.id),
-          sourceId: String(row.source_id),
+          sourceId: String(source.slug),
           docVersion: String(source.doc_version),
           sectionPath: String(row.section_path),
           heading: row.heading === null ? null : String(row.heading),

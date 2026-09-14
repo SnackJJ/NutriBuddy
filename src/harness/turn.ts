@@ -841,9 +841,13 @@ async function runCitationCheck(
     output: stripInvalidCitations(result.output, check),
     verdict: {
       checkpoint: "output",
-      // A block verdict that is not terminal: the answer's other checks keep their
-      // own verdicts and the regenerate budget is untouched.
-      verdict: "block",
+      // `pass` when every citation survived. The first live run reported a
+      // verified citation as a block — a verdict that says "something is wrong"
+      // while its own evidence says nothing is, which is how a reader learns to
+      // ignore verdicts.
+      verdict: check.passed ? "pass" : "block",
+      // Never terminal either way: an answer's other checks keep their own
+      // verdicts and the regenerate budget is untouched.
       checkName: OUTPUT_CITATION_PROVENANCE_CHECK,
       evidence: citationEvidence(check),
       terminal: false,
@@ -1362,7 +1366,14 @@ async function* runUtteranceTurn(
     // actually be delivered. This one is terminal, unlike the strip above: an
     // answer whose only authority is "the guidelines say so" has to be rewritten,
     // not trimmed.
-    const assertionCheck = checkCitationAssertions(result.output);
+    // Checked on the prose the user will actually read — the same text the
+    // lexical backstop uses. An answer delivered through `submit_answer` and one
+    // delivered as plain prose make the same claim, and a check that only read
+    // `result.output` would wave the second one through.
+    const assertionCheck = checkCitationAssertions({
+      prose: outputTextForGate(result),
+      citations: result.output?.citations,
+    });
     outputGateChecks.push(
       createOutputGateCheck(
         OUTPUT_CITATION_ASSERTION_CHECK,

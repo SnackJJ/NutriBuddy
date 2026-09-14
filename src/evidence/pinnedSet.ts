@@ -94,7 +94,13 @@ export function assemblePinnedEvidence(
       ? `${section.sectionPath}`
       : section.sectionPath;
     const anchor = section.anchor ? `\nAnchor: ${section.anchor}` : "";
-    return `### ${trail}\nSection id: ${section.id}\nDocument: ${section.sourceId}${anchor}\n\n${section.text}`;
+    return (
+      `### ${trail}\n` +
+      `Section id: ${section.id}\n` +
+      `Source id: ${section.sourceId}\n` +
+      `Doc version: ${section.docVersion}${anchor}\n\n` +
+      section.text
+    );
   });
 
   const text =

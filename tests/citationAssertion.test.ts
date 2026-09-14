@@ -18,21 +18,30 @@ function output(overrides: Partial<TypedOutput> = {}): TypedOutput {
   return { prose: "Have some chicken.", foodRefs: [], ruleRefs: [], ...overrides };
 }
 
+/** The check reads the prose the user sees plus the citations, like the gate does. */
+function assertions(typed: TypedOutput | undefined, reply = "") {
+  return checkCitationAssertions({
+    prose: typed?.prose ?? reply,
+    citations: typed?.citations,
+  });
+}
+
 const CITATION: CitationRef = {
   sectionId: "ods-vitamin-d#vitamin-d-recommended-intakes",
-  sourceId: "ods-vitamin-d@2024",
-  docVersion: "ods-vitamin-d@2024",
+  sourceId: "ods-vitamin-d",
+  docVersion: "2024",
 };
 
 describe("checkCitationAssertions", () => {
   it("lets an answer with no authority claim pass, citation or not", () => {
-    expect(checkCitationAssertions(output()).passed).toBe(true);
-    expect(checkCitationAssertions({ prose: "You ate 150 g of rice.", foodRefs: [], ruleRefs: [] }).passed).toBe(true);
-    expect(checkCitationAssertions(undefined).passed).toBe(true);
+    expect(assertions(output()).passed).toBe(true);
+    expect(assertions({ prose: "You ate 150 g of rice.", foodRefs: [], ruleRefs: [] }).passed).toBe(true);
+    // A reply with no typed output at all: prose is prose.
+    expect(checkCitationAssertions({ prose: "You ate 150 g of rice.", citations: undefined }).passed).toBe(true);
   });
 
   it("blocks an authority claim with no citation, naming the phrase", () => {
-    const result = checkCitationAssertions(
+    const result = assertions(
       output({ prose: "The Dietary Guidelines recommend two servings of fish per week." }),
     );
 
@@ -42,7 +51,7 @@ describe("checkCitationAssertions", () => {
   });
 
   it("accepts the same claim once a citation is present", () => {
-    const result = checkCitationAssertions(
+    const result = assertions(
       output({
         prose: "The Dietary Guidelines recommend two servings of fish per week.",
         citations: [CITATION],
@@ -55,7 +64,7 @@ describe("checkCitationAssertions", () => {
   });
 
   it("treats an empty citation array as no citation, not as a checked answer", () => {
-    const result = checkCitationAssertions(
+    const result = assertions(
       output({ prose: "According to the NIH, vitamin D matters.", citations: [] }),
     );
     expect(result.passed).toBe(false);
@@ -63,7 +72,7 @@ describe("checkCitationAssertions", () => {
 
   it("catches the same claim in the prompt's other language", () => {
     for (const prose of ["膳食指南推荐每周吃两次鱼。", "指南建议补充维生素 D。"]) {
-      expect(checkCitationAssertions(output({ prose })).passed).toBe(false);
+      expect(assertions(output({ prose })).passed).toBe(false);
     }
   });
 
@@ -72,7 +81,7 @@ describe("checkCitationAssertions", () => {
     // an authority), but a sentence that reports a catalog observation without
     // attributing it must not be blocked.
     expect(
-      checkCitationAssertions(output({ prose: "Chicken breast has 31 g of protein per 100 g." })).passed,
+      assertions(output({ prose: "Chicken breast has 31 g of protein per 100 g." })).passed,
     ).toBe(true);
   });
 

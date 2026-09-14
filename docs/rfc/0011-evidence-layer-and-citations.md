@@ -76,9 +76,9 @@ create index source_sections_pinned_idx on public.source_sections (pinned) where
 ```ts
 export interface CitationRef {
   readonly sectionId: string;
-  readonly sourceId: string;
-  readonly docVersion: string;
-  readonly quote?: string;          // 可选短引文，长度上限见 §8
+  readonly sourceId: string;        // 文档身份，**不带版本**（如 "ods-vitamind"）
+  readonly docVersion: string;      // 修订（如 "2024"），与 sourceId 正交
+  readonly quote?: string;          // 可选短引文，上限 240 字符（CITATION_QUOTE_MAX_CHARS）
 }
 
 // TypedOutput 增加可选字段（不破坏既有生产者）
@@ -91,6 +91,8 @@ export interface TypedOutput {
 ```
 
 `SCHEMA_VERSION` 由 `1.9.0` → `1.10.0`；`canonicalizeTurnEvents` 的 golden 需同步（新增字段先于既有断言落地，避免 golden 集体失效）。
+
+**实现注记（2026-09-14）**：`sourceId` 与 `docVersion` 必须分成两个字段，且 `sourceId` **不含版本**。第一版把 registry 行 id（`<slug>@<version>`）当作 `sourceId`，真实模型于是写出 `sourceId: "ods-vitamin-k"` 而漏掉 `@2024`，三条引用全部因**格式**原因被剥离。字段设计让模型必须重复同一事实两次，就是把失败概率乘二。
 
 ### 3.4 本轮可用证据集必须成为 typed 数据
 

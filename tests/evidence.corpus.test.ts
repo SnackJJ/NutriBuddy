@@ -146,7 +146,11 @@ describe("assemblePinnedEvidence", () => {
   it("states each section's id and document, because those are what a citation names", () => {
     const evidence = assemblePinnedEvidence([section("ods-x#y", "Vitamin X text.")], "v1");
     expect(evidence.text).toContain("Section id: ods-x#y");
-    expect(evidence.text).toContain("Document: ods-x@2024");
+    // Two separate fields, because a model that has to repeat a version that is
+    // embedded inside the document id drops half of it (seen in the first live
+    // citation turn).
+    expect(evidence.text).toContain("Source id: ods-x@2024");
+    expect(evidence.text).toContain("Doc version: doc@2024");
     expect(evidence.text).toContain("will be removed");
     expect(evidence.text).toContain("Vitamin X text.");
   });
@@ -174,9 +178,12 @@ describe("assemblePinnedEvidence", () => {
     for (const id of evidence.evidenceSet.sectionIds) {
       expect(id).toMatch(/^[a-z0-9-]+#[a-z0-9-]+$/);
     }
-    // Every block names its document, which is what a citation quotes back.
-    const documentLines = evidence.text.match(/^Document: .+$/gm) ?? [];
-    expect(documentLines).toHaveLength(evidence.sections);
-    expect(documentLines.some((line) => line.includes("ods-vitamin-k@2024"))).toBe(true);
+    // Every block names its document and its version, which is what a citation
+    // has to quote back.
+    const sourceLines = evidence.text.match(/^Source id: .+$/gm) ?? [];
+    const versionLines = evidence.text.match(/^Doc version: .+$/gm) ?? [];
+    expect(sourceLines).toHaveLength(evidence.sections);
+    expect(versionLines).toHaveLength(evidence.sections);
+    expect(sourceLines.some((line) => line.includes("ods-vitamin-k"))).toBe(true);
   });
 });
