@@ -123,7 +123,8 @@ begin
 
   select string_agg(name, ', ') into missing
     from (values ('user_profile'), ('meal_logs'), ('proposals'),
-                 ('turns'), ('turn_events')) as expected(name)
+                 ('turns'), ('turn_events'), ('sources'), ('source_sections'),
+                 ('drug_nutrient_interactions')) as expected(name)
    where not exists (
      select 1 from pg_tables
       where schemaname = 'public' and tablename = expected.name
@@ -291,6 +292,29 @@ begin
        and indexname = 'sources_one_active_per_slug'
   ) then
     raise exception '0013: the one-active-version-per-source index is missing';
+  end if;
+
+  -- 0015's premise: the hard-constraint data source exists and is populated in a
+  -- database built from this repository. Before it, a replayed database had no
+  -- interaction table at all and this script still passed — "the migrations
+  -- replay" was true of a database in which every medication request would fail
+  -- (issue #125).
+  select count(*) into applied from public.drug_nutrient_interactions;
+  if applied < 8 then
+    raise exception '0015: expected the seeded interaction rules, found % row(s)',
+      applied;
+  end if;
+
+  if has_table_privilege('anon', 'public.drug_nutrient_interactions', 'select')
+     or has_table_privilege('authenticated', 'public.drug_nutrient_interactions', 'insert')
+     or has_table_privilege('authenticated', 'public.drug_nutrient_interactions', 'update')
+     or has_table_privilege('authenticated', 'public.drug_nutrient_interactions', 'delete')
+  then
+    raise exception '0015: the interaction rules are writable by a user-facing role';
+  end if;
+
+  if not has_table_privilege('authenticated', 'public.drug_nutrient_interactions', 'select') then
+    raise exception '0015: signed-in readers cannot read the interaction rules';
   end if;
 
   -- The local stack's own version is the premise of everything above, and it is
