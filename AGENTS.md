@@ -45,6 +45,7 @@ npm run verify:migrations # 空库重放检查（需 Docker + psql，会 db rese
 npm run smoke:confirm    # live Supabase confirm/void (needs .env.local)
 npm run smoke:trace      # D9: trace write door closed + cross-account reads (needs .env.local)
 npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏，`--with-text` 仅本地调试）
+npm run prune:traces     # 90 天滚动保留（默认 dry-run，`--apply` 才删；按月手工执行）
 npm run eval
 ```
 
