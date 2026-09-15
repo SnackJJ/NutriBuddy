@@ -19,8 +19,20 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
+
+      # Pinned, and pinned to the same version the lock file is authored with.
+      #
+      # `npm ci` checks that the lock satisfies package.json, and how it judges
+      # that changed between npm majors: the lock shipped on 2026-09-15 was
+      # written by npm 11 and rejected by npm 10 over where the `@emnapi` peer
+      # pair belongs, which took CI down for two runs before anyone read the log.
+      # The lesson is not which judge is right — it is that the tool authoring the
+      # lock and the tool validating it have to be the same one. Bump this only
+      # together with a regenerated lock.
+      - name: Pin npm
+        run: npm install --global npm@11.6.2 && npm --version
 
       - run: npm ci
 

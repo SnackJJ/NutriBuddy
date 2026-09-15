@@ -53,6 +53,8 @@ npm run eval
 npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需模型 key（NUTRIBUDDY_MODEL_PROVIDER=commandcode 可走网关）
 ```
 
+**Toolchain**: the lock file's author and its validator must be the same npm. CI pins `npm@11.6.2` (`.github/workflows/eval.yml`); regenerate a lock with that same version, never with whatever `npm -v` happens to say — a lock written by one npm major and checked by another fails `npm ci` on a file that neither side considers wrong. Regenerate with `npm install --package-lock-only`.
+
 ## What to read
 
 **Default (cold start):** this file + `CONTEXT.md`. Open `docs/ADD.md` when architecture or seam behavior is in play. Open an ADR only if it touches the area.
