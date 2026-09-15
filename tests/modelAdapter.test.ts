@@ -46,6 +46,7 @@ describe("DeepSeekAdapter", () => {
     let captured: { url: string; init: RequestInit } | undefined;
     const adapter = new DeepSeekAdapter({
       apiKey: "secret-key",
+      provider: "deepseek",
       baseUrl: "https://api.deepseek.com/v1",
       fetchImpl: async (url, init) => {
         captured = { url: String(url), init: init ?? {} };
@@ -88,8 +89,11 @@ describe("DeepSeekAdapter", () => {
     expect(authSeen).toBe("Bearer env-key");
   });
 
-  it("throws a clear error when no API key is available", () => {
-    expect(() => new DeepSeekAdapter({ env: {} })).toThrow(/DEEPSEEK_API_KEY/);
+  it("throws a clear error naming the default provider's key", () => {
+    expect(() => new DeepSeekAdapter({ env: {} })).toThrow(/COMMANDCODE_API_KEY/);
+    expect(() => new DeepSeekAdapter({ env: { NUTRIBUDDY_MODEL_PROVIDER: "deepseek" } })).toThrow(
+      /DEEPSEEK_API_KEY/,
+    );
   });
 
   it("surfaces a readable error on a non-2xx response", async () => {
@@ -437,8 +441,22 @@ describe("DeepSeekAdapter", () => {
 // token at the miss rate.
 
 describe("resolveProviderProfile", () => {
-  it("defaults to the direct DeepSeek endpoint", () => {
+  it("defaults to the gateway, not to the direct endpoint", () => {
+    // The two providers serve different models under the same tier names, so a
+    // wrong default does not fail — it answers with another model.
     const profile = resolveProviderProfile({ env: {} });
+    expect(profile.id).toBe("commandcode");
+    expect(profile.apiKeyEnv).toBe("COMMANDCODE_API_KEY");
+    expect(profile.models).toEqual({
+      flash: "deepseek/deepseek-v4.1-flash",
+      pro: "deepseek/deepseek-v4-pro",
+    });
+  });
+
+  it("selects the direct endpoint by name", () => {
+    const profile = resolveProviderProfile({
+      env: { NUTRIBUDDY_MODEL_PROVIDER: "deepseek" },
+    });
     expect(profile.id).toBe("deepseek");
     expect(profile.baseUrl).toBe("https://api.deepseek.com/v1");
     expect(profile.models).toEqual({ flash: "deepseek-v4-flash", pro: "deepseek-v4-pro" });

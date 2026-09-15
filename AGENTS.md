@@ -50,7 +50,7 @@ npm run export:traces    # 轨迹导出（--turn / --user+--date；默认脱敏�
 npm run prune:traces     # 90 天滚动保留（默认 dry-run，`--apply` 才删；按月手工执行）
 npm run create:user      # 建号（白名单方案 A，RFC 0010；需 .env.local）
 npm run eval
-npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需模型 key（NUTRIBUDDY_MODEL_PROVIDER=commandcode 可走网关）
+npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需模型 key（默认走 commandcode 网关，NUTRIBUDDY_MODEL_PROVIDER=deepseek 可直连）
 ```
 
 **Toolchain**: the lock file's author and its validator must be the same npm. CI pins `npm@11.6.2` (`.github/workflows/eval.yml`); regenerate a lock with that same version, never with whatever `npm -v` happens to say — a lock written by one npm major and checked by another fails `npm ci` on a file that neither side considers wrong. Regenerate with `npm install --package-lock-only`.

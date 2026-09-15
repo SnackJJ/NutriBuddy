@@ -6,7 +6,7 @@
 // 档位的 model id、计价表、以及是否发送 DeepSeek 私有的 `thinking` 字段。把供应商
 // 写死在常量里意味着换网关要改代码，而"换供应商只动这里"是本模块存在的理由。
 //
-// 用哪家由 NUTRIBUDDY_MODEL_PROVIDER 选（默认 deepseek），单项还可用
+// 用哪家由 NUTRIBUDDY_MODEL_PROVIDER 选（默认 commandcode，见 DEFAULT_PROVIDER），单项还可用
 // NUTRIBUDDY_MODEL_BASE_URL / NUTRIBUDDY_MODEL_API_KEY / NUTRIBUDDY_MODEL_FLASH /
 // NUTRIBUDDY_MODEL_PRO 覆盖。
 //
@@ -61,6 +61,16 @@ const TOKENS_PER_MTOK = 1_000_000;
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 
 export type ModelProviderId = "deepseek" | "commandcode" | "custom";
+
+/**
+ * Used when `NUTRIBUDDY_MODEL_PROVIDER` is unset.
+ *
+ * The gateway, because the two providers serve different models under the same
+ * tier names: flash is `deepseek-v4-flash` direct and `deepseek/deepseek-v4.1-flash`
+ * through the gateway. A wrong default would not fail, it would silently answer
+ * with another model, so the default is the one this project runs.
+ */
+const DEFAULT_PROVIDER: ModelProviderId = "commandcode";
 
 export interface ProviderProfile {
   readonly id: ModelProviderId;
@@ -153,7 +163,7 @@ export interface DeepSeekAdapterOptions {
   readonly env?: Record<string, string | undefined>;
   /** 注入 fetch（测试用）；默认全局 fetch。 */
   readonly fetchImpl?: FetchImpl;
-  /** 供应商选择：显式覆盖，否则读 NUTRIBUDDY_MODEL_PROVIDER（默认 deepseek）。 */
+  /** 供应商选择：显式覆盖，否则读 NUTRIBUDDY_MODEL_PROVIDER（默认 commandcode）。 */
   readonly provider?: ModelProviderId;
 }
 
@@ -177,7 +187,7 @@ export function resolveProviderProfile(
   const requested =
     options.provider ??
     (env.NUTRIBUDDY_MODEL_PROVIDER as ModelProviderId | undefined) ??
-    "deepseek";
+    DEFAULT_PROVIDER;
 
   if (requested !== "custom" && requested in PROVIDER_PROFILES) {
     const base = PROVIDER_PROFILES[requested as Exclude<ModelProviderId, "custom">];
