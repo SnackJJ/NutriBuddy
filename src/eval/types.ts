@@ -3,7 +3,6 @@
 // 三层评分中的第一层「代码评」：零 LLM 成本，每次 CI 可跑。
 // 定义 eval case、bare/harness 运行结果、对比报告的类型。
 
-import type { TraceEvent } from "../harness/tracer";
 import type { UserContext } from "../harness/gate";
 import type { StopReason } from "../harness/types";
 
@@ -62,28 +61,6 @@ export interface EvalCase {
   /** 用户安全上下文（constrained / cross_domain case 提供）。 */
   readonly userContext?: UserContext;
 }
-
-// ─── Code Scorer（issue #6）───────────────────────────────────────────────
-
-/** 单条失败：哪类断言挂了 + 人读细节。 */
-export interface ScoreFailure {
-  readonly check: string;
-  readonly detail: string;
-}
-
-export interface ScoreResult {
-  readonly caseId: string;
-  readonly passed: boolean;
-  readonly failures: readonly ScoreFailure[];
-}
-
-/**
- * Legacy demoted producer: TraceEvent stream for offline fixtures.
- * Prefer turn() + scoreCaseFromTurnEvents for harness truth (Phase 3).
- */
-export type TraceProducer = (
-  evalCase: EvalCase,
-) => Promise<readonly TraceEvent[]>;
 
 // ─── Baseline Comparison（issue #19）──────────────────────────────────────
 
@@ -156,7 +133,6 @@ export interface EvalSummary {
 
 /** 完整 eval 报告。 */
 export interface EvalReport {
-  readonly results: readonly ScoreResult[];
   readonly comparison: readonly ComparisonRow[];
   readonly summary: EvalSummary;
   readonly total: number;

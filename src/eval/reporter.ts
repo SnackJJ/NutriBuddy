@@ -56,7 +56,6 @@ export function generateReport(
   const passed = comparison.filter((r) => r.harnessPassed).length;
 
   return {
-    results: [],
     comparison,
     summary,
     total,

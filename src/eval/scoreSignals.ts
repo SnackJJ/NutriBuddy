@@ -1,8 +1,6 @@
-// Phase 3 — eval score signals from the schema-versioned turn event stream.
-// Turn events are the source of truth for tool/gate facts; TraceEvent is demoted.
+// Eval score signals from the schema-versioned turn event stream.
 
 import type { AnyTurnEvent } from "../harness/turn";
-import type { TraceEvent } from "../harness/tracer";
 
 /** Facts the code scorer needs — independent of TraceEvent shape. */
 export interface ScoreSignals {
@@ -46,38 +44,3 @@ export function scoreSignalsFromTurnEvents(
   };
 }
 
-/** Demoted TraceEvent adapter — only for legacy producers/tests. */
-export function scoreSignalsFromTrace(
-  trace: readonly TraceEvent[],
-): ScoreSignals {
-  const toolCalls = trace
-    .filter((e) => e.type === "tool_call")
-    .map((e) => extractToolNameFromTracePayload(e.payload));
-
-  let reply: string | undefined;
-  for (let i = trace.length - 1; i >= 0; i--) {
-    if (trace[i].type === "model_return") {
-      reply = trace[i].payload;
-      break;
-    }
-  }
-
-  return {
-    toolCalls,
-    reply,
-    wasBlocked: trace.some((e) => e.type === "gate_block"),
-  };
-}
-
-function extractToolNameFromTracePayload(payload: string): string {
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    if (parsed && typeof parsed === "object" && "name" in parsed) {
-      const name = (parsed as { name: unknown }).name;
-      if (typeof name === "string") return name.trim();
-    }
-  } catch {
-    // bare tool name
-  }
-  return payload.trim();
-}

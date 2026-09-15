@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  scoreCaseFromTurnEvents,
-  scoreSignalsFromTurnEvents,
-} from "../src/eval/scorer";
-import type { EvalCase } from "../src/eval/types";
+import { scoreSignalsFromTurnEvents } from "../src/eval/scoreSignals";
+import { scoreHarness } from "../src/eval/metrics";
 import { consumeTurn, turn, type AnyTurnEvent } from "../src/harness/turn";
 import { Tracer } from "../src/harness/tracer";
 import type { ModelAdapter, ToolCall } from "../src/harness/types";
@@ -76,13 +73,9 @@ describe("scoreSignalsFromTurnEvents (Phase 3)", () => {
     expect(signals.reply).toBe(result.reply);
     expect(calls).toBeGreaterThanOrEqual(1);
 
-    const evalCase: EvalCase = {
-      id: "turn-score",
-      category: "simple",
-      query: "q",
-      expected: { mustCallTools: ["query_catalog"] },
-    };
-    const scored = scoreCaseFromTurnEvents(evalCase, events, result.reply);
+    const scored = scoreHarness(result.reply, signals.toolCalls, {
+      mustCallTools: ["query_catalog"],
+    }, undefined);
     expect(scored.passed).toBe(true);
   });
 
@@ -113,15 +106,12 @@ describe("scoreSignalsFromTurnEvents (Phase 3)", () => {
     // lexical gate may block peanut recommendations
     if (result.stopReason === "gate_blocked") {
       expect(signals.wasBlocked).toBe(true);
-      const scored = scoreCaseFromTurnEvents(
-        {
-          id: "blocked",
-          category: "constrained",
-          query: "q",
-          expected: { shouldBeBlocked: true },
-        },
-        events,
+      const scored = scoreHarness(
         result.reply,
+        signals.toolCalls,
+        { shouldBeBlocked: true },
+        undefined,
+        signals.wasBlocked ? 1 : 0,
       );
       expect(scored.passed).toBe(true);
     } else {
