@@ -1,4 +1,4 @@
-// Eval 数据集：25 条手工 query（issue #19 / PRD v2 §4.2）。
+// Eval 数据集：29 条手工 query（issue #19 / PRD v2 §4.2）。
 //
 // 覆盖 5 个类别：
 //   simple       — 基础营养查询，无过敏/用药约束
@@ -7,9 +7,10 @@
 //   cross_domain — 药物-营养素相互作用冲突
 //   edge_case    — 模糊食物、极端值、边界场景
 //
-// 所有 userContext 中的过敏/用药对应 gate 的规则形状；离线与 CI 手臂注入
-// `src/eval/evalInteractions.ts` 的 fixture，live 手臂同理（生产读
-// `drug_nutrient_interactions` 表，但仓库里没有任何迁移建它 —— 见该文件的说明）。
+// 所有 userContext 中的过敏/用药对应 gate 的规则形状；两条手臂都注入
+// `src/eval/evalInteractions.ts` 的 fixture，因为 scripted 手臂按设计不连数据库。
+// 生产读 `drug_nutrient_interactions` 表（迁移 0015 建表并种子），fixture 与种子
+// 的一致性由 `tests/interactionSeed.test.ts` 逐条比对。
 //
 // `mustCallTools` 用的是**产品实际注册的工具名**（`query_catalog` / `log_meal` /
 // `submit_answer`）。此前写的是 M1 时代的 `search_food`，那个名字在运行时不存在，

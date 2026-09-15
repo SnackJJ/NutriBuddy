@@ -1,16 +1,16 @@
 // Interaction rules for the offline/CI eval arms (#93/#96 e2e fidelity).
 //
-// The live application reads these rules from the `drug_nutrient_interactions`
-// table through `supabaseInteractionStore`. The eval cannot: no migration in
-// `supabase/migrations` creates that table, so the data source does not exist in
-// a replayed database (recorded as a follow-up issue rather than papered over).
+// The application reads these rules from the `drug_nutrient_interactions` table
+// through `supabaseInteractionStore`; migration `0015` creates and seeds it
+// (issue #125). The eval cannot use it all the same: the scripted arm runs with
+// no database by design, so it carries its own copy — a fixture, in the same
+// sense the eval queries are hand-written test data. It states the rules the
+// dataset was written against, and it is versioned with the dataset.
 //
-// So the eval carries its own copy — and it is a fixture, in the same sense the
-// eval queries are hand-written test data: it states the rules the dataset was
-// written against, and it is versioned with the dataset. If the two ever
-// disagree, the eval is measuring a different product from the one that ships,
-// which is why the dataset hash covers the cases and this file is small enough to
-// read.
+// Two copies of a safety rule set is a drift risk with a specific shape: the eval
+// would keep passing while production refused different food, or the reverse.
+// `tests/interactionSeed.test.ts` parses the migration and compares the two, so
+// the drift fails a test rather than a user.
 //
 // Severity and source strings mirror the table's contract (`severity` is
 // high|moderate|low; `source` names where the rule came from) so the fixture
