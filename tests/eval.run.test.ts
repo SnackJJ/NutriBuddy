@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { main, pendingProducer } from "../src/eval/run";
+import { loadEvalCases } from "../src/eval/dataset";
 import { bareUserContextMessage, runBareEval } from "../src/eval/bare-runner";
 import type { EvalCase, TraceProducer } from "../src/eval/types";
 import type { ModelAdapter, ModelRequest } from "../src/harness/types";
@@ -19,8 +20,10 @@ describe("eval run (npm run eval entrypoint)", () => {
     const text = out.join("");
     expect(text).toContain("simple");
     expect(text).toContain("cross_domain");
-    // 全量 = 29 条（含 issue #49 descriptive 4 条）
-    expect(text).toMatch(/29/);
+    // The whole set, whatever it holds today. The literal was how this went stale
+    // the moment a case was added, and the case count is not what the test is
+    // about: that the report covers the set is.
+    expect(text).toMatch(new RegExp(String(loadEvalCases().length)));
     // pending 模式：非 strict，返回 0（框架本身绿）
     expect(code).toBe(0);
   });

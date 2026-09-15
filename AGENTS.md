@@ -33,7 +33,7 @@ Keep this list short. Prefer GitHub issues as the live backlog.
 
 迁移现在有 **15 个文件**（0001–0011、0013–0016；**0012 不存在** —— 它原本留给 S3 方案 B 的白名单表，方案 A 不需要，于是留空而不是补一个空文件）。0011 之后是：0011 轨迹、0013 依据语料、0014 老表 grant、0015 相互作用规则、0016 账号删除级联。本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本逐条断言每迁移的授权 / 策略 / 索引 / 计数前提（含"规则表已种子""三表有级联外键"这类曾经空通过的项）。
 
-Nightly live eval thickening and dropping derived `toolResult` after the UI migration (RFC 0002 §2.6) stay open; TraceEvent stays debug-only.
+**Live eval runs on a human's machine, never on GitHub.** Decided 2026-09-15. The repo is public, so a model key in Actions secrets is a credential living in a second trust boundary; and a `schedule:` job would need its report pushed back to `main` to stay comparable (`--compare` reads `reports/index.json` in the working tree), which is a bot committing to the default branch nightly. GitHub is the code host here, not a runner. The authoritative command is `npm run eval:report -- --live`; `npm run eval:live` is a superseded runner whose live arm gets no tool definitions at all. Dataset thickening stays open, and so does dropping derived `toolResult` after the UI migration (RFC 0002 §2.6); TraceEvent stays debug-only.
 
 Do **not** confuse ADD product Phase 0–4 with structural RFC phases (already landed).
 

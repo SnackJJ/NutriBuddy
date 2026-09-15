@@ -76,5 +76,5 @@ export function createStubTools(): Map<string, ToolHandler> {
     return `${food}: unknown (no USDA data available)`;
   };
 
-  return new Map([["search_food", handler]]);
+  return new Map([["query_catalog", handler]]);
 }

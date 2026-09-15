@@ -16,7 +16,16 @@ export type EvalCategory =
   | "numeric"
   | "cross_domain"
   | "edge_case"
-  | "descriptive";
+  | "descriptive"
+  /**
+   * 写入路径：用户要求记录一餐。
+   *
+   * 单独一类而不是塞进 descriptive，因为这里要考的是**动作**而不是措辞：
+   * 模型说"已经帮你记下了"而没调 `log_meal`，用户的数据就是静默丢失了。
+   * 这正是 harness 相对于裸模型存在的理由，而 2026-09-15 之前数据集里没有一条
+   * case 对它有断言。
+   */
+  | "write";
 
 /** 预定义每条 query 的期望约束（纯 TS 断言判定，无需 LLM）。 */
 export interface EvalExpected {

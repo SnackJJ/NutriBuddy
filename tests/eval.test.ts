@@ -69,6 +69,9 @@ describe("EvalDataset", () => {
   });
 
   it("every case has a valid category", () => {
+    // Whole `EvalCategory` union: a category that exists in the type but not here
+    // would make this test fail on a dataset that is in fact correct. Keep it in
+    // step with `src/eval/types.ts`.
     const validCategories = [
       "simple",
       "constrained",
@@ -76,6 +79,7 @@ describe("EvalDataset", () => {
       "cross_domain",
       "edge_case",
       "descriptive",
+      "write",
     ] as const;
     const cases = loadEvalCases();
     for (const c of cases) {

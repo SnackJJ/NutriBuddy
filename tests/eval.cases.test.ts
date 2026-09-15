@@ -9,21 +9,36 @@ const CATEGORIES: EvalCategory[] = [
   "cross_domain",
   "edge_case",
   "descriptive",
+  "write",
 ];
 
 const EVAL_CASES = loadEvalCases();
 
 describe("EVAL_CASES", () => {
-  it("holds 20-30 cases (issue #6 / PRD §4.2)", () => {
+  it("holds 20-40 cases (issue #6 / PRD §4.2)", () => {
+    // The ceiling moved from 30 on 2026-09-15, when `write` was added. It exists
+    // to keep the set hand-reviewable, not to fix its size: the set had reached
+    // the old bound while whole surfaces (the write path) still had no case
+    // asserting anything about them, and a bound that forces a choice between
+    // "reviewable" and "covers the product" picks the wrong one.
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(20);
-    expect(EVAL_CASES.length).toBeLessThanOrEqual(30);
+    expect(EVAL_CASES.length).toBeLessThanOrEqual(40);
   });
 
-  it("covers all five failure modes with 4-6 cases each", () => {
+  it("covers every category with 4-6 cases each", () => {
     for (const cat of CATEGORIES) {
       const n = EVAL_CASES.filter((c) => c.category === cat).length;
       expect(n, `category ${cat}`).toBeGreaterThanOrEqual(4);
       expect(n, `category ${cat}`).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("makes every category reachable — the list above is the whole type", () => {
+    // A category added to `EvalCategory` but not to CATEGORIES would be silently
+    // exempt from the coverage rule above, which is how a group ships with one
+    // case and no one notices.
+    for (const c of EVAL_CASES) {
+      expect(CATEGORIES, `category of ${c.id}`).toContain(c.category);
     }
   });
 

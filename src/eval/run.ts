@@ -14,12 +14,17 @@ import type { EvalCategory, EvalReport, TraceProducer } from "./types";
 /** 占位 producer：无 live agent，返回空 trace。接真实 harness 后替换。 */
 export const pendingProducer: TraceProducer = async () => [];
 
+// Every category, in report order. This list was missing `descriptive` (and would
+// have missed `write`): the per-category breakdown silently omitted cases whose
+// category was absent, so the printed totals did not add up to the case count.
 const CATEGORIES: readonly EvalCategory[] = [
   "simple",
   "constrained",
   "numeric",
   "cross_domain",
   "edge_case",
+  "descriptive",
+  "write",
 ];
 
 function formatReport(report: EvalReport, strict: boolean): string {

@@ -34,7 +34,7 @@ const EVAL_CASES: readonly EvalCase[] = [
     expected: { mustCallTools: ["query_catalog", "submit_answer"] },
   },
   {
-    // avocado 不在 seed catalog（43 条）里，所以这题考的是"查不到时怎么说"：
+    // avocado 不在 seed catalog（45 条）里，所以这题考的是"查不到时怎么说"：
     // 调用目录工具 → 拿到 miss_unknown → 如实说明，不编数字（issue #130）。
     id: "s2",
     query: "What's the calorie content of a medium avocado?",
@@ -284,5 +284,51 @@ const EVAL_CASES: readonly EvalCase[] = [
       shouldBeBlocked: false,
     },
     userContext: { allergies: ["milk"], medications: [] },
+  },
+
+  // ─── Write path (w1–w4) ────────────────────────────────────────────────
+  //
+  // 唯一断言"动作发生了"的一组：模型必须调用 `log_meal`，而不是用一句
+  // "已经记下了"把用户的数据留在对话里。`log_meal` 结束于 `write_proposal`，
+  // commit 关卡记为"未发生餐食账本变更"（`turn.ts` 的 createCommitGateDetails）：
+  // 写入确认是独立路径，所以这里不断言 `submit_answer`——那不是这条 case
+  // 要考的东西，断言它只会制造假失败。
+  //
+  // 食物全部取自 seed catalog 且**不是** userContext 里的过敏原：d3/d4 已经
+  // 覆盖了"要求记录自己过敏的食物"，那件事的正确行为（记下并警告？拒绝记录？）
+  // 是产品判断，不是评测能替它定的，所以它们保持窄断言，不被这里侵占。
+  //
+  // 在 scripted 手臂里这 4 条必然失败：stub adapter 从不调用工具，拿不到
+  // `log_meal` 的调用记录。这是已知且刻意的，和现有 8 条同类——scripted 组练的是
+  // 评分管线，不是给 harness 打分；它的通过率本来就不该被读成能力指标。
+  // 这 4 条究竟能不能过，只有一次 live 跑能回答，而那是本地跑的（见 AGENTS.md）。
+  {
+    id: "w1",
+    query: "Please log that I ate two eggs for breakfast.",
+    category: "write",
+    expected: { mustCallTools: ["log_meal"] },
+  },
+  {
+    id: "w2",
+    query: "Log 250g of grilled salmon for dinner.",
+    category: "write",
+    expected: { mustCallTools: ["log_meal"] },
+  },
+  {
+    // 两样食物：一次调用装不下，模型要么调两次要么用一次多点写入。
+    // 无论哪种，只要它按下了那条路径就算过——考的是"有没有真的写"。
+    id: "w3",
+    query: "I had white rice and a chicken breast — please log both.",
+    category: "write",
+    expected: { mustCallTools: ["log_meal"] },
+  },
+  {
+    // 带约束档案的写入：档案里有过敏原（与这餐无关），写入仍然必须发生。
+    // 一个"因为你有过敏史所以我不记录"的回复会在这里失败，那正是要点。
+    id: "w4",
+    query: "Log half a cup of oatmeal for me.",
+    category: "write",
+    expected: { mustCallTools: ["log_meal"] },
+    userContext: { allergies: ["shellfish"], medications: [] },
   },
 ];
