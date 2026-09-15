@@ -12,7 +12,7 @@
 ## 2. 现状与证据
 
 - `src/eval/reporter.ts` 已产出逐 case 对比（bare / harness / delta 四种）+ 汇总；`src/eval/metrics.ts` 的 `computeMetrics` 已算 6 项指标（bare 通过率、harness 通过率、约束违反率、工具调用率、来源合规率、闸拦截率）—— **但只 print，不落盘，无历史**。
-- `src/eval/index.ts` 已有 stub / live 两模式；入口是 `npm run eval` 与 `npm run eval:live`（合规信号）。
+- `src/eval/index.ts` 已有 stub / live 两模式；入口是 `npm run eval` 与 `npm run eval:live`（合规信号）。（后者的正确性未成立、已于 2026-09-15 删除，见 §10.2；此处保留的是当时的事实。）
 - 成本/延迟/缓存命中的字段**已经在事件里**：`TurnModelCallEvent.latencyMs / usage / costUsd`（`turn.ts:210`），loop 另发 `model_call_usage`（`loop.ts:423`）—— 缺的只是聚合，不是埋点。
 - 数据集：29 条 case / 6 类失败模式（simple 5、constrained 6、numeric 5、cross_domain 5、edge_case 4、descriptive 4）。
 - 现状后果：无法回答"哪一版改进了多少"，简历与对外叙述里最值钱的那句消融归因**在结构上写不出来**。
@@ -106,6 +106,9 @@ reports/
 ## 10. 未决
 
 1. 报告是否上传为 CI artifact：私有仓库收益低，倾向不做。
-2. `eval:live`（合规信号跑）与 `eval:report` 是否合并入口：建议保留两个 —— 前者测"模型是否守规矩"，后者做归档与对比。
+2. ~~`eval:live`（合规信号跑）与 `eval:report` 是否合并入口：建议保留两个~~ —— **已作废（2026-09-15），保留的是 `eval:report`，`eval:live` 已删除。**
+   原建议的前提是"前者测模型是否守规矩"，但代码从未做到：`live-compliance.ts` 的 live 手臂传入的是**空工具表**（`new Map()`），模型收不到任何工具定义，于是所有 `mustCallTools` 断言必然失败——失败原因看起来像能力缺口，正是 `dataset.ts` 注释警告过的那种误读。它的 stub 手臂用的还是 M1 时代不存在的 `search_food`。
+   而它承诺的合规事实另有归属：`eval:report` 的 `cases.json` 已逐条携带 `toolCalls` / `gateBlocks` / `stopReason`，三份 live 基线也全部出自 `eval:report --live`。
+   **被放弃的那一点**：live-compliance 还导出过**逐检查点**的 gate 判定序列与 `typedOutput` 信号（report 只有次数）。若这两个视图需要回来，正确位置是报告的某一节，而不是第二个 runner——同一套 provider/store/tool 装配维护两份，正是这次要清掉的东西。
 3. 是否把 live 报告与轨迹表 join（回答"哪类失败在增加"）：属 V1.1 归因闭环，本 RFC 不做。
 4. bootstrap 置信区间：建议 V1.1 引入，本 RFC 只保证口径与 n 可查。

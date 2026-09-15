@@ -13,7 +13,6 @@
     "test": "vitest run",
     "eval": "npx tsx src/eval/index.ts",
     "eval:report": "npx tsx src/eval/report.ts",
-    "eval:live": "npx tsx src/eval/live-compliance.ts",
     "smoke:confirm": "npx tsx --env-file=.env.local scripts/smoke-rfc0001-confirm.mts",
     "smoke:trace": "npx tsx --env-file=.env.local scripts/smoke-rfc0008-trace.mts",
     "smoke:delete": "npx tsx --env-file=.env.local scripts/smoke-account-delete.mts",
