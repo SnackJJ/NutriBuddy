@@ -192,6 +192,69 @@ describe("index", () => {
     expect(entry.summary.harnessPassRate).toBe(1);
   });
 
+  it("records which provider and model a live run used", () => {
+    // A live report that does not name its model cannot be attributed: three
+    // baselines in `reports/` were written without this field, so whether they
+    // ran the same model is now unanswerable. Recording it is what stops the next
+    // three from being in that position.
+    const identity = {
+      provider: "commandcode",
+      models: { flash: "deepseek/deepseek-v4.1-flash", pro: "deepseek/deepseek-v4-pro" },
+      pricingSource: "upstream deepseek published pricing; the gateway's own markup is not known",
+    };
+    const summary = buildSummary({
+      cases: CASES,
+      bareResults: [bare("s1", true)],
+      harnessResults: [harness("s1", true)],
+      env: {
+        reportId: "2026-09-15T12-00-00Z-abc1234",
+        at: "2026-09-15T12:00:00.000Z",
+        mode: "live",
+        tag: "live-x",
+        gitSha: "abc1234",
+        dirty: false,
+        appVersion: "1.0.0",
+        catalogVersion: "usda-sr-legacy-2026-07-v1",
+        model: identity,
+      },
+      traces: null,
+      telemetry: { included: false, reason: "--traces not requested" },
+    });
+
+    expect(indexEntryFor(summary).model).toEqual(identity);
+    const markdown = renderReportMarkdown(summary, []);
+    expect(markdown).toContain("provider `commandcode`");
+    expect(markdown).toContain("deepseek/deepseek-v4.1-flash");
+    // The pricing caveat has to travel with the identity: cost rows are computed
+    // from mirrored prices, and a gateway's markup is not among them.
+    expect(markdown).toContain("gateway's own markup is not known");
+  });
+
+  it("leaves the model field off a scripted report", () => {
+    const summary = buildSummary({
+      cases: CASES,
+      bareResults: [bare("s1", true)],
+      harnessResults: [harness("s1", true)],
+      env: {
+        reportId: "2026-09-15T12-00-00Z-scripted",
+        at: "2026-09-15T12:00:00.000Z",
+        mode: "scripted",
+        tag: "scripted",
+        gitSha: "abc1234",
+        dirty: false,
+        appVersion: "1.0.0",
+        catalogVersion: "usda-sr-legacy-2026-07-v1",
+      },
+      traces: null,
+      telemetry: { included: false, reason: "--traces not requested" },
+    });
+
+    // `mode` already says a stub ran; a field that is sometimes "not a model"
+    // invites exactly the misreading the field exists to prevent.
+    expect(summary.env.model).toBeUndefined();
+    expect(renderReportMarkdown(summary, [])).not.toContain("- model:");
+  });
+
   it("replaces an entry with the same reportId instead of appending a twin", () => {
     const first = { reportId: "r1" } as never;
     const second = { reportId: "r2" } as never;

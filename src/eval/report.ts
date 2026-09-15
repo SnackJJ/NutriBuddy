@@ -42,8 +42,8 @@ import { loadEvalCases } from "./dataset";
 import { runBareEval } from "./bare-runner";
 import { runHarnessEval } from "./harness-runner";
 import { createStubAdapter, createStubTools } from "./stubAdapter";
-import { DeepSeekAdapter } from "../harness/modelAdapter";
-import type { ToolHandler } from "../harness/types";
+import { DeepSeekAdapter, resolveProviderProfile } from "../harness/modelAdapter";
+import type { ToolHandler, ModelTier } from "../harness/types";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { BareResult, ComparisonRow, EvalCase, HarnessResult } from "./types";
 import {
@@ -86,6 +86,25 @@ const DEFAULT_TRACE_LIMIT = 500;
 
 export type ReportMode = "scripted" | "live";
 
+/**
+ * Which model produced a live report (issue: reports could not be attributed).
+ *
+ * A live run measures model behaviour, so "live" without the model is an
+ * incomplete record: two reports of the same dataset can differ because the
+ * harness changed or because the model behind the gateway did, and nothing in the
+ * file used to say which. `pricingSource` rides along for the same reason — the
+ * cost rows are computed from mirrored prices, and when the provider is a gateway
+ * that is not the invoice.
+ *
+ * Absent in scripted mode: the stub adapter is not a model, and the mode field
+ * already says so.
+ */
+export interface ReportModelIdentity {
+  readonly provider: string;
+  readonly models: Record<ModelTier, string>;
+  readonly pricingSource: string;
+}
+
 export interface ReportEnv {
   readonly reportId: string;
   readonly at: string;
@@ -96,6 +115,8 @@ export interface ReportEnv {
   readonly appVersion: string;
   readonly catalogVersion: string;
   readonly datasetHash: string;
+  /** Present only for `mode: "live"`; see {@link ReportModelIdentity}. */
+  readonly model?: ReportModelIdentity;
 }
 
 /**
@@ -135,6 +156,14 @@ export interface ComparableEntry {
   readonly appVersion: string;
   readonly catalogVersion: string;
   readonly datasetHash: string;
+  /**
+   * Recorded, not yet enforced: `--compare` still treats two live reports as
+   * comparable when their dataset hashes match, even if the model behind them
+   * changed. Recording it first is what makes that rule reviewable later — the
+   * old baselines in `reports/` genuinely cannot be attributed, which is the
+   * argument for putting the field in before needing it.
+   */
+  readonly model?: ReportModelIdentity;
   readonly n: number;
   readonly summary: ComparableSummary;
 }
@@ -265,6 +294,14 @@ export function renderReportMarkdown(
   lines.push(`- git: \`${env.gitSha}\`${env.dirty ? " (dirty working tree)" : ""}`);
   lines.push(`- app version: ${env.appVersion} · catalog: ${env.catalogVersion}`);
   lines.push(`- dataset: n=${summary.n} · \`${env.datasetHash}\``);
+  if (env.model) {
+    // Named in the report body, not only in summary.json: whoever reads a live
+    // result has to be able to say which model produced it.
+    lines.push(
+      `- model: provider \`${env.model.provider}\` · flash \`${env.model.models.flash}\` · pro \`${env.model.models.pro}\``,
+    );
+    lines.push(`- pricing: ${env.model.pricingSource}`);
+  }
   lines.push(`- telemetry: ${summary.telemetry.included ? `traces from ${summary.telemetry.source ?? "unknown"}` : `not included (${summary.telemetry.reason ?? "unknown"})`}`);
   lines.push("");
 
@@ -440,6 +477,7 @@ export function indexEntryFor(summary: ReportSummary): ComparableEntry {
     appVersion: summary.env.appVersion,
     catalogVersion: summary.env.catalogVersion,
     datasetHash: summary.env.datasetHash,
+    model: summary.env.model,
     n: summary.n,
     summary: buildComparableSummary(summary.eval, summary.traces),
   };
@@ -488,6 +526,14 @@ export interface ReportDeps {
   readonly appVersion?: () => string;
   readonly catalogVersion?: () => string;
   readonly loadCases?: () => readonly EvalCase[];
+  /**
+   * The provider and models a live run will use.
+   *
+   * Resolved from the environment by default, which is where the adapter reads it
+   * too, so the report names the same thing the run did. Returns undefined in
+   * scripted mode.
+   */
+  readonly modelIdentity?: (mode: ReportMode) => ReportModelIdentity | undefined;
   /** Runs the evaluation; injected so tests do not need an adapter. */
   readonly runEval?: (mode: ReportMode) => Promise<ReportRunResult>;
   /** Trace telemetry, or null when it is unavailable/not requested. */
@@ -597,6 +643,35 @@ function readPackageVersion(): string {
     return parsed.version ?? "0.0.0-unversioned";
   } catch {
     return "0.0.0-unversioned";
+  }
+}
+
+/**
+ * The provider and models a live run will use, from the same environment the
+ * adapter reads.
+ *
+ * Scripted mode returns undefined rather than naming the stub: the mode field
+ * already says a stub ran, and a field that is sometimes "not a model" invites
+ * exactly the misreading this field exists to prevent.
+ */
+function defaultModelIdentity(mode: ReportMode): ReportModelIdentity | undefined {
+  if (mode !== "live") return undefined;
+  try {
+    const profile = resolveProviderProfile();
+    return {
+      provider: profile.id,
+      models: profile.models,
+      pricingSource: profile.pricingSource,
+    };
+  } catch (err) {
+    // An unknown provider id is the adapter's error to raise, with its own
+    // message, at the moment it tries to answer. Failing the report here would
+    // turn a typo in an environment variable into "no report at all".
+    return {
+      provider: `unresolved (${(err as Error).message})`,
+      models: { flash: "unknown", pro: "unknown" },
+      pricingSource: "unknown",
+    };
   }
 }
 
@@ -780,6 +855,7 @@ export async function main(
       dirty: git.dirty,
       appVersion: (deps.appVersion ?? readPackageVersion)(),
       catalogVersion: (deps.catalogVersion ?? (() => CATALOG_SNAPSHOT_VERSION))(),
+      model: (deps.modelIdentity ?? defaultModelIdentity)(mode),
     },
     traces,
     telemetry,
