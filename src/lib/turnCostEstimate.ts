@@ -8,7 +8,9 @@
 // The bound is built from what the pinned region, the catalog signature and the
 // loop's own ceilings allow — never from the model's output:
 //   * the pinned region is byte-stable by design (ADD §ContextAssembler, AOT), so
-//     its token upper bound is computable once at cold start;
+//     its token upper bound is computable once at cold start — including the two
+//     blocks the region carries that cannot be measured there (the profile
+//     section and S4's evidence, both charged at their enforcing ceilings);
 //   * every observation is capped by MAX_OBSERVATION_BYTES, and worst case every
 //     step carries the sum of all observations so far;
 //   * the loop runs at most MAX_STEPS steps, each with one model call;
@@ -23,6 +25,7 @@
 import { computeCostUsd } from "../harness/modelAdapter";
 import { MAX_STEPS } from "../harness/loop";
 import { MAX_OBSERVATION_BYTES } from "../catalog/queryCatalog";
+import { PINNED_MAX_CHARS } from "../evidence/pinnedSet";
 import type { ModelTier } from "../harness/types";
 
 /**
@@ -52,17 +55,23 @@ const TOKENS_PER_CHAR = 0.5;
 const PROFILE_REGION_TOKENS_UPPER_BOUND = tokensForChars(14_000);
 
 /**
- * The retrieval evidence subset that S4 will pin into the region (RFC 0011 §3.7:
- * at most 40 sections, at most 6k tokens).
+ * Upper bound on the evidence block S4 pins into the region (RFC 0011 §3.7).
  *
- * Counted as 0 today, and this is a known under-count rather than a decision:
- * S3 and S4 are parallel branches, and the number to put here is whatever S4
- * actually pins. Until S4 lands, a turn whose cost is dominated by injected
- * evidence is not covered by this estimate. Calibrate this constant against the
- * shipped §3.7 subset when S4 lands (issue #100 keeps that as a second pass —
- * the bound must be corrected, not assumed to still hold).
+ * Charged at the ceiling `pinnedSet.ts` enforces rather than at the size of the
+ * corpus loaded today, for the same reason the profile section is charged at
+ * what validation allows: the route builds this bound once at cold start
+ * (`app/api/chat/route.ts`), and the evidence blocks are read from Postgres
+ * asynchronously after that. A measured number would also go stale in the
+ * dangerous direction — the corpus growing to fill its ceiling is a normal
+ * Tuesday, and a bound that only holds at the corpus size of the day is not a
+ * bound. {@link PinnedBudgetError} makes the ceiling a real one.
+ *
+ * The route's `assemblePinnedRegion(...)` call deliberately omits `evidence`
+ * (RFC 0011 §3.7 loads it once per instance, not per request), which is exactly
+ * why this allowance has to exist here: without it the pinned region is charged
+ * for everything it carries except the block S4 added to it.
  */
-const EVIDENCE_SUBSET_TOKENS = 0;
+const EVIDENCE_REGION_TOKENS_UPPER_BOUND = tokensForChars(PINNED_MAX_CHARS);
 
 /**
  * Upper bound on one response's completion tokens.
@@ -97,7 +106,7 @@ export interface TurnCostBounds {
   readonly toolSchemaTokens: number;
   /** Catalog signature stamped on the turn (the snapshot version the run is pinned to). */
   readonly catalogSignatureTokens: number;
-  /** S4's pinned evidence subset — 0 until S4 lands. */
+  /** S4's pinned evidence block, at the ceiling `pinnedSet.ts` enforces. */
   readonly evidenceTokens: number;
   /** One observation, at its byte ceiling. */
   readonly observationTokensPerStep: number;
@@ -130,7 +139,7 @@ export function buildTurnCostBounds(input: TurnCostBoundInput): TurnCostBounds {
       tokensForChars(input.pinnedText.length) + PROFILE_REGION_TOKENS_UPPER_BOUND,
     toolSchemaTokens: tokensForChars(input.toolSchemaText?.length ?? 0),
     catalogSignatureTokens: tokensForChars(input.catalogSignature.length),
-    evidenceTokens: EVIDENCE_SUBSET_TOKENS,
+    evidenceTokens: EVIDENCE_REGION_TOKENS_UPPER_BOUND,
     observationTokensPerStep: tokensForBytes(MAX_OBSERVATION_BYTES),
     outputTokensPerCall: MAX_OUTPUT_TOKENS_PER_CALL,
     steps: MAX_STEPS,

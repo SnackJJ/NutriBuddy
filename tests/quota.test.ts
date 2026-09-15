@@ -14,6 +14,7 @@ import { computeCostUsd } from "../src/harness/modelAdapter";
 import type { ModelUsage } from "../src/harness/types";
 import { MAX_STEPS } from "../src/harness/loop";
 import { MAX_OBSERVATION_BYTES } from "../src/catalog/queryCatalog";
+import { PINNED_MAX_CHARS } from "../src/evidence/pinnedSet";
 import {
   checkQuota,
   decideQuota,
@@ -243,7 +244,11 @@ describe("estimateWorstCaseTurnCostUsd (#100)", () => {
 
   it("prices the bound through computeCostUsd, so pricing has one source", () => {
     const promptTokens =
-      MAX_STEPS * (bounds.pinnedTokens + bounds.toolSchemaTokens + bounds.catalogSignatureTokens) +
+      MAX_STEPS *
+        (bounds.pinnedTokens +
+          bounds.toolSchemaTokens +
+          bounds.catalogSignatureTokens +
+          bounds.evidenceTokens) +
       bounds.observationTokensPerStep * ((MAX_STEPS * (MAX_STEPS - 1)) / 2);
     const expected = computeCostUsd("flash", {
       promptTokens,
@@ -312,17 +317,36 @@ describe("estimateWorstCaseTurnCostUsd (#100)", () => {
     expect(anomalous).toBeGreaterThan(QUOTA_DEFAULT_LIMITS.maxTurnCostUsd);
   });
 
-  it("counts the S4 evidence subset as 0 and says the correction is outstanding", () => {
-    // Issue #100: the evidence subset that S4 pins (RFC 0011 §3.7) is not
-    // available yet, so it contributes nothing today. Asserting the number and
-    // the note together is the point — the second pass is scheduled, not
-    // forgotten.
-    expect(bounds.evidenceTokens).toBe(0);
+  it("charges S4's evidence block at the ceiling the assembler enforces", () => {
+    // Issue #100's second pass, done: the evidence S4 pins into the region
+    // (RFC 0011 §3.7) now contributes to the bound. It is charged at
+    // PINNED_MAX_CHARS rather than at the size of the corpus loaded today,
+    // because the route builds this bound once at cold start and cannot see the
+    // asynchronously loaded blocks — and a bound that only holds at the corpus
+    // size of the day is not a bound.
+    expect(bounds.evidenceTokens).toBe(tokensForChars(PINNED_MAX_CHARS));
+    // Derived, not copied: the number above and the ceiling the assembler
+    // throws on are the same constant, so the corpus growing cannot desync them.
     const source = fs.readFileSync("src/lib/turnCostEstimate.ts", "utf-8");
-    expect(source).toContain("EVIDENCE_SUBSET_TOKENS = 0");
+    expect(source).toMatch(/EVIDENCE_REGION_TOKENS_UPPER_BOUND\s*=\s*tokensForChars\(PINNED_MAX_CHARS\)/);
     expect(source).toMatch(/0011/);
-    expect(source).toMatch(/S4/);
-    expect(source).toMatch(/calibrate/i);
+    expect(fs.readFileSync("tests/quota.test.ts", "utf-8")).toContain("PINNED_MAX_CHARS");
+  });
+
+  it("still clears the default single-turn cap with a full-ceiling evidence set", () => {
+    // The correction must not turn an ordinary turn into a refused one: the
+    // defaults in quota.ts are calibrated against this estimate, so the whole
+    // ceiling has to fit under the cap with room to spare. If a corpus at its
+    // limit ever stops fitting, the cap and the ceiling are in conflict and the
+    // failure belongs here rather than on someone's invoice.
+    for (const tier of ["flash", "pro"] as const) {
+      const estimate = estimateWorstCaseTurnCostUsd({
+        bounds: { ...bounds, tier },
+        requestChars: 0,
+      });
+      expect(estimate).toBeGreaterThan(0);
+      expect(estimate).toBeLessThan(QUOTA_DEFAULT_LIMITS.maxTurnCostUsd);
+    }
   });
 });
 
