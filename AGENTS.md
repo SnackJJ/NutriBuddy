@@ -30,6 +30,7 @@ Keep this list short. Prefer GitHub issues as the live backlog.
 3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）：代码侧已落地（配额纯函数 `src/lib/quota.ts`、`turns` 聚合、429 前置、最坏成本预估、UI 隐藏注册、拒绝日志）；运维人工步骤（关闭公开注册、provider 消费上限、Production-only 密钥）见 `docs/ops/v1.0-operations.md`，**尚未执行**
 4. **S4 — 依据层**（`docs/rfc/0011`，ADR 0004 已接受）：已落地 —— 迁移 0013（sources/source_sections + RLS）、13 个联邦政府语料源（372 段，`sources/`）、`scripts/ingest-sources.mts`（按 content_hash 幂等、变更 supersede 不删）、`CitationRef`/`evidenceSet`（SCHEMA_VERSION 1.10.0）、`citationGate`（四条件 + fail-closed，tier-1 剥离 `terminal:false`）、词面兜底 tier-2（声称有出处却无引用 → 重生成→拒答）、钉住集装配进 pinned region（29 段 / ~6k token）、最小引用 UI（标题 + 可点开链接）。**D8 已实测**：真模型给出的 1 条引用经 registry 校验通过并随答案送达
 5. **S5 — 上线收尾**：代码与文档侧已落地 —— README（定位 / 三条不变量 / 十分钟跑起来 / 数字从哪来）、`version: 1.0.0`、首页可用入口、隐私说明（`docs/privacy.md` + `/privacy`，含供应商条款查证与"删号不等于供应商侧清除"）、账号删除（迁移 0016 级联 + `DELETE /api/account` + `npm run smoke:delete` 实测）。**仍待人工**：Vercel 部署与 Production-only 密钥（#113）、`v1.0.0` tag（#114）、关闭公开注册（#101）、provider 消费上限（#119）、真机 PWA 验证（#117）、托管条款确认（#118）
+6. **V1.1 — 检索**（`docs/rfc/0013`，2026-09-16）：判据是**规范性建议带可核验引用的比率升上去**（来自 `citationGate` 的结构结果，与 `numericProvenanceGate` 分开计）；钉住集只覆盖语料 7.8% 且字符预算已用 99.4%，扩它撞双重天花板，所以检索是唯一出路。切片、注入、预算与评测口径都在该 RFC，T1–T8 即 issue 草稿。**另有两笔账被它暴露**：`docs/privacy.md` §4 未记录默认网关（commandcode）的条款（按 §4 自己的规矩即"未核对"，归 #113）；`docs/rfc/0007`/`0008`/`0011` 已落地但状态头仍写 `Proposed`
 
 迁移现在有 **15 个文件**（0001–0011、0013–0016；**0012 不存在** —— 它原本留给 S3 方案 B 的白名单表，方案 A 不需要，于是留空而不是补一个空文件）。0011 之后是：0011 轨迹、0013 依据语料、0014 老表 grant、0015 相互作用规则、0016 账号删除级联。本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本逐条断言每迁移的授权 / 策略 / 索引 / 计数前提（含"规则表已种子""三表有级联外键"这类曾经空通过的项）。
 
@@ -64,7 +65,7 @@ npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需
 | Path | Role |
 |------|------|
 | `docs/PRD-v2.md` | Product goals / old milestone color |
-| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; product RFCs 0006–0012 are `Proposed` (0012 is V1.1) |
+| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; product RFCs 0006–0012 are `Proposed` (0012 与 0013 是 V1.1). 注意 0007/0008/0011 已在代码里落地而状态头未更新（`docs/rfc/0013` §10 记了这笔） |
 | `docs/agents/*` | Tracker / triage / domain-doc **how-to** for Matt skills |
 
 **Do not load unless the task explicitly needs them:**

@@ -2,13 +2,23 @@
 
 > 本文只定义领域概念，不含实现细节。架构 source of truth 是 `docs/ADD.md`；术语解释若与 ADD 冲突，以 ADD 为准。术语按首字母排序。
 
+## Bibliography（参考文献段）
+
+语料里**指向证据的指针**，不是证据：政府文件末尾的文献列表。书目段没有可引用的主张，因此不进检索索引（见 `docs/rfc/0013` §3）。
+
 ## Catalog（食品目录）
 
 运行时本地食品与营养事实目录。数据来自 USDA FoodData Central snapshot ingestion，但运行时不调用 USDA API。Catalog 提供 food id、per-100g 营养值、allergen tags、aliases、portion aliases 和 snapshot version。
 
+## Chunk（检索切片）
+
+语料章节按段落与尺寸切出的片段，是**检索单元**，不是可引用单元。Chunk 只存在于检索索引里，命中后归属回它的章节；引用永远指向章节（见 `docs/adr/0005`）。
+
 ## Citation（引用）
 
 答案里指向权威原文的结构化指针：`sectionId` + `sourceId` + `docVersion`（可选短引文）。引用**只**来自本轮可用证据集，且必须能在 source registry 中查到、状态为 active、版本一致；校验不通过的引用被确定性剥离而不是整体拒答。引用不携带营养数字，也不参与任何安全判定（见 `docs/adr/0004`）。
+
+可引用单元是**章节**，不是 chunk（见 `docs/adr/0005`）。引用支撑的是**规范性主张**；营养数字的支撑来自 catalog observation（`numericProvenanceGate`）。这是两种不同的支撑关系，不合并成一个比率。
 
 ## Gates（闸）
 
@@ -29,6 +39,10 @@ agent 可创建但不可直接提交的 immutable 写入提案。`log_meal` 只�
 ## Resolver（食品解析器）
 
 Catalog 下的确定性解析器。解析顺序为 exact match → alias table → fuzzy threshold。模型可以提出字符串，但不能 mint food id；多候选、低置信或未知食物必须返回 typed miss 并要求 clarification。
+
+## Retrieval（检索）
+
+按问题从语料里选出本轮可用证据的机制：词法侧与向量侧各召回一批 chunk，融合后归回章节，构成当轮证据集。检索只决定"哪些章节可用"，**不提供数字、实体、写入，也不参与任何安全判定**（见 `docs/adr/0004`）；检索不可用时答案退化为无引用并说明依据不足。
 
 ## Source registry（依据登记表）
 
