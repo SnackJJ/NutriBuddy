@@ -145,6 +145,23 @@ export interface HarnessResult {
   readonly infrastructure?: InfrastructureFault;
   /** See {@link CitationSignal}. Absent when the case ran without a corpus. */
   readonly citations?: CitationSignal;
+  /**
+   * What retrieval contributed to this case, when the run had a corpus
+   * (RFC 0013 §5).
+   *
+   * Absent means retrieval was not wired for this run — which is not the same
+   * fact as "retrieval ran and found nothing", and the difference is the whole
+   * point of the attribution: without it, a scripted arm with no corpus would be
+   * reported as the product failing to cite.
+   */
+  readonly retrieval?: RetrievalSignal;
+}
+
+/** Shape of {@link HarnessResult.retrieval}. */
+export interface RetrievalSignal {
+  readonly hits: number;
+  /** Why retrieval contributed nothing; absent when it contributed something. */
+  readonly degraded?: "unavailable" | "no_hits";
 }
 
 /** 单条 case 的对比行。 */

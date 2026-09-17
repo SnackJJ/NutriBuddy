@@ -36,6 +36,13 @@ import {
   QUERY_CATALOG_SCHEMA,
 } from "../harness/queryCatalog";
 import { SUBMIT_ANSWER_SCHEMA } from "../harness/submitAnswer";
+import { createEdgeFunctionEmbedder } from "../evidence/embedding";
+import {
+  createSupabaseEvidenceTextSource,
+  loadPinnedEvidence,
+} from "../evidence/registry";
+import { createSupabaseRetriever } from "../evidence/retrieval";
+import type { HarnessEvidenceDeps } from "./harness-runner";
 import { evalInteractionStore } from "./evalInteractions";
 import { createFileStores } from "../lib/cliStores";
 import { loadEvalCases } from "./dataset";
@@ -277,6 +284,16 @@ function listOrDash(cases: readonly string[]): string {
   return cases.length === 0 ? "—" : cases.join(", ");
 }
 
+/**
+ * An attribution bucket with its count: `2（v1, v4）` or `—`.
+ *
+ * The count leads because these buckets are routinely empty, and "—" with a
+ * number behind it reads as "none, measured" rather than "not reported".
+ */
+function describeCases(cases: readonly string[]): string {
+  return cases.length === 0 ? "— (0)" : `${cases.length}（${cases.join(", ")}）`;
+}
+
 function points(value: number | undefined): string {
   if (value === undefined) return "n/a";
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}pt`;
@@ -373,8 +390,12 @@ export function renderReportMarkdown(
     `| --- | --- | --- |`,
     `| 引用支撑率 | ${citationRate(metrics.citationSupport)} | ${metrics.citationSupport.supported}/${metrics.citationSupport.declared} 条应有依据的 case 带 ≥1 条存活引用 |`,
     `| 其中已测量 | ${metrics.citationSupport.measured}/${metrics.citationSupport.declared} | 未测量的 case 留在分母里，不悄悄剔除 |`,
-    `| 引用被剥离（tier-1） | ${listOrDash(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
-    `| 声称有据却无引用（tier-2） | ${listOrDash(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
+    `| 检索未接线 | ${describeCases(metrics.citationSupport.unwired)} | 这一轮没有语料（scripted 臂即如此）：比率结构性为 0，读成能力缺口是错的 |`,
+    `| 检索无命中（\`retrieval_miss\`） | ${describeCases(metrics.citationSupport.retrievalMiss)} | 检索跑了，语料里没有这个问题的依据 |`,
+    `| 检索不可用 | ${describeCases(metrics.citationSupport.retrievalUnavailable)} | 检索没跑成（outage）。与上一行是两件事，处置也不同 |`,
+    `| 有命中但没引用 | ${describeCases(metrics.citationSupport.citedNothing)} | 给了依据却没引：检索到位了，答案没用 |`,
+    `| 引用被剥离（tier-1） | ${describeCases(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
+    `| 声称有据却无引用（tier-2） | ${describeCases(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
   );
   lines.push("");
 
@@ -569,6 +590,11 @@ export interface ReportDeps {
   readonly modelIdentity?: (mode: ReportMode) => ReportModelIdentity | undefined;
   /** Runs the evaluation; injected so tests do not need an adapter. */
   readonly runEval?: (mode: ReportMode) => Promise<ReportRunResult>;
+  /**
+   * The corpus a live run reads, injected so a test can assert the citation
+   * section without a database. Defaults to the environment's local stack.
+   */
+  readonly liveEvidence?: () => Promise<HarnessEvidenceDeps>;
   /** Trace telemetry, or null when it is unavailable/not requested. */
   readonly loadTraces?: (mode: ReportMode, until: Date) => Promise<{
     readonly metrics: TraceMetrics;
@@ -747,6 +773,49 @@ export async function main(
   const mode: ReportMode = args.live ? "live" : "scripted";
   const cases = (deps.loadCases ?? loadEvalCases)();
 
+  /**
+   * The corpus for a live run (RFC 0011 §3.7, RFC 0013 §5).
+   *
+   * Read once per run, from whatever the environment points at — the local stack
+   * a human ingested into, which is where live runs happen (AGENTS.md). Failure
+   * returns no dependencies rather than throwing: a live report with no corpus is
+   * still a report about the model, and its citation section says "retrieval not
+   * wired" instead of blaming the product for a database it could not read.
+   */
+  async function liveEvidence(): Promise<HarnessEvidenceDeps> {
+    if (deps.liveEvidence) return deps.liveEvidence();
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const env = process.env as Record<string, string | undefined>;
+      const url = env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+      const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !serviceKey || !anonKey) return {};
+
+      const client = createClient(url, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const loaded = await loadPinnedEvidence(client);
+      return {
+        pinnedText: loaded.evidence.text,
+        pinnedSet: loaded.evidence.evidenceSet,
+        citationRegistry: loaded.registry,
+        retrieval: {
+          retriever: createSupabaseRetriever(client, {
+            embed: createEdgeFunctionEmbedder({ baseUrl: url, apiKey: anonKey }),
+          }),
+          texts: createSupabaseEvidenceTextSource(client),
+          sourceVersion: loaded.evidence.evidenceSet.sourceVersion,
+        },
+      };
+    } catch (err) {
+      console.error(
+        `[eval] corpus unavailable; this run reports retrieval as not wired: ${String(err).slice(0, 200)}`,
+      );
+      return {};
+    }
+  }
+
   const runEval =
     deps.runEval ??
     (async (runMode: ReportMode): Promise<ReportRunResult> => {
@@ -807,6 +876,7 @@ export async function main(
           evalInteractionStore(),
           catalog,
           toolSchemas,
+          await liveEvidence(),
         ),
       };
     });

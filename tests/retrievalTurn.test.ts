@@ -289,3 +289,156 @@ describe("retrieved evidence at the turn seam", () => {
     expect(evidence.text).toContain("excerpt");
   });
 });
+
+// ── the two boundaries #136 turns on ────────────────────────────────────────
+//
+// Retrieval is an evidence layer: it may supply the *reason* for a
+// recommendation and nothing else. The numeric provenance gate already forbids
+// numbers that do not trace to an observation column, which means corpus text is
+// not a number source either — that is the `rag_boundary` property, and it is
+// asserted here rather than assumed. The second boundary is the degraded path:
+// with retrieval down the answer must still be an answer, without a source and
+// without inventing one.
+
+describe("rag_boundary: retrieved text is not a number source", () => {
+  const NUMBERED_TEXTS: EvidenceTextSource = {
+    async loadSections(ids) {
+      return ids.map((id) => ({
+        id,
+        sourceId: "ods-vitamin-d",
+        docVersion: "2024",
+        sectionPath: "Vitamin D / Recommended Intakes",
+        anchor: null,
+        // The corpus does contain figures like this; the gate's job is to make
+        // sure they cannot become the answer's figures.
+        text: "The recommended dietary allowance for adults is 600 IU (15 mcg) per day.",
+      }));
+    },
+    async loadChunks() {
+      return [];
+    },
+  };
+
+  async function retrieveNumbered() {
+    return loadRetrievalEvidence({
+      retriever: {
+        async retrieve() {
+          return {
+            hits: [
+              { sectionId: RETRIEVED_SECTION, chunkId: `${RETRIEVED_SECTION}#c1`, score: 1, via: ["vector"] as const },
+            ],
+          };
+        },
+      },
+      texts: NUMBERED_TEXTS,
+      query: QUESTION,
+      sourceVersion: PINNED.sourceVersion,
+    });
+  }
+
+  it("blocks an answer whose number exists only in the retrieved text", async () => {
+    const retrieved = await retrieveNumbered();
+    const { events, result } = await runTurn({
+      output: {
+        prose: "Adults need 600 IU of vitamin D a day.",
+        foodRefs: [],
+        ruleRefs: [],
+      },
+      retrievedEvidence: retrieved.text,
+      evidenceSet: withRetrievedSections(PINNED, retrieved.sectionIds),
+    });
+
+    const numeric = events.find(
+      (event) => event.type === "gate_verdict" && event.checkName === "output_numeric_provenance",
+    );
+    if (numeric?.type !== "gate_verdict") throw new Error("no numeric verdict");
+    expect(numeric.verdict).toBe("block");
+    expect(numeric.evidence).toContain("Ungrounded numeric fact");
+
+    // The claim is not delivered as an answer: the turn refuses. The number
+    // survives only inside the refusal's quotation of what it blocked, which is
+    // the diagnostic — not the assertion — and is why this checks the sentence
+    // rather than the substring.
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toMatch(/cannot safely answer/i);
+    expect(result.reply).not.toContain("Adults need 600 IU of vitamin D a day.");
+  });
+
+  it("does not treat the injected block as a source, even though the number is in the prompt", async () => {
+    // The positive half of the rule — a figure that traces to an observation
+    // column passes — is covered in `numericProvenanceGate.test.ts`. What matters
+    // here is that retrieval changed nothing about it: the number really is in the
+    // context the model saw, and it is still ungrounded.
+    const retrieved = await retrieveNumbered();
+    const { requests, events } = await runTurn({
+      output: { prose: "Adults need 600 IU of vitamin D a day.", foodRefs: [], ruleRefs: [] },
+      retrievedEvidence: retrieved.text,
+      evidenceSet: withRetrievedSections(PINNED, retrieved.sectionIds),
+    });
+
+    const prompt = requests[0].messages.map((message) => message.content).join("\n");
+    expect(prompt).toContain("600 IU");
+
+    const numeric = events.find(
+      (event) => event.type === "gate_verdict" && event.checkName === "output_numeric_provenance",
+    );
+    if (numeric?.type !== "gate_verdict") throw new Error("no numeric verdict");
+    expect(numeric.verdict).toBe("block");
+  });
+});
+
+describe("degradation: no evidence is answered as no evidence", () => {
+  it("regenerates then refuses when the answer claims authority with nothing to cite", async () => {
+    const { events, result } = await runTurn({
+      // The tier-2 backstop: an answer that says "according to ODS" while citing
+      // nothing is the one citation failure severe enough to rewrite, and with
+      // retrieval down there is nothing legitimate to cite.
+      output: {
+        prose: "According to ODS, vitamin D is important for bone health.",
+        foodRefs: [],
+        ruleRefs: [],
+      },
+      evidenceSet: PINNED,
+      retrievalProvenance: {
+        sourceVersion: PINNED.sourceVersion,
+        hits: [],
+        degraded: "unavailable",
+      },
+    });
+
+    const assertion = events.find(
+      (event) => event.type === "gate_verdict" && event.checkName === "citation_assertion",
+    );
+    if (assertion?.type !== "gate_verdict") throw new Error("no citation_assertion verdict");
+    expect(assertion.verdict).toBe("block");
+    // Tier-2 is the terminal one: it consumes the regenerate budget, unlike a
+    // stripped citation. That distinction is data (`terminal`), not a naming
+    // convention (RFC 0011 §3.5).
+    expect(assertion.terminal).not.toBe(false);
+    // It was neither rewritten into a safer answer nor delivered as one: the turn
+    // refused, and the claim appears only as the reason it was refused.
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toMatch(/cannot safely answer/i);
+    expect(result.reply).not.toContain("According to ODS, vitamin D is important for bone health.");
+  });
+
+  it("still answers, uncited, when the answer makes no authority claim", async () => {
+    const { result } = await runTurn({
+      output: {
+        prose: "Vitamin D is involved in calcium absorption and bone maintenance.",
+        foodRefs: [],
+        ruleRefs: [],
+      },
+      evidenceSet: PINNED,
+      retrievalProvenance: {
+        sourceVersion: PINNED.sourceVersion,
+        hits: [],
+        degraded: "unavailable",
+      },
+    });
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.reply.length).toBeGreaterThan(0);
+    expect(result.output?.citations).toBeUndefined();
+  });
+});

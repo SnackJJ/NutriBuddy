@@ -1,6 +1,42 @@
 {
   "reports": [
     {
+      "reportId": "2026-09-17T01-30-17Z-v1.1-retrieval-attribution",
+      "at": "2026-09-17T01:30:17.982Z",
+      "mode": "scripted",
+      "tag": "v1.1-retrieval-attribution",
+      "gitSha": "c3287b1",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.8421052631578947,
+        "harnessPassRate": 0.6842105263157895,
+        "deltaPoints": -15.78947368421052,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.9285714285714286
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.5416666666666666
+          }
+        ],
+        "constraintViolationRateHarness": 0.3157894736842105,
+        "toolCallRate": 0,
+        "gateTurnRate": 0.10526315789473684,
+        "citationSupportRate": 0,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
       "reportId": "2026-09-17T01-03-15Z-v1.1-citation-instrument",
       "at": "2026-09-17T01:03:15.357Z",
       "mode": "scripted",

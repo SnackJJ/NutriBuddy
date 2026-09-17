@@ -297,6 +297,21 @@ export interface CitationSupport {
   /** Of those, how many kept at least one verified citation. */
   readonly supported: number;
   readonly rate?: number;
+  /**
+   * Cases whose turn ran with no retrieval wired at all.
+   *
+   * Named separately because this is a fact about the *run*, not about the
+   * product: the scripted arm has no corpus, so its citation rate is structurally
+   * zero and reading that as a capability gap would be the same mistake #129
+   * fixed for provider faults.
+   */
+  readonly unwired: readonly string[];
+  /** Retrieval ran and the corpus had nothing for the question (`retrieval_miss`). */
+  readonly retrievalMiss: readonly string[];
+  /** Retrieval could not run: an outage, not a corpus gap (RFC 0013 §5). */
+  readonly retrievalUnavailable: readonly string[];
+  /** Retrieval supplied sections and the answer cited none of them. */
+  readonly citedNothing: readonly string[];
   /** Cases where a citation was stripped for failing the provenance check (tier-1). */
   readonly stripped: readonly string[];
   /** Cases where the answer claimed authority without naming a source (tier-2). */
@@ -472,11 +487,31 @@ export function citationSupportOf(
   const measured = declared.filter((c) => byId.get(c.id)?.citations !== undefined);
   const supported = measured.filter((c) => (byId.get(c.id)?.citations?.kept ?? 0) > 0);
 
+  // Attribution over the cases that fell short, one bucket each. The order is the
+  // question a reader asks: was retrieval even wired, could it run, did the corpus
+  // have anything, did the answer use what it was given.
+  const short = measured.filter((c) => (byId.get(c.id)?.citations?.kept ?? 0) === 0);
+  const unwired: string[] = [];
+  const retrievalMiss: string[] = [];
+  const retrievalUnavailable: string[] = [];
+  const citedNothing: string[] = [];
+  for (const c of short) {
+    const retrieval = byId.get(c.id)?.retrieval;
+    if (!retrieval) unwired.push(c.id);
+    else if (retrieval.degraded === "unavailable") retrievalUnavailable.push(c.id);
+    else if (retrieval.degraded === "no_hits" || retrieval.hits === 0) retrievalMiss.push(c.id);
+    else citedNothing.push(c.id);
+  }
+
   return {
     declared: declared.length,
     measured: measured.length,
     supported: supported.length,
     rate: declared.length > 0 ? supported.length / declared.length : undefined,
+    unwired,
+    retrievalMiss,
+    retrievalUnavailable,
+    citedNothing,
     stripped: measured
       .filter((c) => byId.get(c.id)?.citations?.stripped === true)
       .map((c) => c.id),

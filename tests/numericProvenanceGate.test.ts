@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkNumericProvenance } from "../src/harness/numericProvenanceGate";
+import { checkNumericProvenance, extractNumbersFromProse } from "../src/harness/numericProvenanceGate";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
 import type { TypedOutput } from "../src/harness/turn";
 
@@ -454,5 +454,52 @@ describe("checkNumericProvenance", () => {
     });
 
     expect(result.passed).toBe(true);
+  });
+});
+
+// ── the unit vocabulary is measured against the corpus, not remembered ──────
+//
+// This test exists because the gap it guards was invisible: the gate could not
+// extract "600 IU" or "15 mcg" at all, so a figure stated from the evidence text
+// was never checked — and vitamin D's recommended intake is written in exactly
+// those two units. Nothing failed; the gate simply did not look.
+//
+// The list is derived from the committed corpus (counts in the comment below), so
+// a new source whose units are not recognized shows up here rather than as an
+// unchecked number in an answer.
+
+describe("unit vocabulary covers what the corpus states", () => {
+  // Occurrences of `<number> <unit>` in sources/*/sections.jsonl, measured
+  // 2026-09-17: mg 420, mcg 285, g 64, iu 92, nmol 58, ng 58.
+  const CORPUS_UNITS = ["mg", "mcg", "g", "iu", "nmol", "ng"];
+
+  for (const unit of CORPUS_UNITS) {
+    it(`extracts a number attached to "${unit}"`, () => {
+      const extracted = extractNumbersFromProse(`The value is 123 ${unit} per day.`);
+      expect(extracted.map((entry) => entry.unit)).toContain(unit);
+    });
+  }
+
+  it("writes micrograms in the three spellings the corpus uses", () => {
+    for (const spelling of ["mcg", "µg", "ug"]) {
+      expect(extractNumbersFromProse(`15 ${spelling}`).map((entry) => entry.unit)).toContain(spelling);
+    }
+  });
+
+  it("converts micrograms against milligram observations instead of calling it a mismatch", () => {
+    // 0.5 mg and 500 mcg are the same amount; without the conversion table the
+    // gate would have seen a grounded figure as ungrounded, which is the failure
+    // direction that costs a correct answer.
+    const check = checkNumericProvenance({
+      output: { prose: "That food has 500 mcg of folate.", foodRefs: [], ruleRefs: [] },
+      observations: [
+        makeObservation(
+          "food_lookup",
+          [{ name: "folate", type: "number", unit: "mg", description: "folate" }],
+          [{ folate: 0.5 }],
+        ),
+      ],
+    });
+    expect(check.passed).toBe(true);
   });
 });

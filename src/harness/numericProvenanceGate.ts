@@ -41,6 +41,12 @@ const MASS_CONVERSIONS: Record<string, { readonly factor: number }> = {
   g: { factor: 1 },
   mg: { factor: 0.001 },
   kg: { factor: 1000 },
+  // Micrograms, which the corpus writes three ways. Without these, "500 mcg"
+  // stated by the model could not be compared with a milligram observation, and
+  // the two would look like a mismatch rather than a unit conversion.
+  mcg: { factor: 0.000001 },
+  "µg": { factor: 0.000001 },
+  ug: { factor: 0.000001 },
 };
 
 const ENERGY_CONVERSIONS: Record<string, { readonly factor: number }> = {
@@ -107,6 +113,25 @@ const NUTRITION_UNITS = [
   "cups",
   "tbsp",
   "tsp",
+  // Micrograms and international units. Measured on the committed corpus, `mcg`
+  // (285 occurrences) and `iu` (92) are the second and fourth most common
+  // number-attached units in the evidence text — so leaving them out meant the
+  // numeric provenance gate could not see the figures the corpus states most
+  // often about the very nutrients it covers. `nmol` and `ng` are lab measures
+  // that appear in the same sentences; they are recognized for the same reason,
+  // which is that a model quoting them should be asked where they came from.
+  "mcg",
+  "µg",
+  "ug",
+  "micrograms",
+  "microgram",
+  "milligrams",
+  "milligram",
+  "grams",
+  "gram",
+  "iu",
+  "ng",
+  "nmol",
 ];
 
 // Build unit alternation for the regex.
