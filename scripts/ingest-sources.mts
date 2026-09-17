@@ -5,11 +5,20 @@
  *   npx tsx --env-file=.env.local scripts/ingest-sources.mts            # upsert the committed corpus
  *   npx tsx --env-file=.env.local scripts/ingest-sources.mts --dry      # decide, write nothing
  *   npx tsx --env-file=.env.local scripts/ingest-sources.mts --only ods-iron
+ *   npx tsx --env-file=.env.local scripts/ingest-sources.mts --rechunk  # rebuild the retrieval index only
+ *   npx tsx --env-file=.env.local scripts/ingest-sources.mts --no-embed # skip the embedding pass
  *
  * Reads `sources/<id>/manifest.json` + `sections.jsonl` (written by
- * `scripts/fetch-sources.mts`), writes `sources` / `source_sections` through the
- * service role, and refreshes `sources/snapshot.json` — the committed record of
- * which document versions and content hashes a release pins.
+ * `scripts/fetch-sources.mts`), writes `sources` / `source_sections` /
+ * `source_chunks` through the service role, and refreshes `sources/snapshot.json`
+ * — the committed record of which document versions and content hashes a release
+ * pins, and of what the retrieval index holds for them.
+ *
+ * `--rechunk` exists because chunks are derived: when the chunking rule or the
+ * embedding model changes, the registry is already correct and only the index is
+ * stale. A plain re-run cannot fix that — unchanged content is skipped by design
+ * — so the rebuild is its own mode, and it deliberately does not refresh the
+ * snapshot (it establishes nothing about which versions are in the database).
  *
  * Exit codes: 0 ok, 1 the corpus or the database refused, 2 missing configuration.
  */
@@ -22,8 +31,10 @@ import {
   buildSnapshot,
   createSupabaseRegistryStore,
   ingestDocument,
+  rechunkDocument,
   type CorpusSnapshot,
 } from "../src/evidence/ingest";
+import { createGteSmallEmbedder } from "../src/evidence/embedding";
 import { isLocalTarget, loadEnvLocal, requireEnv } from "./lib/env";
 
 const SNAPSHOT_PATH = "sources/snapshot.json";
@@ -32,21 +43,27 @@ interface Args {
   readonly dry: boolean;
   readonly only?: string;
   readonly snapshotOnly: boolean;
+  readonly rechunk: boolean;
+  readonly noEmbed: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let dry = false;
   let only: string | undefined;
   let snapshotOnly = false;
+  let rechunk = false;
+  let noEmbed = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--dry") dry = true;
     else if (argv[i] === "--snapshot-only") snapshotOnly = true;
+    else if (argv[i] === "--rechunk") rechunk = true;
+    else if (argv[i] === "--no-embed") noEmbed = true;
     else if (argv[i] === "--only") {
       only = argv[++i];
       if (!only) throw new Error("--only needs a source id");
     } else throw new Error(`unknown argument "${argv[i]}"`);
   }
-  return { dry, only, snapshotOnly };
+  return { dry, only, snapshotOnly, rechunk, noEmbed };
 }
 
 async function main(): Promise<number> {
@@ -108,16 +125,40 @@ async function main(): Promise<number> {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const store = createSupabaseRegistryStore(client);
+  const embedder = args.noEmbed ? undefined : createGteSmallEmbedder();
+  const options = {
+    dry: args.dry,
+    embed: embedder,
+    onEmbedProgress: (done: number, total: number): void => {
+      if (done >= total) process.stdout.write(`\r${" ".repeat(44)}\r`);
+      else process.stdout.write(`\r  embedding ${done}/${total}`);
+    },
+  };
+  if (!embedder) {
+    console.log("chunks will be written without vectors (--no-embed): lexical search only");
+  }
 
   let failures = 0;
   let written = 0;
+  let chunks = 0;
   for (const document of documents) {
     try {
-      const outcome = await ingestDocument(store, document, { dry: args.dry });
+      if (args.rechunk) {
+        const plan = await rechunkDocument(store, document, options);
+        chunks += plan.chunks;
+        console.log(
+          `${document.slug.padEnd(22)} ${args.dry ? "rechunk planned" : "rechunked"}`.padEnd(46) +
+            `${String(plan.chunks).padStart(4)} chunks · bibliography excluded ${plan.bibliography.sections} section(s) / ${plan.bibliography.chunks} chunk(s)`,
+        );
+        continue;
+      }
+
+      const outcome = await ingestDocument(store, document, options);
       written += outcome.written ? 1 : 0;
+      chunks += outcome.chunks;
       console.log(
         `${document.slug.padEnd(22)} ${outcome.plan.action.padEnd(20)} ${String(outcome.plan.sections).padStart(4)} sections ` +
-          `(${outcome.plan.pinned} pinned) · ${outcome.plan.reason}`,
+          `(${outcome.plan.pinned} pinned) · ${outcome.chunks} chunks · ${outcome.plan.reason}`,
       );
     } catch (err) {
       failures += 1;
@@ -125,16 +166,17 @@ async function main(): Promise<number> {
     }
   }
 
-  if (failures === 0 && !args.dry) {
+  if (failures === 0 && !args.dry && !args.rechunk) {
     // Only a complete run refreshes the snapshot: a partial ingest would produce
-    // a snapshot claiming versions that were never written.
+    // a snapshot claiming versions that were never written, and a rechunk run
+    // establishes nothing about which versions are in the database.
     writeSnapshot(buildSnapshot(corpus.documents, budget, ingestedAt));
     console.log(`wrote ${SNAPSHOT_PATH}`);
   }
 
   console.log(
     `\n${documents.length - failures}/${documents.length} document(s) ${args.dry ? "planned (dry run)" : `ingested (${written} written)`}` +
-      ` · pinned ${budget.sections} sections / ${budget.chars} chars`,
+      ` · pinned ${budget.sections} sections / ${budget.chars} chars · ${chunks} chunks`,
   );
   return failures === 0 ? 0 : 1;
 }

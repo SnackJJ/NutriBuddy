@@ -11,7 +11,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildSnapshot,
   ingestDocument,
+  planChunks,
   planIngest,
+  rechunkDocument,
+  type ChunkRow,
   type RegistryStore,
   type SectionRow,
   type SourceRow,
@@ -61,15 +64,18 @@ function memoryStore(seed: readonly SourceRow[] = []): RegistryStore & {
   readonly sources: SourceRow[];
   readonly sections: SectionRow[];
   readonly superseded: string[];
+  readonly chunks: ChunkRow[];
 } {
   const sources = [...seed];
   const sections: SectionRow[] = [];
   const superseded: string[] = [];
+  const chunks: ChunkRow[] = [];
 
   return {
     sources,
     sections,
     superseded,
+    chunks,
     async findActiveSource(slug) {
       const row = sources.find((candidate) => candidate.slug === slug && candidate.status === "active");
       return row ? { id: row.id, contentHash: row.content_hash } : undefined;
@@ -91,6 +97,13 @@ function memoryStore(seed: readonly SourceRow[] = []): RegistryStore & {
         if (index >= 0) sections[index] = row;
         else sections.push(row);
       }
+    },
+    async replaceChunks(sourceId, rows) {
+      // Derived data: replaced, never accumulated. Rows of other versions stay.
+      for (let index = chunks.length - 1; index >= 0; index -= 1) {
+        if (chunks[index].source_id === sourceId) chunks.splice(index, 1);
+      }
+      chunks.push(...rows);
     },
   };
 }
@@ -204,5 +217,152 @@ describe("buildSnapshot", () => {
     expect(snapshot.sources.map((entry) => entry.slug)).toEqual(["a", "b"]);
     expect(snapshot.sources[0]).toMatchObject({ sections: 2, pinned: 1 });
     expect(snapshot.pinnedBudget.maxSections).toBe(40);
+  });
+
+  it("records what the retrieval index holds, and names the excluded sections", () => {
+    const snapshot = buildSnapshot(
+      [
+        document({
+          sections: [
+            {
+              id: "ods-x#intro",
+              sectionPath: "X / Introduction",
+              heading: "Introduction",
+              ordinal: 1,
+              text: "Vitamin X is a thing.",
+              contentHash: "hash-intro",
+              pinned: true,
+            },
+            {
+              id: "ods-x#references",
+              sectionPath: "X / References",
+              heading: "References",
+              ordinal: 2,
+              text: "A. Author. Title. Journal. 2024. ".repeat(20),
+              contentHash: "hash-refs",
+              pinned: false,
+            },
+          ],
+        }),
+      ],
+      { maxSections: 40, maxChars: 24000, sections: 1, chars: 100 },
+      "2026-09-14T00:00:00.000Z",
+    );
+
+    expect(snapshot.chunks.sections).toBe(1);
+    expect(snapshot.chunks.total).toBe(1);
+    expect(snapshot.chunks.bibliography.sections).toBe(1);
+    expect(snapshot.chunks.bibliography.sectionIds).toEqual(["ods-x#references"]);
+    // Named with the size of what the exclusion saved, not just a count of one.
+    expect(snapshot.chunks.bibliography.chunks).toBeGreaterThan(0);
+  });
+});
+
+describe("chunks", () => {
+  const bibliography = {
+    id: "ods-x#references",
+    sectionPath: "X / References",
+    heading: "References",
+    ordinal: 3,
+    text: "A. Author. Title. Journal. 2024. ".repeat(30),
+    contentHash: "hash-refs",
+    pinned: false,
+  };
+
+  const withBibliography = (extra: Partial<CorpusDocument> = {}) =>
+    document({
+      sections: [...document().sections, bibliography],
+      ...extra,
+    });
+
+  it("keeps a bibliography out of the index and names it in the plan", () => {
+    const plan = planChunks(withBibliography());
+
+    expect(plan.rows.map((row) => row.section_id)).toEqual(["ods-x#intro", "ods-x#detail"]);
+    expect(plan.bibliography.sections).toBe(1);
+    expect(plan.bibliography.sectionIds).toEqual(["ods-x#references"]);
+    // The excluded section's text is long enough to have produced chunks.
+    expect(plan.bibliography.chunks).toBeGreaterThan(0);
+  });
+
+  it("writes chunk rows on the first run, with the section path kept apart", async () => {
+    const store = memoryStore();
+    const outcome = await ingestDocument(store, document());
+
+    expect(outcome.chunks).toBe(2);
+    expect(store.chunks).toHaveLength(2);
+    expect(store.chunks[0]).toMatchObject({
+      id: "ods-x#intro#c1",
+      section_id: "ods-x#intro",
+      source_id: "ods-x@2024",
+      ordinal: 1,
+      heading_text: "X / Introduction",
+      text: "Vitamin X is a thing.",
+      embedding: null,
+    });
+  });
+
+  it("is idempotent: a second run does not accumulate chunks", async () => {
+    const store = memoryStore();
+    await ingestDocument(store, document());
+    const before = JSON.stringify(store.chunks);
+
+    const second = await ingestDocument(store, document());
+
+    expect(second.plan.action).toBe("skip");
+    expect(JSON.stringify(store.chunks)).toBe(before);
+    expect(store.chunks).toHaveLength(2);
+  });
+
+  it("keeps the superseded version's chunks, because its sections stay citable", async () => {
+    const store = memoryStore();
+    await ingestDocument(store, document());
+    await ingestDocument(
+      store,
+      document({ id: "ods-x@2025", docVersion: "2025", contentHash: "doc-hash-2" }),
+    );
+
+    expect(store.chunks.map((row) => row.source_id)).toEqual(["ods-x@2024", "ods-x@2024", "ods-x@2025", "ods-x@2025"]);
+  });
+
+  it("fills the vector from the embedding port as a pgvector literal", async () => {
+    const store = memoryStore();
+    const embedded: string[] = [];
+    const embed = {
+      async embed(texts: readonly string[]) {
+        embedded.push(...texts);
+        return texts.map(() => Array.from({ length: 384 }, (_, index) => index / 1000));
+      },
+    };
+
+    await ingestDocument(store, document(), { embed });
+
+    // Embedded under its index text: the section path is part of what the vector
+    // sees, which is the whole reason the prefix exists.
+    expect(embedded[0]).toBe("X / Introduction\n\nVitamin X is a thing.");
+    const vector = JSON.parse(store.chunks[0].embedding ?? "null") as number[];
+    expect(vector).toHaveLength(384);
+    expect(vector[1]).toBeCloseTo(0.001);
+  });
+
+  it("rebuilds chunks without touching the registry, for a changed rule or model", async () => {
+    const store = memoryStore();
+    await ingestDocument(store, document());
+    store.chunks.splice(0, store.chunks.length, {
+      ...store.chunks[0],
+      text: "stale",
+    });
+    const sourcesBefore = JSON.stringify(store.sources);
+
+    const plan = await rechunkDocument(store, document());
+
+    expect(plan.chunks).toBe(2);
+    expect(store.chunks).toHaveLength(2);
+    expect(store.chunks[0].text).toBe("Vitamin X is a thing.");
+    expect(JSON.stringify(store.sources)).toBe(sourcesBefore);
+  });
+
+  it("produces the same rows twice, so a rebuild is not a diff", () => {
+    expect(JSON.stringify(planChunks(document()).rows)).toBe(JSON.stringify(planChunks(document()).rows));
   });
 });

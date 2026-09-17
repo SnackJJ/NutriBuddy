@@ -334,6 +334,75 @@ begin
     raise exception '0016: no cascading foreign key to auth.users on: %', missing;
   end if;
 
+  -- 0017's premise: retrieval is a read path over derived data, and the lexical
+  -- index is generated rather than maintained. Before it, a replayed database
+  -- had nowhere to put a chunk at all and this script still passed — "the
+  -- migrations replay" was true of a database in which retrieval could not exist.
+  if not exists (select 1 from pg_extension where extname = 'vector') then
+    raise exception '0017: the vector extension is not installed';
+  end if;
+
+  if not exists (
+    select 1 from pg_tables
+     where schemaname = 'public' and tablename = 'source_chunks'
+  ) then
+    raise exception '0017 did not create source_chunks';
+  end if;
+
+  -- A chunk is a retrieval unit, never a citable one (docs/adr/0005): it must
+  -- cascade from its section, and nothing may reference it.
+  if not exists (
+    select 1 from pg_constraint c
+     where c.contype = 'f'
+       and c.conrelid = 'public.source_chunks'::regclass
+       and c.confrelid = 'public.source_sections'::regclass
+       and c.confdeltype = 'c'
+  ) then
+    raise exception '0017: source_chunks does not cascade from its section';
+  end if;
+
+  -- Both retrieval paths must be indexed, or a query plan silently degrades to a
+  -- sequential scan over every chunk — which replays perfectly and is only
+  -- visible as latency later.
+  select string_agg(want.idx, ', ') into missing
+    from (values ('source_chunks_tsv_idx'), ('source_chunks_embedding_idx')) as want(idx)
+   where not exists (
+     select 1 from pg_indexes
+      where schemaname = 'public' and tablename = 'source_chunks' and indexname = want.idx
+   );
+  if missing is not null then
+    raise exception '0017: missing index(es) on source_chunks: %', missing;
+  end if;
+
+  -- The generated column is what keeps the lexical index from drifting from the
+  -- text it indexes; a plain column would be a second source of truth.
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'source_chunks'
+       and column_name = 'tsv' and is_generated = 'ALWAYS'
+  ) then
+    raise exception '0017: source_chunks.tsv is not a generated column';
+  end if;
+
+  if has_table_privilege('anon', 'public.source_chunks', 'select, insert, update, delete')
+     or has_table_privilege('authenticated', 'public.source_chunks', 'insert')
+     or has_table_privilege('authenticated', 'public.source_chunks', 'update')
+     or has_table_privilege('authenticated', 'public.source_chunks', 'delete')
+  then
+    raise exception '0017: the retrieval index is writable by a user-facing role';
+  end if;
+
+  if not has_table_privilege('authenticated', 'public.source_chunks', 'select') then
+    raise exception '0017: signed-in readers cannot read the retrieval index';
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'public' and tablename = 'source_chunks' and cmd = 'SELECT'
+  ) then
+    raise exception '0017: source_chunks has row level security but no select policy';
+  end if;
+
   -- The local stack's own version is the premise of everything above, and it is
   -- the one part of "local replay ≈ production" that config.toml states.
   if current_setting('server_version_num')::int / 10000
