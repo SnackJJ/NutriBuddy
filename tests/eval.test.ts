@@ -80,6 +80,7 @@ describe("EvalDataset", () => {
       "edge_case",
       "descriptive",
       "write",
+      "evidence",
     ] as const;
     const cases = loadEvalCases();
     for (const c of cases) {

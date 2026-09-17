@@ -113,7 +113,7 @@ function renderTextReport(
     `  Tool call rate (harness):   ${(summary.toolCallRate * 100).toFixed(1)}%`,
   );
   lines.push(
-    `  Source compliance rate:     bare ${(summary.sourceComplianceRate.bare * 100).toFixed(1)}% / harness ${(summary.sourceComplianceRate.harness * 100).toFixed(1)}%`,
+    `  Source marker rate:         bare ${(summary.sourceMarkerRate.bare * 100).toFixed(1)}% / harness ${(summary.sourceMarkerRate.harness * 100).toFixed(1)}%   (lexical wording, not a citation check)`,
   );
   lines.push(
     `  Gate turn rate (harness):   ${(summary.gateTurnRate * 100).toFixed(1)}%`,

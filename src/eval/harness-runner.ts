@@ -53,6 +53,8 @@ export async function runHarnessEval(
       let stopReason: StopReason = "end_turn";
       const toolCalls: string[] = [];
       let gateVerdictBlocks = 0;
+      let keptCitations: number | undefined;
+      let sawTerminalResult = false;
 
       const turnEvents: AnyTurnEvent[] = [];
 
@@ -99,6 +101,12 @@ export async function runHarnessEval(
         reply = result.reply;
         steps = result.steps;
         stopReason = result.stopReason;
+        // The turn writes the citation gate's *stripped* output back onto its own
+        // result (turn.ts), so what is left here is what the answer actually
+        // cites. Reading it is the only way to tell "cited something" from "cited
+        // nothing, and the gate passed anyway" — a `pass` verdict is true of both.
+        keptCitations = result.output?.citations?.length ?? 0;
+        sawTerminalResult = true;
       } catch (err) {
         // Safety net only: turn() reports its own fatal errors as a crash terminal
         // (RFC 0008 §3.6), and `crashReply` above already put this text in the
@@ -134,6 +142,16 @@ export async function runHarnessEval(
         toolCalls: scored.toolCalls,
         gateBlocks: scored.gateBlocks,
         durationMs,
+        // Absent rather than zero when no terminal result arrived (a crash
+        // outside the seam): "cited nothing" and "never got that far" are
+        // different facts, and a rate computed over the second would be a lie.
+        citations: sawTerminalResult
+          ? {
+              kept: keptCitations ?? 0,
+              stripped: signals.citationStripped,
+              claimedAuthorityWithoutCitation: signals.citationClaimedWithoutSource,
+            }
+          : undefined,
       };
     };
 

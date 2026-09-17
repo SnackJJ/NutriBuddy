@@ -24,7 +24,15 @@ export type EvalCategory =
    * 这正是 harness 相对于裸模型存在的理由，而 2026-09-15 之前数据集里没有一条
    * case 对它有断言。
    */
-  | "write";
+  | "write"
+  /**
+   * 应有依据的问题：正确答案应当引得到语料原文（RFC 0013 §0）。
+   *
+   * 单独一类是因为它服务的是**分母**而不是风险面：引用支撑率必须只在"本来就需要
+   * 出处"的问题上计算，否则会被基础查询稀释。这类 case 用 `expected.shouldCite`
+   * 标记，且不进 pass/fail。
+   */
+  | "evidence";
 
 /** 预定义每条 query 的期望约束（纯 TS 断言判定，无需 LLM）。 */
 export interface EvalExpected {
@@ -38,6 +46,15 @@ export interface EvalExpected {
   readonly shouldAskClarification?: boolean;
   /** trace 里必须出现 gate_block（跨域冲突硬拦）。 */
   readonly shouldBeBlocked?: boolean;
+  /**
+   * 这条 case 的答案**应当**带可核验引用（RFC 0013 §0）。
+   *
+   * 它是一个**软**标记：没有它，求"引用支撑率"时分母只能拿全部 case 充数，而
+   * "100g 鸡胸多少蛋白"这种问题本来就不需要语料出处，于是分母被稀释、指标失去意义。
+   * 与 `mustNotContain` 这类硬契约不同，它不进 pass/fail —— ADR 0004 第 3 条把缺引用
+   * 定为分级处理（先剥离、再重生成），不是整体拒答。
+   */
+  readonly shouldCite?: boolean;
   /**
    * 这条 case 问的食物**不在 catalog 里**（issue #130）。
    *
@@ -88,6 +105,31 @@ export interface BareResult {
   readonly infrastructure?: InfrastructureFault;
 }
 
+/**
+ * What the citation gate did to one harness answer (RFC 0013 §0).
+ *
+ * Structural, from the gate's own result: the count of citations that survived
+ * comes from the terminal output (the turn writes the stripped output back), and
+ * the two flags come from the `gate_verdict` events the runner already collects.
+ *
+ * It exists because the criterion for V1.1 retrieval is "a prescriptive answer
+ * carries a verifiable citation", and nothing in the report could previously
+ * answer that: the metric named `sourceMarkerRate` counts words like "according
+ * to", and the gate's `pass` verdict is also true of an answer that cites nothing
+ * at all. Neither tells you a citation was there.
+ */
+export interface CitationSignal {
+  /** Citations that survived the gate — what the answer actually cites. */
+  readonly kept: number;
+  /** The tier-1 provenance check stripped at least one citation. */
+  readonly stripped: boolean;
+  /**
+   * The tier-2 backstop fired: the answer claimed authority without naming a
+   * source, which is the one citation failure severe enough to regenerate.
+   */
+  readonly claimedAuthorityWithoutCitation: boolean;
+}
+
 /** Harness 运行结果（单条 case）。 */
 export interface HarnessResult {
   readonly caseId: string;
@@ -101,6 +143,8 @@ export interface HarnessResult {
   readonly durationMs: number;
   /** See {@link InfrastructureFault}. */
   readonly infrastructure?: InfrastructureFault;
+  /** See {@link CitationSignal}. Absent when the case ran without a corpus. */
+  readonly citations?: CitationSignal;
 }
 
 /** 单条 case 的对比行。 */
@@ -124,7 +168,8 @@ export interface EvalSummary {
     readonly harness: number;
   };
   readonly toolCallRate: number;
-  readonly sourceComplianceRate: {
+  /** 文体信号，不是引用检查；见 `summary.ts` 的 CitationSupport。 */
+  readonly sourceMarkerRate: {
     readonly bare: number;
     readonly harness: number;
   };

@@ -1,6 +1,42 @@
 {
   "reports": [
     {
+      "reportId": "2026-09-17T01-03-15Z-v1.1-citation-instrument",
+      "at": "2026-09-17T01:03:15.357Z",
+      "mode": "scripted",
+      "tag": "v1.1-citation-instrument",
+      "gitSha": "f8b09b9",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.8421052631578947,
+        "harnessPassRate": 0.6842105263157895,
+        "deltaPoints": -15.78947368421052,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.9285714285714286
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.5416666666666666
+          }
+        ],
+        "constraintViolationRateHarness": 0.3157894736842105,
+        "toolCallRate": 0,
+        "gateTurnRate": 0.10526315789473684,
+        "citationSupportRate": 0,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
       "reportId": "2026-09-14T16-00-41Z-live-v3-final",
       "at": "2026-09-14T16:00:41.929Z",
       "mode": "live",
@@ -150,40 +186,6 @@
       }
     },
     {
-      "reportId": "2026-09-14T13-53-46Z-v1.0.0-s2-baseline",
-      "at": "2026-09-14T13:53:46.296Z",
-      "mode": "scripted",
-      "tag": "v1.0.0-s2-baseline",
-      "gitSha": "80df4e5",
-      "dirty": true,
-      "appVersion": "0.0.0-unversioned",
-      "catalogVersion": "usda-sr-legacy-2026-07-v1",
-      "datasetHash": "bd84acbe8dd4e2a1",
-      "n": 29,
-      "summary": {
-        "barePassRate": 0.8620689655172413,
-        "harnessPassRate": 0.7241379310344828,
-        "deltaPoints": -13.793103448275856,
-        "groups": [
-          {
-            "group": "regression",
-            "n": 14,
-            "measured": 14,
-            "harnessPassRate": 0.9285714285714286
-          },
-          {
-            "group": "capability",
-            "n": 15,
-            "measured": 15,
-            "harnessPassRate": 0.5333333333333333
-          }
-        ],
-        "constraintViolationRateHarness": 0.27586206896551724,
-        "toolCallRate": 0,
-        "gateTurnRate": 0.13793103448275862
-      }
-    },
-    {
       "reportId": "2026-09-14T13-32-49Z-live-commandcode-v1",
       "at": "2026-09-14T13:32:49.136Z",
       "mode": "live",
@@ -215,40 +217,6 @@
         "constraintViolationRateHarness": 0.20689655172413793,
         "toolCallRate": 1,
         "gateTurnRate": 0.4827586206896552
-      }
-    },
-    {
-      "reportId": "2026-09-14T11-25-35Z-v1.0.0-s2-baseline",
-      "at": "2026-09-14T11:25:35.983Z",
-      "mode": "scripted",
-      "tag": "v1.0.0-s2-baseline",
-      "gitSha": "0771564",
-      "dirty": false,
-      "appVersion": "0.0.0-unversioned",
-      "catalogVersion": "usda-sr-legacy-2026-07-v1",
-      "datasetHash": "2ed96d9b935c9739",
-      "n": 29,
-      "summary": {
-        "barePassRate": 0.8620689655172413,
-        "harnessPassRate": 0.6551724137931034,
-        "deltaPoints": -20.68965517241379,
-        "groups": [
-          {
-            "group": "regression",
-            "n": 14,
-            "measured": 14,
-            "harnessPassRate": 0.7857142857142857
-          },
-          {
-            "group": "capability",
-            "n": 15,
-            "measured": 15,
-            "harnessPassRate": 0.5333333333333333
-          }
-        ],
-        "constraintViolationRateHarness": 0.3448275862068966,
-        "toolCallRate": 0,
-        "gateTurnRate": 0.06896551724137931
       }
     }
   ]

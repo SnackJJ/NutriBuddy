@@ -30,6 +30,11 @@ const CATEGORY_HINTS: Record<string, string> = {
     "Nutritional values vary by source and preparation method. Consult USDA FoodData Central for precise figures.",
   cross_domain: "Based on your medication profile, here are safe dietary recommendations.",
   edge_case: "This is a reasonable nutritional response to your query.",
+  // Deliberately no citation: the scripted arm has no corpus and no model, so its
+  // citation-support rate is 0 by construction. That is the honest offline number
+  // — the metric's plumbing is asserted in tests, and the number that matters
+  // comes from a live run (RFC 0013 §0).
+  evidence: "Here is what the evidence says about that nutrient.",
 };
 
 function stubResponse(evalCase: EvalCase): string {

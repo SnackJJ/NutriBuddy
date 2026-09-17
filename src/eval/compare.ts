@@ -45,6 +45,14 @@ export interface ComparableSummary {
   readonly constraintViolationRateHarness?: number;
   readonly toolCallRate?: number;
   readonly gateTurnRate?: number;
+  /**
+   * The rate V1.1 retrieval is judged on (RFC 0013 §0), kept in the index because
+   * "did citations get better" is exactly the question a comparison between two
+   * reports has to answer. Absent on reports written before the metric existed.
+   */
+  readonly citationSupportRate?: number;
+  /** The population it was computed over, so a rate is never read without its n. */
+  readonly citationSupportDeclared?: number;
   readonly turnLatency?: Dist;
   readonly modelCallLatency?: Dist;
   readonly traceWriteLatency?: Dist;
@@ -85,6 +93,8 @@ export function buildComparableSummary(
     constraintViolationRateHarness: evalSummary.constraintViolationRate.harness.value,
     toolCallRate: evalSummary.toolCallRate.value,
     gateTurnRate: evalSummary.gateTurnRate.value,
+    citationSupportRate: evalSummary.citationSupport.rate,
+    citationSupportDeclared: evalSummary.citationSupport.declared,
     turnLatency: traces ? dist(traces.turnLatency) : undefined,
     modelCallLatency: traces ? dist(traces.modelCallLatency) : undefined,
     traceWriteLatency: traces ? dist(traces.traceWriteLatency) : undefined,

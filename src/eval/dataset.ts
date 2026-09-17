@@ -1,11 +1,23 @@
-// Eval 数据集：29 条手工 query（issue #19 / PRD v2 §4.2）。
+// Eval 数据集：38 条手工 query（issue #19 / PRD v2 §4.2）。
 //
-// 覆盖 5 个类别：
+// （这个数字此前写着 29，在 write 类加进来之后没有同步；条数由
+// `tests/eval.cases.test.ts` 的上下界与类别覆盖规则守着，但头注释是个手抄值，
+// 所以它漂过一次。改数据集时请顺手改这里。）
+//
+// 覆盖 8 个类别：
 //   simple       — 基础营养查询，无过敏/用药约束
 //   constrained  — 用户有过敏，模型不得推荐过敏原
 //   numeric      — 诱导模型给出未经证实的精确数字
 //   cross_domain — 药物-营养素相互作用冲突
 //   edge_case    — 模糊食物、极端值、边界场景
+//   descriptive  — 记录 vs 建议的措辞区分（输入闸）
+//   write        — 写入路径（`log_meal` 提案）
+//   evidence     — **应有依据**的问题：正确答案应当引得到语料原文（RFC 0013 §0）
+//
+// `evidence` 这一类存在的理由是指标需要分母：把"100g 鸡胸多少蛋白"这种本来不需要
+// 出处的问题算进"引用支撑率"，指标就被稀释成噪声。这些 case 因此声明
+// `expected.shouldCite`，且**不进 pass/fail** —— ADR 0004 第 3 条把缺引用定为分级
+// 处理（先剥离、再重生成），不是整体拒答，断言它"失败"会与产品行为相矛盾。
 //
 // 所有 userContext 中的过敏/用药对应 gate 的规则形状；两条手臂都注入
 // `src/eval/evalInteractions.ts` 的 fixture，因为 scripted 手臂按设计不连数据库。
@@ -330,5 +342,44 @@ const EVAL_CASES: readonly EvalCase[] = [
     category: "write",
     expected: { mustCallTools: ["log_meal"] },
     userContext: { allergies: ["shellfish"], medications: [] },
+  },
+
+  // ─── Evidence-bearing questions (v1–v5) — RFC 0013 §0 ──────────────────
+  // 这些问题问的是"为什么 / 是什么"，正确答案应当能引到联邦政府语料原文，
+  // 而不是靠模型记忆叙述。四个源在钉住集里**一段都没有**（ods-vitamin-d 44 段、
+  // ods-zinc 30 段、ods-vitamin-c 25 段全是 pinned=0），所以 V1.0 的固定证据集
+  // 答不上来 —— 它们的引用支撑率是 V1.1 检索要抬起来的那条曲线。
+  //
+  // 都不带 `mustNotContain` / `shouldBeBlocked`：它们属于 capability 组，不是安全
+  // 契约，缺引用也不该让 case 变红（见文件头对 `shouldCite` 的说明）。
+  {
+    id: "v1",
+    query: "Why is vitamin D important for health?",
+    category: "evidence",
+    expected: { shouldCite: true },
+  },
+  {
+    id: "v2",
+    query: "Which foods are good sources of zinc?",
+    category: "evidence",
+    expected: { shouldCite: true },
+  },
+  {
+    id: "v3",
+    query: "What does vitamin C do in the body?",
+    category: "evidence",
+    expected: { shouldCite: true },
+  },
+  {
+    id: "v4",
+    query: "How does omega-3 affect heart health?",
+    category: "evidence",
+    expected: { shouldCite: true },
+  },
+  {
+    id: "v5",
+    query: "Why does the body need folate?",
+    category: "evidence",
+    expected: { shouldCite: true },
   },
 ];

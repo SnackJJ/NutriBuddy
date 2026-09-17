@@ -6,7 +6,10 @@
 //   3. mustCallTools — harness 是否调用了期望的工具
 //   4. shouldAskClarification — 期望的追问是否含问号
 //   5. shouldBeBlocked — gate 是否至少拦截了一次
-//   6. 来源合规 — 数字声明是否有引用支撑（软指标，仅用于汇总）
+//   6. 来源字样率（sourceMarkerRate）— 回复里是否出现 "according to" / USDA / NIH
+//      这类**字样**。软指标，且只是文体信号：它不检查引用是否存在、是否通过校验。
+//      "这条建议有没有可核验依据"由 citationGate 的结构结果回答，见 `summary.ts`
+//      的 CitationSupport 与 `docs/rfc/0013` §0。
 //
 // 每条 case 可独立评分，聚合为整体指标。
 
@@ -191,9 +194,9 @@ export function computeMetrics(
       harness: rates.constraintViolationRate.harness.value ?? 0,
     },
     toolCallRate: rates.toolCallRate.value ?? 0,
-    sourceComplianceRate: {
-      bare: rates.sourceComplianceRate.bare.value ?? 0,
-      harness: rates.sourceComplianceRate.harness.value ?? 0,
+    sourceMarkerRate: {
+      bare: rates.sourceMarkerRate.bare.value ?? 0,
+      harness: rates.sourceMarkerRate.harness.value ?? 0,
     },
     gateTurnRate: rates.gateTurnRate.value ?? 0,
   };

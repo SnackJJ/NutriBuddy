@@ -50,6 +50,7 @@ import {
   groupOf,
   METRIC_DEFINITIONS,
   summarizeEvalResults,
+  type CitationSupport,
   type EvalResultSummary,
 } from "./summary";
 import {
@@ -260,6 +261,22 @@ function pct(value: number | undefined): string {
   return value === undefined ? "n/a" : `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * The citation support rate, with its fraction in front of the percentage.
+ *
+ * The count leads because this metric is routinely computed over a handful of
+ * cases: "0/3" is a fact about the dataset, while "0.0%" invites the reader to
+ * treat a small sample as a measured zero.
+ */
+function citationRate(support: CitationSupport): string {
+  if (support.declared === 0) return "n/a（数据集里没有声明应带引用的 case）";
+  return pct(support.rate);
+}
+
+function listOrDash(cases: readonly string[]): string {
+  return cases.length === 0 ? "—" : cases.join(", ");
+}
+
 function points(value: number | undefined): string {
   if (value === undefined) return "n/a";
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}pt`;
@@ -341,7 +358,23 @@ export function renderReportMarkdown(
   lines.push(`| 工具调用率 | — | ${pct(metrics.toolCallRate.value)} | |`);
   lines.push(`| 闸拦截率 | — | ${pct(metrics.gateTurnRate.value)} | |`);
   lines.push(
-    `| 来源合规率（软，词面） | ${pct(metrics.sourceComplianceRate.bare.value)} | ${pct(metrics.sourceComplianceRate.harness.value)} | |`,
+    `| 来源字样率（文体信号，非引用检查） | ${pct(metrics.sourceMarkerRate.bare.value)} | ${pct(metrics.sourceMarkerRate.harness.value)} | |`,
+  );
+  lines.push("");
+  lines.push("## 引用支撑（结构性，V1.1 检索的判据）", "");
+  lines.push(
+    "分母是**声明了应当带引用**的 case（`expected.shouldCite`），不是全部 case：",
+    '"100g 鸡胸多少蛋白"这类问题本来就不需要语料出处，混进分母会把指标稀释成噪声。',
+    "`kept` 取终态输出里通过校验的引用数；缺失（没走到终态）的 case 不计入分子，但仍在分母里。",
+    "",
+  );
+  lines.push(
+    `| 指标 | 值 | 说明 |`,
+    `| --- | --- | --- |`,
+    `| 引用支撑率 | ${citationRate(metrics.citationSupport)} | ${metrics.citationSupport.supported}/${metrics.citationSupport.declared} 条应有依据的 case 带 ≥1 条存活引用 |`,
+    `| 其中已测量 | ${metrics.citationSupport.measured}/${metrics.citationSupport.declared} | 未测量的 case 留在分母里，不悄悄剔除 |`,
+    `| 引用被剥离（tier-1） | ${listOrDash(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
+    `| 声称有据却无引用（tier-2） | ${listOrDash(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
   );
   lines.push("");
 
