@@ -25,12 +25,14 @@ Product prose in `docs/PRD-v2.md` is **context, not architecture**. It never win
 
 Keep this list short. Prefer GitHub issues as the live backlog.
 
-1. **S1 已收口**（`docs/rfc/0008`）：T1–T9 全部落地（迁移 0011/0014、TraceStore 端口、`turn()` 接线、`SupabaseTraceStore`、重放路由、导出 `scripts/export-traces.mts`、保留 `scripts/prune-traces.ts`、D9 smoke）。两处仍未闭合、已留在票上：D4 的**真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）与 `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
+1. **S1 已收口**（`docs/rfc/0008`，**Implemented**）：T1–T9 全部落地（迁移 0011/0014、TraceStore 端口、`turn()` 接线、`SupabaseTraceStore`、重放路由、导出 `scripts/export-traces.mts`、保留 `scripts/prune-traces.ts`、D9 smoke）。两处仍未闭合：D4 的**真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）——**这条当前没有票**（原票 #89 已关闭，2026-09-17 #137 归位时确认）；与 `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
 2. **S2 — 评测报告与成本/延迟聚合**（`docs/rfc/0009`）：已落地 —— `npm run eval:report` 产出 `reports/<reportId>/{report.md,summary.json,cases.json}` + `reports/index.json`，`--compare <reportId>` 按阈值标倒退（数据集或 mode 不同即判不可比），`--traces` 并入轨迹遥测。live 基线在 `reports/`（v1/v2 是历史记录，datasetHash 已变故与后续不可比）。**live 基线挖出的六个问题全部已修并关闭**：#126 转圈 + 终态空回复、#127 gate 没拦 prescriptive 过敏请求、#128 词面判分把警告当违规、#129 provider 抖动被记成能力失败（现重试 + `infrastructure` 标记并从分母剔除且点名）、#130 catalog 里没有的食物（`expectsCatalogMiss`：必须如实说查不到且不得编数字）、#125 药物相互作用表无迁移（硬约束数据源在重放库里不存在）
 3. **S3 — 费用闸、配额与白名单登录**（`docs/rfc/0010`）：代码侧已落地（配额纯函数 `src/lib/quota.ts`、`turns` 聚合、429 前置、最坏成本预估、UI 隐藏注册、拒绝日志）；运维人工步骤（关闭公开注册、provider 消费上限、Production-only 密钥）见 `docs/ops/v1.0-operations.md`，**尚未执行**
 4. **S4 — 依据层**（`docs/rfc/0011`，ADR 0004 已接受）：已落地 —— 迁移 0013（sources/source_sections + RLS）、13 个联邦政府语料源（372 段，`sources/`）、`scripts/ingest-sources.mts`（按 content_hash 幂等、变更 supersede 不删）、`CitationRef`/`evidenceSet`（SCHEMA_VERSION 1.10.0）、`citationGate`（四条件 + fail-closed，tier-1 剥离 `terminal:false`）、词面兜底 tier-2（声称有出处却无引用 → 重生成→拒答）、钉住集装配进 pinned region（29 段 / ~6k token）、最小引用 UI（标题 + 可点开链接）。**D8 已实测**：真模型给出的 1 条引用经 registry 校验通过并随答案送达
 5. **S5 — 上线收尾**：代码与文档侧已落地 —— README（定位 / 三条不变量 / 十分钟跑起来 / 数字从哪来）、`version: 1.0.0`、首页可用入口、隐私说明（`docs/privacy.md` + `/privacy`，含供应商条款查证与"删号不等于供应商侧清除"）、账号删除（迁移 0016 级联 + `DELETE /api/account` + `npm run smoke:delete` 实测）。**仍待人工**：Vercel 部署与 Production-only 密钥（#113）、`v1.0.0` tag（#114）、关闭公开注册（#101）、provider 消费上限（#119）、真机 PWA 验证（#117）、托管条款确认（#118）
-6. **V1.1 — 检索**（`docs/rfc/0013`，2026-09-16）：判据是**规范性建议带可核验引用的比率升上去**（来自 `citationGate` 的结构结果，与 `numericProvenanceGate` 分开计）；钉住集只覆盖语料 7.8% 且字符预算已用 99.4%，扩它撞双重天花板，所以检索是唯一出路。切片、注入、预算与评测口径都在该 RFC，T1–T8 即 issue 草稿。**D8 已按 V1.1 口径实测**（`npm run smoke:retrieval`，2026-09-17）：问"Why is vitamin D important for health?"，检索注入 5 段（vector + lexical 混合），真模型给出的 **4 条引用全部经 registry 校验通过并随答案送达**——而这 4 段在钉住集里**一段都没有**，正是 V1.0 的结构性缺口。**另有两笔账被它暴露**：`docs/privacy.md` §4 未记录默认网关（commandcode）的条款（按 §4 自己的规矩即"未核对"，归 #113）；`docs/rfc/0007`/`0008`/`0011` 已落地但状态头仍写 `Proposed`
+6. **V1.1 — 检索已收口**（`docs/rfc/0013`，**Implemented** 2026-09-17；#132–#136 全部关闭）。判据是**规范性建议带可核验引用的比率升上去**（来自 `citationGate` 的结构结果，与 `numericProvenanceGate` 分开计）；钉住集只覆盖语料 7.8% 且字符预算已用 99.4%，扩它撞双重天花板，所以检索是唯一出路。**D8 已按 V1.1 口径实测**（`npm run smoke:retrieval`）：问"Why is vitamin D important for health?"，检索注入 5 段（vector + lexical 混合），真模型给出的 **4 条引用全部经 registry 校验通过并随答案送达**——而这 4 段在钉住集里**一段都没有**。写 `rag_boundary` 断言时还挖出并修掉一个真漏洞：数字来源闸的单位表没有 `mcg`/`IU`，而它们是语料里第 2、第 4 常见的数字单位（`docs/rfc/0013` §6）。
+   **未闭合**：报告里的引用支撑率在 scripted 臂是结构性为零（没有语料，报告已按"检索未接线"点名），真实数字需一次人工 `npm run eval:report -- --live`。**V1.1 剩下的与检索无关**：场景策略包（`docs/rfc/0012`，唯一还 `Proposed` 的一条）与失败归因 / 历史回放。
+   **一笔账仍未还**：`docs/privacy.md` §4 未记录默认网关（commandcode）的条款，按 §4 自己的规矩即"未核对"——归 #113 的部署前置。
 
 迁移现在有 **17 个文件**（0001–0011、0013–0018；**0012 不存在** —— 它原本留给 S3 方案 B 的白名单表，方案 A 不需要，于是留空而不是补一个空文件）。0011 之后是：0011 轨迹、0013 依据语料、0014 老表 grant、0015 相互作用规则、0016 账号删除级联、0017 检索切片与索引（vector + tsvector）、0018 检索排序函数（词法 / 向量各一个，不做融合）。本地重放依赖 Supabase 本地栈（`docs/rfc/0007` D2 与 `scripts/verify-migrations.sh`），该脚本逐条断言每迁移的授权 / 策略 / 索引 / 计数前提（含"规则表已种子""三表有级联外键""检索函数是 invoker-rights 且可调用"这类曾经空通过的项）。
 
@@ -66,7 +68,7 @@ npm run eval:report -- --live --traces   # 报告：scripted 默认；--live 需
 | Path | Role |
 |------|------|
 | `docs/PRD-v2.md` | Product goals / old milestone color |
-| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). Structural RFCs 0001–0003 landed; product RFCs 0006–0012 are `Proposed` (0012 与 0013 是 V1.1). 注意 0007/0008/0011 已在代码里落地而状态头未更新（`docs/rfc/0013` §10 记了这笔） |
+| `docs/rfc/*` | Design notes; **status is declared in each RFC header** (`Proposed` / `Accepted` / `Implemented`). 0001–0011 与 0013 已 **Implemented**（0013 是 V1.1 检索，2026-09-17 落地）；**0012（场景策略包）是唯一还 `Proposed` 的一条**，属 V1.1 未做的部分。状态头与实现不符时以实现为准并去改状态头——这条规矩此前漂过一次（0006–0011 落地后仍写 `Proposed`，#137 归位） |
 | `docs/agents/*` | Tracker / triage / domain-doc **how-to** for Matt skills |
 
 **Do not load unless the task explicitly needs them:**

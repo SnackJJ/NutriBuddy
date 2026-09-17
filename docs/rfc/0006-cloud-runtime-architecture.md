@@ -1,6 +1,6 @@
 # RFC 0006 — 云端运行架构（V1 上线形态）
 
-> 状态：**Proposed**（2026-07-26）。
+> 状态：**Implemented**（2026-07-26 提出，2026-09-17 归位）。设计已在代码里落地（云端运行面：Next.js 路由 + Supabase + 轨迹 + 配额，见 RFC 0008/0010）。未闭合的是**运维步骤**而非设计：部署与 Production-only 密钥（#113）、托管条款确认（#118）。
 > 关联：`docs/adr/0002`（交付形态 Accepted）、`docs/adr/0004`（知识 RAG 纳入 Proposed）、`docs/ADD.md` §Testing Seam / §Observability / §Multi-User。
 > 本文回答"哪些东西放云端、放在哪一层、为什么"；**不改变** ADD 的架构主张（单 agent、四道闸、单缝）。
 

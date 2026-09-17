@@ -1,6 +1,6 @@
 # RFC 0007 — V1.0 版本计划：目标、验收与切片
 
-> 状态：**Proposed**（2026-07-26）。
+> 状态：**Implemented**（2026-07-26 提出，2026-09-17 归位）。S1–S4 与 S5 的代码/文档侧全部落地。**未闭合**：S5 的人工步骤（#113 部署、#114 tag、#101 关闭公开注册、#119 消费上限、#117 真机 PWA、#118 托管条款）；§3 的 **S6 数字加固是可选切片，未做**。
 > 关联：`docs/adr/0002`（交付形态 Accepted）、`docs/adr/0004`（知识 RAG 纳入 Proposed）、`docs/rfc/0006`（云端运行架构 Proposed — 本计划的技术依据）。
 > **本 RFC 定义目标与验收，不承载任务清单**：切片经 spec 转为 GitHub issue 后，backlog 的 live 真源在 issue tracker（见 `docs/agents/issue-tracker.md`）。
 

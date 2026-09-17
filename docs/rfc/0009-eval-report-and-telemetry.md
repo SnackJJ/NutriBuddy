@@ -1,6 +1,6 @@
 # RFC 0009 — 评测报告与成本/延迟聚合（S2 spec）
 
-> 状态：**Proposed**（2026-07-26）。
+> 状态：**Implemented**（2026-07-26 提出，2026-09-17 归位）。`npm run eval:report` + `reports/index.json` + `--compare` + 轨迹遥测均在位。**live 报告只在人的机器上跑**（理由见 `AGENTS.md`），因此判据类指标的真实数字需一次人工 `--live`。
 > 关联：`docs/rfc/0007` §3 S2（验收 D5）、`docs/rfc/0006` §6、`docs/research/agent-skills-design-patterns.md` §5（pass^k、capability vs regression）。
 > 对应 issue 草稿见 §9。
 
