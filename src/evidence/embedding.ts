@@ -103,11 +103,23 @@ export function createGteSmallEmbedder(options: { readonly batchSize?: number } 
  * `unavailable`, and a turn with no retrieval must be a labelled degradation
  * rather than a silently empty evidence block (RFC 0013 §5).
  */
+/**
+ * How long the query embedding may take before the turn gives up on it.
+ *
+ * This call sits in front of every utterance turn, so a function that accepts the
+ * connection and never answers would otherwise stall the turn until the platform's
+ * own ceiling kills the whole request — a failed turn, not the labelled
+ * degradation the retrieval path promises. Eight seconds is far above a healthy
+ * round trip (gte-small on a short query) and far below a user's patience.
+ */
+export const EMBED_TIMEOUT_MS = 8_000;
+
 export function createEdgeFunctionEmbedder(options: {
   readonly baseUrl: string;
   readonly apiKey: string;
   /** Injectable for tests; production uses the platform fetch. */
   readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
 }): EmbeddingPort & { readonly model: string; readonly dimensions: number } {
   const doFetch = options.fetchImpl ?? fetch;
   const endpoint = `${options.baseUrl.replace(/\/$/, "")}/functions/v1/embed`;
@@ -124,6 +136,9 @@ export function createEdgeFunctionEmbedder(options: {
           Authorization: `Bearer ${options.apiKey}`,
         },
         body: JSON.stringify({ texts }),
+        // Without a deadline the failure mode is a hang, and a hang is the one
+        // failure the caller's catch never sees.
+        signal: AbortSignal.timeout(options.timeoutMs ?? EMBED_TIMEOUT_MS),
       });
 
       if (!response.ok) {

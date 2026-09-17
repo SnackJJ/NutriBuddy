@@ -552,7 +552,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     evidenceSet: withRetrievedSections(loaded?.evidence.evidenceSet, retrieved.sectionIds),
     citationRegistry: loaded?.registry,
     retrievedEvidence: retrieved.text,
-    retrievalProvenance: retrieved.provenance,
+    // Only for a question. A commit short-circuit was never meant to retrieve, and
+    // stamping it `unavailable` would report an outage that never happened — the
+    // conflation the attribution buckets exist to prevent.
+    ...(turnInput.tag === "utterance" ? { retrievalProvenance: retrieved.provenance } : {}),
     requireTools: turnInput.tag === "utterance",
   });
 

@@ -26,6 +26,16 @@ const DIMENSIONS = 384;
 const MAX_TEXTS = 32;
 
 /**
+ * Upper bound per text, in characters.
+ *
+ * The anon key is public by design, so anyone can call this function; a count cap
+ * alone would leave an unbounded string to tokenize and run through the model.
+ * gte-small truncates at 512 tokens, so anything beyond a few thousand characters
+ * is work that can only be thrown away.
+ */
+const MAX_TEXT_CHARS = 4_000;
+
+/**
  * The model session, created on first use rather than at module load.
  *
  * A top-level `new Supabase.ai.Session(...)` fails the whole function when the
@@ -79,6 +89,13 @@ async function handle(request: Request): Promise<Response> {
   }
   if (texts.length > MAX_TEXTS) {
     return Response.json({ error: `at most ${MAX_TEXTS} texts per request` }, { status: 413 });
+  }
+  const tooLong = (texts as string[]).find((text) => text.length > MAX_TEXT_CHARS);
+  if (tooLong !== undefined) {
+    return Response.json(
+      { error: `each text must be at most ${MAX_TEXT_CHARS} characters (got ${tooLong.length})` },
+      { status: 413 },
+    );
   }
 
   // Sequential rather than Promise.all: the session is one model instance, and a

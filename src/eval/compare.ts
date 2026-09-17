@@ -258,6 +258,19 @@ export function compareSummaries(
     ),
     pointDelta("toolCallRate", "工具调用率", before.toolCallRate, after.toolCallRate, thresholds.passRateDropPoints, "fall"),
     pointDelta("gateTurnRate", "闸拦截率", before.gateTurnRate, after.gateTurnRate, thresholds.passRateDropPoints, "fall"),
+    // The metric V1.1 is judged on (RFC 0013 §0). It was written into the index
+    // and read by nothing, which made the one number the criterion names invisible
+    // to the tool whose whole job is "did this change make the product worse".
+    // Absent on either side means incomparable, and `pointDelta` says so rather
+    // than reading a missing metric as zero.
+    pointDelta(
+      "citationSupportRate",
+      "引用支撑率",
+      before.citationSupportRate,
+      after.citationSupportRate,
+      thresholds.passRateDropPoints,
+      "fall",
+    ),
   ];
 
   for (const group of after.groups) {

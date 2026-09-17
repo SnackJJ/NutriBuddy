@@ -224,6 +224,18 @@ export function assembleChatTurnPorts(
     userContext: input.userContext,
     interactionStore: input.interactionStore,
     trace: input.trace,
+    // The evidence ports. This list is the seam between the chat route and
+    // `turn()`: a field that is accepted in the input type but not forwarded here
+    // is a port nothing observes, and the failure is silent in the worst way —
+    // the answer still streams, with no evidence and every citation stripped by
+    // the fail-closed gate, so it looks like a product that simply cites nothing.
+    // The V1.0 evidence trio was dropped here from the day it landed; V1.1's pair
+    // joined it, and `tests/chat.seam.test.ts` now asserts all five survive.
+    evidenceText: input.evidenceText,
+    evidenceSet: input.evidenceSet,
+    citationRegistry: input.citationRegistry,
+    retrievedEvidence: input.retrievedEvidence,
+    retrievalProvenance: input.retrievalProvenance,
     crashReply: input.crashReply,
     requireTools: input.requireTools,
   });

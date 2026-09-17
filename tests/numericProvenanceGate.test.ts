@@ -503,3 +503,45 @@ describe("unit vocabulary covers what the corpus states", () => {
     expect(check.passed).toBe(true);
   });
 });
+
+// ── spelled-out units must be groundable, not merely visible ────────────────
+//
+// Recognizing a unit the catalog cannot express is worse than not recognizing it:
+// the figure becomes visible to the gate and then fails to match an observation
+// column written as `mg`, so a correctly grounded answer gets refused. The
+// reviewer of this change found exactly that, which is why the direction is
+// asserted rather than the extraction alone.
+
+describe("spelled-out mass units fold onto the catalog's vocabulary", () => {
+  const cases = [
+    { prose: "That food has 500 milligrams of sodium.", unit: "mg", value: 500 },
+    { prose: "It provides 100 grams of protein.", unit: "g", value: 100 },
+    { prose: "It has 500 micrograms of folate.", unit: "mcg", value: 500 },
+    { prose: "That is 2 kilograms of food.", unit: "kg", value: 2 },
+  ];
+
+  for (const { prose, unit, value } of cases) {
+    it(`passes "${prose}" against an observation in ${unit}`, () => {
+      const check = checkNumericProvenance({
+        output: { prose, foodRefs: [], ruleRefs: [] },
+        observations: [
+          makeObservation(
+            "food_lookup",
+            [{ name: "amount", type: "number", unit, description: "amount" }],
+            [{ amount: value }],
+          ),
+        ],
+      });
+      expect(check.reasons).toEqual([]);
+      expect(check.passed).toBe(true);
+    });
+  }
+
+  it("still blocks a spelled-out unit with no matching observation", () => {
+    const check = checkNumericProvenance({
+      output: { prose: "It provides 100 grams of protein.", foodRefs: [], ruleRefs: [] },
+      observations: [],
+    });
+    expect(check.passed).toBe(false);
+  });
+});

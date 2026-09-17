@@ -107,7 +107,12 @@ export async function runHarnessEval(
             query: c.query,
             sourceVersion: evidence.retrieval.sourceVersion,
           });
-        } catch {
+        } catch (error) {
+          // Bound and logged: a report that lists a case under "retrieval
+          // unavailable" without the reason is a report nobody can diagnose.
+          console.error(
+            `[eval] retrieval failed for ${c.id}; counting the case as an outage: ${String(error).slice(0, 200)}`,
+          );
           retrieved = {
             sectionIds: [],
             provenance: {

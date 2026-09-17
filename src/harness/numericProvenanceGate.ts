@@ -37,6 +37,24 @@ export interface NumericProvenanceResult {
  * We use g as the mass base and kcal as the energy base
  * because those are the units the query catalog declares.
  */
+/**
+ * Spelled-out mass units, folded onto the abbreviations the catalog declares.
+ *
+ * The extractor recognizes both spellings; the observation side only ever writes
+ * `g`/`mg`/`kg`, so without this table a grounded figure phrased in words cannot
+ * be matched or converted, and the gate refuses a correct answer.
+ */
+const SPELLED_OUT_MASS_UNITS: Record<string, string> = {
+  grams: "g",
+  gram: "g",
+  milligrams: "mg",
+  milligram: "mg",
+  kilograms: "kg",
+  kilogram: "kg",
+  micrograms: "mcg",
+  microgram: "mcg",
+};
+
 const MASS_CONVERSIONS: Record<string, { readonly factor: number }> = {
   g: { factor: 1 },
   mg: { factor: 0.001 },
@@ -162,6 +180,15 @@ export function extractNumbersFromProse(prose: string): ExtractedNumber[] {
     }
     if (unit === "cups") {
       unit = "cup";
+    }
+    // Spelled-out mass units fold into their abbreviations, because that is the
+    // vocabulary the catalog declares: recognizing "milligrams" in prose without
+    // translating it would make an answer that says "500 milligrams" ungroundable
+    // against an observation column of `mg` — the failure direction this gate's
+    // tolerance logic exists to avoid, and one that costs a correct answer.
+    const spelledOut = SPELLED_OUT_MASS_UNITS[unit];
+    if (spelledOut) {
+      unit = spelledOut;
     }
 
     results.push({ value, unit: unit || null, raw });
