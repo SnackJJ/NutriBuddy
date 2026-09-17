@@ -5,7 +5,7 @@
 // The route handler is thin — just wires parsed inputs into the Turn Seam.
 
 import type { ChatMessage } from "../harness/types";
-import type { TurnEvidenceSet, TurnInput, TurnPorts } from "../harness/turn";
+import type { TurnEvidenceSet, TurnInput, TurnPorts, TurnRetrieval } from "../harness/turn";
 import type { CitationRegistry } from "../harness/citationGate";
 import type { Tracer } from "../harness/tracer";
 import type { ModelAdapter } from "../harness/types";
@@ -166,6 +166,10 @@ export interface BuildChatTurnPortsInput {
   readonly evidenceSet?: TurnEvidenceSet;
   /** Registry the citation gate checks against (RFC 0011 §3.5). */
   readonly citationRegistry?: CitationRegistry;
+  /** Retrieved evidence block for the model (RFC 0013 §5). */
+  readonly retrievedEvidence?: string;
+  /** What retrieval contributed, for the trace (RFC 0013 §5). */
+  readonly retrievalProvenance?: TurnRetrieval;
 }
 
 /**

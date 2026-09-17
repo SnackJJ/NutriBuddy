@@ -26,6 +26,7 @@ import { computeCostUsd } from "../harness/modelAdapter";
 import { MAX_STEPS } from "../harness/loop";
 import { MAX_OBSERVATION_BYTES } from "../catalog/queryCatalog";
 import { PINNED_MAX_CHARS } from "../evidence/pinnedSet";
+import { RETRIEVAL_MAX_CHARS } from "../evidence/retrievalContext";
 import type { ModelTier } from "../harness/types";
 
 /**
@@ -74,6 +75,23 @@ const PROFILE_REGION_TOKENS_UPPER_BOUND = tokensForChars(14_000);
 const EVIDENCE_REGION_TOKENS_UPPER_BOUND = tokensForChars(PINNED_MAX_CHARS);
 
 /**
+ * Upper bound on the retrieved-evidence block V1.1 adds to the context
+ * (RFC 0013 §5, issue #135).
+ *
+ * Charged at the ceiling `retrievalContext.ts` enforces rather than at the size
+ * of a typical hit, for the same reason the pinned evidence block is charged at
+ * its own ceiling: the route builds this bound once at cold start, the hits
+ * arrive per request, and a bound that only holds for the questions asked so far
+ * is not a bound. {@link RETRIEVAL_MAX_CHARS} is enforced by the renderer, so this
+ * allowance is what that block can actually reach.
+ *
+ * Unlike the pinned blocks this one is *not* in the cached prefix: it changes with
+ * the question, which is why it rides the dynamic region. The bound assumes no
+ * cache hits anyway.
+ */
+const RETRIEVAL_REGION_TOKENS_UPPER_BOUND = tokensForChars(RETRIEVAL_MAX_CHARS);
+
+/**
  * Upper bound on one response's completion tokens.
  *
  * The adapter sends no `max_tokens` (modelAdapter.ts), so this is the pinned
@@ -108,6 +126,8 @@ export interface TurnCostBounds {
   readonly catalogSignatureTokens: number;
   /** S4's pinned evidence block, at the ceiling `pinnedSet.ts` enforces. */
   readonly evidenceTokens: number;
+  /** V1.1's retrieved-evidence block, at the ceiling the renderer enforces. */
+  readonly retrievalTokens: number;
   /** One observation, at its byte ceiling. */
   readonly observationTokensPerStep: number;
   readonly outputTokensPerCall: number;
@@ -140,6 +160,7 @@ export function buildTurnCostBounds(input: TurnCostBoundInput): TurnCostBounds {
     toolSchemaTokens: tokensForChars(input.toolSchemaText?.length ?? 0),
     catalogSignatureTokens: tokensForChars(input.catalogSignature.length),
     evidenceTokens: EVIDENCE_REGION_TOKENS_UPPER_BOUND,
+    retrievalTokens: RETRIEVAL_REGION_TOKENS_UPPER_BOUND,
     observationTokensPerStep: tokensForBytes(MAX_OBSERVATION_BYTES),
     outputTokensPerCall: MAX_OUTPUT_TOKENS_PER_CALL,
     steps: MAX_STEPS,
@@ -181,6 +202,7 @@ export function estimateWorstCaseTurnCostUsd(input: WorstCaseTurnInput): number 
     bounds.toolSchemaTokens +
     bounds.catalogSignatureTokens +
     bounds.evidenceTokens +
+    bounds.retrievalTokens +
     tokensForChars(input.requestChars);
   const steps = Math.max(0, bounds.steps);
   const promptTokens =

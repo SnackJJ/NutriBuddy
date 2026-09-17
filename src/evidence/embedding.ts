@@ -87,3 +87,59 @@ export function createGteSmallEmbedder(options: { readonly batchSize?: number } 
     },
   };
 }
+
+/**
+ * The query-side embedder: the deployed Edge Function, not an in-process model
+ * (ADR 0006).
+ *
+ * Vercel's node runtime cannot carry the ONNX weights the ingest uses locally, so
+ * the query half of the pair calls the function that runs the same model inside
+ * Supabase. The two are the same `gte-small` with the same pooling and
+ * normalisation, which is what makes a query vector comparable with the corpus
+ * vectors; ADR 0006 records that this guard is a pinned config plus a one-off
+ * cross-check rather than something a unit test can hold.
+ *
+ * Failures are thrown, not swallowed: the retriever turns them into
+ * `unavailable`, and a turn with no retrieval must be a labelled degradation
+ * rather than a silently empty evidence block (RFC 0013 §5).
+ */
+export function createEdgeFunctionEmbedder(options: {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  /** Injectable for tests; production uses the platform fetch. */
+  readonly fetchImpl?: typeof fetch;
+}): EmbeddingPort & { readonly model: string; readonly dimensions: number } {
+  const doFetch = options.fetchImpl ?? fetch;
+  const endpoint = `${options.baseUrl.replace(/\/$/, "")}/functions/v1/embed`;
+
+  return {
+    model: GTE_SMALL.model,
+    dimensions: GTE_SMALL.dimensions,
+
+    async embed(texts) {
+      const response = await doFetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${options.apiKey}`,
+        },
+        body: JSON.stringify({ texts }),
+      });
+
+      if (!response.ok) {
+        // The body carries the function's own reason (an unsupported runtime, a
+        // bad dimension), which is the difference between "retrieval is down" and
+        // "retrieval is misconfigured".
+        const detail = await response.text().catch(() => "");
+        throw new Error(`embed function returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+      }
+
+      const payload = (await response.json()) as { embeddings?: unknown };
+      const embeddings = payload.embeddings;
+      if (!Array.isArray(embeddings) || embeddings.length !== texts.length) {
+        throw new Error(`embed function returned ${Array.isArray(embeddings) ? embeddings.length : "no"} vectors for ${texts.length} texts`);
+      }
+      return embeddings as number[][];
+    },
+  };
+}

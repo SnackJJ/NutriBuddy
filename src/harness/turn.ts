@@ -56,12 +56,18 @@ export type { FoodRef, RuleRef, TypedOutput } from "./types";
 /**
  * Bump minor for compatible additions, major for breaking event-shape changes.
  *
+ * 1.11.0 adds one optional field (RFC 0013 §5 / #135): `TurnStartEvent.retrieval`
+ * — which sections retrieval contributed, and why it contributed none. Additive,
+ * so a reader of 1.10.0 events stays correct: a turn written before this version
+ * simply has no retrieval to report, which is also true of a turn with no
+ * retriever wired.
+ *
  * 1.10.0 adds two optional fields (RFC 0011 §3.3/§3.4): `TypedOutput.citations`
  * and `TurnStartEvent.evidenceSet`. Both are additive, so a reader of 1.9.0
  * events stays correct — which is the point of the minor bump and the reason the
  * new fields land *before* the assertions that use them.
  */
-export const SCHEMA_VERSION = "1.10.0";
+export const SCHEMA_VERSION = "1.11.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -277,6 +283,35 @@ export interface TurnStartEvent extends TurnEvent {
   readonly profileVersion?: string;
   /** Evidence available to this turn; absent when no corpus is wired. */
   readonly evidenceSet?: TurnEvidenceSet;
+  /** What retrieval contributed to this turn (RFC 0013 §5). */
+  readonly retrieval?: TurnRetrieval;
+}
+
+/**
+ * What retrieval contributed to a turn (RFC 0013 §5 / issue #135).
+ *
+ * Ids and scores, not text. The corpus is a versioned snapshot and its chunk
+ * text is immutable within a version, so a replay can reload exactly what the
+ * model was shown by id — while inlining the text would put several thousand
+ * characters of corpus into every turn's event stream, which the browser also
+ * reads as NDJSON.
+ *
+ * The distinction this type exists for: `evidenceSet` says what the model was
+ * *allowed* to cite; `retrieval` says what it was *given*, and why. Without it a
+ * trace cannot tell a pinned citation from a retrieved one, or tell a question
+ * the corpus could not answer from a retrieval outage.
+ */
+export interface TurnRetrieval {
+  /** Corpus snapshot the ids resolve in. */
+  readonly sourceVersion: string;
+  readonly hits: readonly {
+    readonly sectionId: string;
+    readonly chunkId: string;
+    readonly score: number;
+    readonly via: readonly ("lexical" | "vector")[];
+  }[];
+  /** Present when retrieval returned nothing; absent when it returned hits. */
+  readonly degraded?: "unavailable" | "no_hits";
 }
 
 export interface TurnStepEvent extends TurnEvent {
@@ -350,6 +385,9 @@ function createTurnStartEvent(
     // and "evidence was assembled and it was empty" are different, and only the
     // second one is a configured turn.
     ...(ports.evidenceSet ? { evidenceSet: ports.evidenceSet } : {}),
+    // Same reasoning for retrieval: a turn with no retrieval wired and a turn
+    // whose retrieval found nothing must not look alike in a trace.
+    ...(ports.retrievalProvenance ? { retrieval: ports.retrievalProvenance } : {}),
   };
 }
 
@@ -1345,6 +1383,10 @@ function createRunTurnInput(
     inputDirective,
     userId: ports.userId,
     evidenceText: ports.evidenceText,
+    // Both halves of retrieval have to survive this whitelist: the block the
+    // model reads, and the provenance the trace keeps. A field added to
+    // TurnPorts but not copied here is a port nothing observes.
+    retrievedEvidence: ports.retrievedEvidence,
     adapter: ports.adapter,
     tracer: ports.tracer,
     eventLog: ports.eventLog,
