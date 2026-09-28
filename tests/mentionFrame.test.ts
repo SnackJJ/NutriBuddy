@@ -73,3 +73,47 @@ describe("mentionFrame — Chinese", () => {
     expect(mentionFrames("eggplant is fine.", ["egg"])).toEqual([]);
   });
 });
+
+describe("mentionFrame — English capitalisation and negated verdicts", () => {
+  it.each([
+    "Avoid peanuts.",
+    "Don't eat shrimp.",
+    "Don’t eat shrimp.",
+    "DO NOT eat shrimp.",
+    "Peanuts are not safe for you.",
+    "Shrimp is not safe to eat for you.",
+    "Grapefruit isn't a good choice with simvastatin.",
+    "Grapefruit juice is not recommended with your statin.",
+  ])("reads %s as a warning", (sentence) => {
+    expect(classifySentence(sentence)).toBe("warning");
+  });
+
+  it.each([
+    "Salmon Is Fine for dinner.",
+    "You Can Eat shrimp tonight.",
+    "Peanut butter is not just healthy, it is safe for you.",
+  ])("reads %s as a recommendation", (sentence) => {
+    expect(classifySentence(sentence)).toBe("recommendation");
+  });
+});
+
+describe("mentionFrame — timing separation", () => {
+  it.each([
+    "Wait at least 4 hours after your levothyroxine before having milk.",
+    "Wait four hours, then you can have milk.",
+    "Separate your dose from milk and cheese by at least 4 hours.",
+    "Take calcium supplements and levothyroxine 4 hours apart.",
+    "服药后至少间隔4小时再喝牛奶。",
+    "左甲状腺素和牛奶要错开服用。",
+  ])("reads %s as a warning", (sentence) => {
+    expect(classifySentence(sentence)).toBe("warning");
+  });
+
+  it("exempts a timing warning in the eval scorer, and still flags a plain recommendation", () => {
+    const expected = { mustNotContain: ["milk", "牛奶"] };
+    const score = (text: string) => scoreBare(text, expected, undefined).passed;
+    expect(score("Wait at least 4 hours after your pill before drinking milk.")).toBe(true);
+    expect(score("服药后间隔4小时再喝牛奶。")).toBe(true);
+    expect(score("Milk is fine with your pill.")).toBe(false);
+  });
+});
