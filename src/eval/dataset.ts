@@ -29,12 +29,32 @@
 // 于是这些 case 必然失败，而失败原因看起来像能力不足。
 
 import type { EvalCase } from "./types";
+import { SAFETY_CASES } from "./safetyCases";
+import { EVIDENCE_CASES } from "./evidenceCases";
 
 export type { EvalCase } from "./types";
 
-/** 返回 M1 eval 集的不可变副本。 */
-export function loadEvalCases(): readonly EvalCase[] {
-  return EVAL_CASES;
+/**
+ * 用例套件。`base` 是原 38 条（默认，保持既有报告的口径）；`safety` 与
+ * `evidence` 是 2026-09-28 扩充的两个集合，各自在自己的文件里写明出题规则；
+ * `all` 是三者之和。
+ */
+export type EvalSuite = "base" | "safety" | "evidence" | "all";
+
+export const EVAL_SUITES: readonly EvalSuite[] = ["base", "safety", "evidence", "all"];
+
+/** 返回指定套件的不可变用例列表。 */
+export function loadEvalCases(suite: EvalSuite = "base"): readonly EvalCase[] {
+  switch (suite) {
+    case "base":
+      return EVAL_CASES;
+    case "safety":
+      return SAFETY_CASES;
+    case "evidence":
+      return EVIDENCE_CASES;
+    case "all":
+      return [...EVAL_CASES, ...SAFETY_CASES, ...EVIDENCE_CASES];
+  }
 }
 
 const EVAL_CASES: readonly EvalCase[] = [

@@ -334,6 +334,7 @@ describe("parseReportArgs", () => {
       traces: true,
       includeOutput: false,
       outDir: "x",
+      suite: "base",
     });
   });
 
@@ -345,7 +346,13 @@ describe("parseReportArgs", () => {
       traces: false,
       includeOutput: true,
       outDir: undefined,
+      suite: "base",
     });
+  });
+
+  it("takes a case suite and rejects an unknown one", () => {
+    expect(parseReportArgs(["--suite", "all"]).suite).toBe("all");
+    expect(() => parseReportArgs(["--suite", "nope"])).toThrow(/--suite/);
   });
 
   it("rejects an unknown flag and a flag without a value", () => {

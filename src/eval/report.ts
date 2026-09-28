@@ -45,7 +45,7 @@ import { createSupabaseRetriever } from "../evidence/retrieval";
 import type { HarnessEvidenceDeps } from "./harness-runner";
 import { evalInteractionStore } from "./evalInteractions";
 import { createFileStores } from "../lib/cliStores";
-import { loadEvalCases } from "./dataset";
+import { EVAL_SUITES, loadEvalCases, type EvalSuite } from "./dataset";
 import { runBareEval } from "./bare-runner";
 import { runHarnessEval } from "./harness-runner";
 import { createStubAdapter, createStubTools } from "./stubAdapter";
@@ -617,6 +617,7 @@ interface ParsedArgs {
   readonly traces: boolean;
   readonly includeOutput: boolean;
   readonly outDir?: string;
+  readonly suite: EvalSuite;
 }
 
 class UsageError extends Error {}
@@ -628,6 +629,7 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
   let traces = false;
   let includeOutput = true;
   let outDir: string | undefined;
+  let suite: EvalSuite = "base";
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -658,6 +660,14 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
       case "--out":
         outDir = value();
         break;
+      case "--suite": {
+        const name = value();
+        if (!(EVAL_SUITES as readonly string[]).includes(name)) {
+          throw new UsageError(`--suite must be one of ${EVAL_SUITES.join("|")}`);
+        }
+        suite = name as EvalSuite;
+        break;
+      }
       case "--help":
       case "-h":
         throw new UsageError("requested help");
@@ -666,18 +676,19 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
     }
   }
 
-  return { live, tag, compareTo, traces, includeOutput, outDir };
+  return { live, tag, compareTo, traces, includeOutput, outDir, suite };
 }
 
 const USAGE = `usage:
-  eval:report [--live] [--tag <name>] [--traces] [--compare <reportId>] [--no-output] [--out <dir>]
+  eval:report [--live] [--tag <name>] [--traces] [--compare <reportId>] [--no-output] [--out <dir>] [--suite base|safety|evidence|all]
 
   --live           real model (needs DEEPSEEK_API_KEY); default is the scripted stub
   --tag            report tag; defaults to the git short sha
   --traces         include trace telemetry (delays/cost) from Supabase
   --compare        mark regressions against a reportId in reports/index.json
   --no-output      omit model output from cases.json (it is truncated to ${OUTPUT_LIMIT} chars otherwise)
-  --out            output directory (default: reports)`;
+  --out            output directory (default: reports)
+  --suite          case set (default: base, the original 38)`;
 
 /** Git probe: the report records the revision it describes, not a guess. */
 function readGit(): { sha: string; dirty: boolean } {
@@ -771,7 +782,7 @@ export async function main(
   const tag = args.tag ?? git.sha;
   const reportId = reportIdFor(at, tag);
   const mode: ReportMode = args.live ? "live" : "scripted";
-  const cases = (deps.loadCases ?? loadEvalCases)();
+  const cases = deps.loadCases ? deps.loadCases() : loadEvalCases(args.suite);
 
   /**
    * The corpus for a live run (RFC 0011 §3.7, RFC 0013 §5).

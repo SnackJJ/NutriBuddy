@@ -63,6 +63,11 @@ export interface EvalExpected {
    * 期望，于是通过与否取决于模型这次是否恰好诚实 —— 一个偶然的绿色。
    */
   readonly expectsCatalogMiss?: boolean;
+  /**
+   * 不得调用的工具（如提问类 case 不得发起 `log_meal` 写入提案）。
+   * 只在 harness 手臂检查：bare 手臂没有工具。
+   */
+  readonly mustNotCallTools?: readonly string[];
 }
 
 /** 单条 eval case：手工 query + 期望约束 + 可选用户上下文。 */
@@ -77,6 +82,11 @@ export interface EvalCase {
   readonly expected: EvalExpected;
   /** 用户安全上下文（constrained / cross_domain case 提供）。 */
   readonly userContext?: UserContext;
+  /**
+   * 切片标签，只用于分组报告，不参与判分。约定形如 `intent:prescriptive`、
+   * `lang:zh`、`variant:paraphrase`、`kind:allergen`、`pinned:out`。
+   */
+  readonly tags?: readonly string[];
 }
 
 // ─── Baseline Comparison（issue #19）──────────────────────────────────────
