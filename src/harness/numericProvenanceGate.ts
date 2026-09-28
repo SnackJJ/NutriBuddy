@@ -260,15 +260,30 @@ function valuesClose(
   return relativeDiff <= tolerance;
 }
 
+/**
+ * Columns that hold a portion size, not a nutrient amount. Both food_lookup and
+ * the log_meal proposal observation name it `portion_g`.
+ *
+ * Matching is by unit and value only, so without this a portion of 150 g grounds
+ * "150 g protein" as readily as "150 g of shrimp". The proposal observation made
+ * that hole routine (every logging turn carries its portion), so a portion column
+ * now only grounds figures not framed as nutrient content — the same lexical test
+ * the user-quantity source uses.
+ */
+const PORTION_COLUMNS: ReadonlySet<string> = new Set(["portion_g"]);
+
 function findMatchingObservation(
   extracted: ExtractedNumber,
   obsValues: ObservationValue[],
   tolerance: number,
+  nutrientFramed: boolean,
 ): ObservationValue | null {
   const proseUnit = extracted.unit;
   const proseValue = extracted.value;
 
   for (const obs of obsValues) {
+    if (nutrientFramed && PORTION_COLUMNS.has(obs.column)) continue;
+
     // Try exact unit match first
     if (proseUnit && proseUnit === obs.unit.toLowerCase()) {
       if (valuesClose(proseValue, obs.value, tolerance)) {
@@ -346,6 +361,9 @@ const NUTRIENT_BEFORE_RE = new RegExp(`\\b(?:${NUTRIENT_WORDS})\\b[^.\\n\\d]{0,1
 function framedAsNutrient(text: string, num: ExtractedNumber): boolean {
   const before = text.slice(Math.max(0, num.index - 40), num.index);
   const after = text.slice(num.index + num.raw.length);
+  // "31 g protein per 100 g": the figure after "per" is the basis, not an amount
+  // of the nutrient named before it.
+  if (/\bper\s*$/i.test(before)) return false;
   return NUTRIENT_BEFORE_RE.test(before) || NUTRIENT_AFTER_RE.test(after);
 }
 
@@ -421,7 +439,12 @@ export function checkNumericProvenance(
   const ungrounded: string[] = [];
 
   for (const num of extracted) {
-    const match = findMatchingObservation(num, obsValues, tolerance);
+    const match = findMatchingObservation(
+      num,
+      obsValues,
+      tolerance,
+      framedAsNutrient(prose, num),
+    );
     if (!match && !groundedByUserQuantity(prose, num, userQuantities, tolerance)) {
       const unitLabel = num.unit ? ` ${num.unit}` : "";
       ungrounded.push(

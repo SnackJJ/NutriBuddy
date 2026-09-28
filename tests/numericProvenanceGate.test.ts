@@ -630,3 +630,53 @@ describe("user-stated quantities", () => {
     expect(result.passed).toBe(true);
   });
 });
+
+// ── a portion column grounds portions, not nutrient amounts ─────────────────
+//
+// Matching is by unit and value, so a `portion_g` of 150 used to ground
+// "150 g protein" too. Every logging turn now carries its proposal's portion as
+// an observation, which would have made that routine.
+
+describe("portion columns", () => {
+  const portionOnly = makeObservation(
+    "log_meal_proposal",
+    [
+      { name: "portion_g", type: "number", unit: "g", description: "portion" },
+      { name: "protein_g", type: "number", unit: "g", description: "protein" },
+    ],
+    [{ portion_g: 150, protein_g: 30 }],
+  );
+
+  it("ground the portion", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Logged 150 g of shrimp with 30 g protein."),
+      observations: [portionOnly],
+    });
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("do not ground a nutrient amount that happens to equal the portion", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Shrimp gives you 150 g protein."),
+      observations: [portionOnly],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.reasons[0]).toContain('"150 g"');
+  });
+
+  it("still ground a reference basis written after a nutrient (\"per 150 g\")", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("That is 30 g protein per 150 g."),
+      observations: [portionOnly],
+    });
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("a nutrient column can still ground a nutrient-framed figure", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Protein: 30 g"),
+      observations: [portionOnly],
+    });
+    expect(result.passed).toBe(true);
+  });
+});

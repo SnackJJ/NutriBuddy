@@ -116,21 +116,124 @@ describe("user-stated portion in a logging turn (live d1)", () => {
     expect(evidence.match(/"150 g"/g)).toHaveLength(1);
   });
 
-  it("known remaining cause: the proposal's own kcal is not yet a source", async () => {
-    // d1's second reason was "127.5 kcal" — exactly log_meal's server-side scaling
-    // of shrimp (85 kcal/100 g × 150 g). log_meal outcomes are not observations,
-    // so the gate cannot see them. Out of scope for the user-quantity fix; this
-    // pins the current behaviour so the change that closes it has to flip it.
+});
+
+// ── the proposal's own figures are a source ─────────────────────────────────
+//
+// d1's second reason was "127.5 kcal" — exactly log_meal's server-side scaling of
+// shrimp (85 kcal/100 g × 150 g). d3/d4/w2 were refused the same way ("155 kcal",
+// "146.4 kcal", "520 kcal"), and d3/d4's portions ("100 g", "240 g") were ones the
+// model chose, which only the proposal records. These numbers are computed by
+// code from the catalog, like food_lookup's; the gate just could not see them.
+
+describe("log_meal proposal figures (live d1/d3/d4/w2)", () => {
+  const cases = [
+    {
+      id: "d1",
+      query: "Log the shrimp I ate for lunch — about 150g with rice.",
+      logArgs: { food_name: "shrimp", portion_g: 150, meal_type: "lunch" },
+      prose:
+        "Logged 150 g of shrimp for lunch: 127.5 kcal, 30 g protein, 0.8 g fat, 0 g carbs. " +
+        "Heads up: shrimp is shellfish, and your profile lists a shellfish allergy.",
+      allergies: ["shellfish"],
+    },
+    {
+      id: "d3",
+      query: "I had eggs and toast for breakfast — please track that.",
+      logArgs: { food_name: "egg", portion_g: 100, meal_type: "breakfast" },
+      prose:
+        "Logged 100 g of egg for breakfast (155 kcal, 13 g protein). " +
+        "Note: your profile lists an egg allergy.",
+      allergies: ["egg"],
+    },
+    {
+      id: "d4",
+      query: "I drank a glass of milk with lunch — log it for me.",
+      logArgs: { food_name: "milk", portion_g: 240, meal_type: "lunch" },
+      prose:
+        "Logged 240 g of milk for lunch — 146.4 kcal. Note: your profile lists a milk allergy.",
+      allergies: ["milk"],
+    },
+    {
+      id: "w2",
+      query: "Log 250g of grilled salmon for dinner.",
+      logArgs: { food_name: "salmon", portion_g: 250, meal_type: "dinner" },
+      prose: "Logged 250 g of grilled salmon for dinner: 520 kcal, 50 g protein.",
+      allergies: [],
+    },
+  ];
+
+  for (const { id, query, logArgs, prose, allergies } of cases) {
+    it(`${id}: an answer quoting the proposal ends in write_proposal`, async () => {
+      const { result, numeric } = await runLogTurn(query, logArgs, prose, allergies);
+
+      expect(numeric.every((gate) => gate.verdict === "pass")).toBe(true);
+      expect(result.stopReason).toBe("write_proposal");
+      expect(result.proposal?.portionG).toBe(logArgs.portion_g);
+    });
+  }
+
+  it("a kcal the model made up that disagrees with the proposal is still blocked", async () => {
+    // The proposal says 127.5 kcal; 300 kcal is nobody's number.
     const { result, numeric } = await runLogTurn(
       "Log the shrimp I ate for lunch — about 150g with rice.",
       { food_name: "shrimp", portion_g: 150, meal_type: "lunch" },
-      "Logged 150 g of shrimp (127.5 kcal) for lunch.",
+      "Logged 150 g of shrimp (300 kcal) for lunch.",
       ["shellfish"],
     );
 
     expect(result.stopReason).toBe("gate_blocked");
     const evidence = numeric.at(-1)?.evidence ?? "";
-    expect(evidence).toContain('"127.5 kcal"');
+    expect(evidence).toContain('"300 kcal"');
     expect(evidence).not.toContain('"150 g"');
+  });
+
+  it("a proposal from a blocked attempt does not ground the next attempt", async () => {
+    // Attempt 1 logs 150 g and is blocked (made-up kcal); attempts 2–3 log 200 g
+    // but still say 127.5 kcal — the first proposal's figure, not the live one's.
+    let calls = 0;
+    const proposalStore = createInMemoryProposalStore({ userId: USER });
+    const adapter: ModelAdapter = {
+      generate: async () => {
+        calls++;
+        const first = calls <= 2;
+        const toolCall: ToolCall =
+          calls % 2 === 1
+            ? {
+                id: `log-${calls}`,
+                name: "log_meal",
+                args: { food_name: "shrimp", portion_g: first ? 150 : 200, meal_type: "lunch" },
+              }
+            : {
+                id: `answer-${calls}`,
+                name: "submit_answer",
+                args: {
+                  prose: first ? "Logged shrimp (999 kcal)." : "Logged shrimp (127.5 kcal).",
+                  foodRefs: [],
+                  ruleRefs: [],
+                },
+              };
+        return { content: "", stop: false, finishReason: "tool_calls", toolCalls: [toolCall] };
+      },
+    };
+    const result = await consumeTurn(
+      turn(
+        { tag: "utterance", content: "Log the shrimp I ate for lunch." },
+        {
+          adapter,
+          tracer: new Tracer(),
+          catalog,
+          tools: new Map([
+            ["log_meal", createLogMealHandler({ catalog, proposalStore, userId: USER })],
+          ]),
+          toolSchemas: [LOG_MEAL_SCHEMA],
+          userContext: { allergies: [], medications: [] },
+        },
+      ),
+      () => {},
+    );
+
+    expect(result.stopReason).toBe("gate_blocked");
+    expect(result.reply).toContain('"127.5 kcal"');
   });
 });

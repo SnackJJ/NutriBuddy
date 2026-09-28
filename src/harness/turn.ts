@@ -1021,6 +1021,40 @@ function readStringArray(
   return undefined;
 }
 
+const PROPOSAL_OBSERVATION_TEMPLATE_ID = "log_meal_proposal";
+
+/**
+ * A log_meal proposal's figures, as an observation the numeric gate can match.
+ *
+ * Live d1/d3/d4/w2 were refused for quoting their own proposal ("150 g shrimp,
+ * 127.5 kcal"): those numbers are scaled from the catalog by `log_meal`'s code,
+ * exactly as `food_lookup` scales them, but only query_catalog outcomes were
+ * observations. Gate-only: this does not enter the event stream or the model's
+ * context, so the event schema is unchanged.
+ */
+function proposalObservation(proposal: WriteProposalData): Observation {
+  const figures: ReadonlyArray<readonly [string, "g" | "kcal", number | undefined]> = [
+    ["portion_g", "g", proposal.portionG],
+    ["kcal", "kcal", proposal.kcal],
+    ["protein_g", "g", proposal.proteinG],
+    ["fat_g", "g", proposal.fatG],
+    ["carbs_g", "g", proposal.carbsG],
+  ];
+  const present = figures.filter(([, , value]) => value !== undefined);
+  return {
+    templateId: PROPOSAL_OBSERVATION_TEMPLATE_ID,
+    columns: present.map(([name, unit]) => ({
+      name,
+      type: "number" as const,
+      unit,
+      description: `log_meal proposal ${name}`,
+    })),
+    rows: [Object.fromEntries(present.map(([name, , value]) => [name, value]))],
+    rowCount: 1,
+    truncated: false,
+  };
+}
+
 /**
  * Structural validator for log_meal proposal payloads (RFC 0002).
  * Accepts only the structured proposalResponse object (ok.data) — no result-string parse.
@@ -1176,6 +1210,9 @@ async function* runUtteranceTurn(
     lastResolverMiss = undefined;
     lastWriteProposalData = undefined;
     lastLogMealActArgs = undefined;
+    // Per attempt, like the proposal itself: a blocked attempt's proposal is not
+    // the one this attempt's answer describes, so its figures must not ground it.
+    const proposalObservations: Observation[] = [];
 
     const history: ChatMessage[] = [...(ports.history ?? [])];
 
@@ -1251,6 +1288,9 @@ async function* runUtteranceTurn(
         if (outcome.kind === "ok" && outcome.name === "log_meal") {
           lastWriteProposalData = parseWriteProposalData(outcome.data);
           lastResolverMiss = undefined;
+          if (lastWriteProposalData) {
+            proposalObservations.push(proposalObservation(lastWriteProposalData));
+          }
         }
 
         if (outcome.kind === "typed_miss" && outcome.name === "log_meal") {
@@ -1319,7 +1359,7 @@ async function* runUtteranceTurn(
     const outputGateChecks = collectOutputGateChecks(
       result,
       ports.userContext,
-      observations,
+      [...observations, ...proposalObservations],
       conflicts,
       ports.catalog,
       input.content,
