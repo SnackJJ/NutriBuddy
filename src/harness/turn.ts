@@ -818,8 +818,11 @@ async function runCitationCheck(
 function createNumericProvenanceCheck(
   output: TypedOutput,
   observations: readonly Observation[],
+  userInput: string,
 ): OutputGateCheck {
-  const check = checkNumericProvenance({ output, observations });
+  // The utterance rides along so a portion the user stated ("about 150g") can
+  // be said back without counting as invented (live d1).
+  const check = checkNumericProvenance({ output, observations, userInput });
   const passEvidence =
     observations.length > 0
       ? "All numeric facts trace to observations"
@@ -948,6 +951,7 @@ function collectOutputGateChecks(
   observations: readonly Observation[],
   conflicts: readonly Conflict[],
   catalog: Catalog | undefined,
+  userInput: string,
 ): OutputGateCheck[] {
   const checks: OutputGateCheck[] = [];
   const lexicalCheck = createLexicalBackstopCheck(
@@ -972,7 +976,7 @@ function collectOutputGateChecks(
   }
 
   checks.push(
-    createNumericProvenanceCheck(result.output, observations),
+    createNumericProvenanceCheck(result.output, observations, userInput),
     createAdvisoryStructureCheck(result.output, conflicts),
   );
   return checks;
@@ -1318,6 +1322,7 @@ async function* runUtteranceTurn(
       observations,
       conflicts,
       ports.catalog,
+      input.content,
     );
 
     // ── Tier-2: authority claimed, evidence absent (RFC 0011 §3.6) ────

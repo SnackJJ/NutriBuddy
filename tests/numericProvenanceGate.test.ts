@@ -545,3 +545,88 @@ describe("spelled-out mass units fold onto the catalog's vocabulary", () => {
     expect(check.passed).toBe(false);
   });
 });
+
+// ── the user's own portion is a source (live d1) ────────────────────────────
+//
+// d1 said "about 150g" and the answer's "150 g" was refused as ungrounded. The
+// user's words may ground a *portion*; they may not ground nutrient content, and
+// they never ground energy — those still have to come from the catalog.
+
+describe("user-stated quantities", () => {
+  function check(prose: string, userInput: string, observations: Observation[] = []) {
+    return checkNumericProvenance({ output: typedOutput(prose), observations, userInput });
+  }
+
+  describe("ground a portion the user said", () => {
+    const cases = [
+      { userInput: "Log the shrimp I ate — about 150g with rice.", prose: "Logged 150 g of shrimp." },
+      { userInput: "I had 150 g of shrimp", prose: "Logged 150g shrimp." },
+      { userInput: "I had 150g of shrimp", prose: "Logged 150 grams of shrimp." },
+      { userInput: "I had 150 grams of shrimp", prose: "Logged 150 g of shrimp." },
+      { userInput: "I had 150g of shrimp", prose: "Logged 0.15 kg of shrimp." },
+      { userInput: "I drank 2 cups of milk", prose: "Logged 2 cups of milk." },
+      { userInput: "I drank 1 cup of milk", prose: "That is about 237 ml of milk." },
+      { userInput: "I had 5 oz of salmon", prose: "Logged 142 g of salmon." },
+      { userInput: "I drank half a cup of milk", prose: "Logged 0.5 cup of milk." },
+      { userInput: "Log 250g of salmon", prose: "| Food | Portion |\n| salmon | 250 g |" },
+    ];
+    for (const { userInput, prose } of cases) {
+      it(`"${userInput}" → "${prose.replace(/\n/g, " ")}"`, () => {
+        const result = check(prose, userInput);
+        expect(result.reasons).toEqual([]);
+        expect(result.passed).toBe(true);
+      });
+    }
+  });
+
+  describe("do not ground nutrient content or other units", () => {
+    const cases = [
+      // The user's number, reframed as a nutrient: the case the fix must not open.
+      { userInput: "I had 150g of shrimp", prose: "That is 150 g protein." },
+      { userInput: "I had 150g of shrimp", prose: "That is 150 g of protein." },
+      { userInput: "I had 150g of shrimp", prose: "It has 150 g of total fat." },
+      { userInput: "I had 150g of shrimp", prose: "Protein: 150 g" },
+      { userInput: "I had 150g of shrimp", prose: "| Protein | 150 g |" },
+      { userInput: "I had 150g of shrimp", prose: "carbs of 150 g" },
+      // Energy is never a portion, even when the user said it.
+      { userInput: "I had 500 kcal of pasta", prose: "Logged 500 kcal of pasta." },
+      // A user's own nutrient claim is not a source either.
+      { userInput: "My shake had 30 g protein", prose: "Logged a shake with 30 g of protein." },
+      // Mass ↔ volume needs a density — a food fact, not a unit fact.
+      { userInput: "I drank 250 ml of milk", prose: "Logged 250 g of milk." },
+      // A different number is not the user's number.
+      { userInput: "I had 150g of shrimp", prose: "Logged 200 g of shrimp." },
+      // No user input, no user source.
+      { userInput: "", prose: "Logged 150 g of shrimp." },
+    ];
+    for (const { userInput, prose } of cases) {
+      it(`"${userInput}" ↛ "${prose}"`, () => {
+        expect(check(prose, userInput).passed).toBe(false);
+      });
+    }
+  });
+
+  it("releases the portion but still blocks a nutrient figure in the same answer", () => {
+    const result = check("Logged 150 g of shrimp — 150 g protein, 20 g fat.", "about 150g of shrimp");
+    expect(result.reasons).toHaveLength(2);
+    expect(result.reasons[0]).toContain('"150 g"');
+    expect(result.reasons[1]).toContain('"20 g"');
+  });
+
+  it("does not replace observations: catalog figures still ground as before", () => {
+    const obs = makeObservation("food_lookup", CHICKEN_COLUMNS, [
+      {
+        food_id: "food-shrimp-001",
+        food_name: "shrimp",
+        portion_g: 150,
+        kcal: 127.5,
+        protein_g: 30,
+        fat_g: 0.8,
+        carbs_g: 0,
+        allergen_tags: "shellfish",
+      },
+    ]);
+    const result = check("150 g shrimp: 127.5 kcal, 30 g protein.", "about 150g of shrimp", [obs]);
+    expect(result.passed).toBe(true);
+  });
+});

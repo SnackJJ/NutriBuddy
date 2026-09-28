@@ -21,6 +21,12 @@ export interface NumericProvenanceInput {
    * Set to 0 for exact-match mode in strict eval contexts.
    */
   readonly tolerance?: number;
+  /**
+   * The user's own utterance for this turn. A portion the user stated here
+   * ("about 150g", "2 cups") is a legitimate source for the answer to repeat —
+   * see {@link groundedByUserQuantity} for what it can and cannot ground.
+   */
+  readonly userInput?: string;
 }
 
 export interface NumericProvenanceResult {
@@ -109,6 +115,8 @@ interface ExtractedNumber {
   value: number;
   unit: string | null;
   raw: string;
+  /** Offset of `raw` in the text — the user-quantity check reads its neighbours. */
+  index: number;
 }
 
 /**
@@ -191,7 +199,7 @@ export function extractNumbersFromProse(prose: string): ExtractedNumber[] {
       unit = spelledOut;
     }
 
-    results.push({ value, unit: unit || null, raw });
+    results.push({ value, unit: unit || null, raw, index: match.index });
   }
 
   return results;
@@ -289,6 +297,100 @@ function findMatchingObservation(
   return null;
 }
 
+// ─── user-stated quantities ────────────────────────────────────────────────
+//
+// live d1: "Log the shrimp I ate for lunch — about 150g with rice." The answer
+// said "150 g" back and was refused as ungrounded, because the only sources were
+// observation columns — the user's own words were not one. Repeating what the
+// user said is not a number the model made up.
+//
+// What this source may ground is deliberately narrow:
+// - only portion units (mass / volume). Energy and micronutrient units never,
+//   because a user saying "500 kcal" does not make the catalog agree;
+// - only a figure not framed as nutrient content. "150 g" of shrimp and
+//   "150 g protein" are the same token to the extractor; the words around it
+//   are the only thing that tells them apart. The test is lexical (like the rest
+//   of the output gate), so its residual gap is a nutrient claim that does not
+//   name the nutrient next to the number ("it has 150 g, mostly protein") — that
+//   stays releasable when it equals the user's portion. Accepted: the number is
+//   still the user's, and naming the nutrient anywhere adjacent blocks;
+// - conversions within one dimension only (150 g ↔ 0.15 kg, 1 cup ↔ 237 ml).
+//   Mass ↔ volume would need a density, which is a food fact, not a unit fact.
+
+/** Portion units, to a per-dimension base (g for mass, ml for volume). */
+const PORTION_UNITS: Record<string, { readonly base: "g" | "ml"; readonly factor: number }> = {
+  g: { base: "g", factor: 1 },
+  kg: { base: "g", factor: 1000 },
+  oz: { base: "g", factor: 28.3495 },
+  lb: { base: "g", factor: 453.592 },
+  ml: { base: "ml", factor: 1 },
+  l: { base: "ml", factor: 1000 },
+  cup: { base: "ml", factor: 236.588 },
+  tbsp: { base: "ml", factor: 14.787 },
+  tsp: { base: "ml", factor: 4.929 },
+};
+
+const NUTRIENT_WORDS =
+  "protein|proteins|fat|fats|carb|carbs|carbohydrate|carbohydrates|fiber|fibre|" +
+  "sugar|sugars|sodium|salt|cholesterol|calcium|iron|potassium|magnesium|zinc|" +
+  "vitamin|caffeine|alcohol|omega";
+
+/** "150 g protein", "150 g of total fat", "150 g (carbs)". */
+const NUTRIENT_AFTER_RE = new RegExp(
+  `^\\s*\\(?\\s*(?:of\\s+)?(?:total\\s+|dietary\\s+|saturated\\s+|trans\\s+|added\\s+)?(?:${NUTRIENT_WORDS})\\b`,
+  "i",
+);
+/** "Protein: 150 g", "protein of 150 g", "| Protein | 150 g |" — a short, digit-free bridge. */
+const NUTRIENT_BEFORE_RE = new RegExp(`\\b(?:${NUTRIENT_WORDS})\\b[^.\\n\\d]{0,12}$`, "i");
+
+function framedAsNutrient(text: string, num: ExtractedNumber): boolean {
+  const before = text.slice(Math.max(0, num.index - 40), num.index);
+  const after = text.slice(num.index + num.raw.length);
+  return NUTRIENT_BEFORE_RE.test(before) || NUTRIENT_AFTER_RE.test(after);
+}
+
+function toPortionBase(num: { value: number; unit: string | null }) {
+  const unit = num.unit ? PORTION_UNITS[num.unit] : undefined;
+  return unit ? { base: unit.base, value: num.value * unit.factor } : null;
+}
+
+/** "half a cup" — the one spelled-out amount handled; anything vaguer is not a source. */
+const HALF_A_UNIT_RE = /\bhalf (?:a|an) (cup|tbsp|tsp|oz|lb|kg|l)\b/gi;
+
+/** Portions the user stated this turn, in base units. Nutrient-framed figures are not portions. */
+function collectUserQuantities(userInput: string): { base: "g" | "ml"; value: number }[] {
+  const quantities: { base: "g" | "ml"; value: number }[] = [];
+  for (const num of extractNumbersFromProse(userInput)) {
+    if (framedAsNutrient(userInput, num)) continue;
+    const portion = toPortionBase(num);
+    if (portion) quantities.push(portion);
+  }
+  for (const match of userInput.matchAll(HALF_A_UNIT_RE)) {
+    const portion = toPortionBase({ value: 0.5, unit: match[1].toLowerCase() });
+    if (portion) quantities.push(portion);
+  }
+  return quantities;
+}
+
+/**
+ * Whether a prose figure the observations could not ground is the user's own
+ * portion said back. Only reached after observation matching fails, so it can
+ * only ever release more, never block something observations would ground.
+ */
+function groundedByUserQuantity(
+  prose: string,
+  num: ExtractedNumber,
+  userQuantities: readonly { base: "g" | "ml"; value: number }[],
+  tolerance: number,
+): boolean {
+  if (userQuantities.length === 0) return false;
+  const portion = toPortionBase(num);
+  if (!portion || framedAsNutrient(prose, num)) return false;
+  return userQuantities.some(
+    (q) => q.base === portion.base && valuesClose(portion.value, q.value, tolerance),
+  );
+}
+
 // ─── main check ────────────────────────────────────────────────────────────
 
 const DEFAULT_TOLERANCE = 0.05; // 5% relative tolerance
@@ -305,7 +407,7 @@ const DEFAULT_TOLERANCE = 0.05; // 5% relative tolerance
 export function checkNumericProvenance(
   input: NumericProvenanceInput,
 ): NumericProvenanceResult {
-  const { output, observations, tolerance = DEFAULT_TOLERANCE } = input;
+  const { output, observations, tolerance = DEFAULT_TOLERANCE, userInput } = input;
   const prose = output.prose;
 
   const extracted = extractNumbersFromProse(prose);
@@ -314,12 +416,13 @@ export function checkNumericProvenance(
   }
 
   const obsValues = collectObservationValues(observations);
+  const userQuantities = userInput ? collectUserQuantities(userInput) : [];
 
   const ungrounded: string[] = [];
 
   for (const num of extracted) {
     const match = findMatchingObservation(num, obsValues, tolerance);
-    if (!match) {
+    if (!match && !groundedByUserQuantity(prose, num, userQuantities, tolerance)) {
       const unitLabel = num.unit ? ` ${num.unit}` : "";
       ungrounded.push(
         `Ungrounded numeric fact: "${num.raw}" (value ${num.value}${unitLabel}) ` +
