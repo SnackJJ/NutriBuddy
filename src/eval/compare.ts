@@ -208,6 +208,12 @@ export function compareSummaries(
     readonly afterDatasetHash?: string;
     readonly beforeMode?: string;
     readonly afterMode?: string;
+    /** `--evidence`; the caller maps a legacy live entry to "retrieval". */
+    readonly beforeEvidence?: string;
+    readonly afterEvidence?: string;
+    /** `--arms`; the caller maps an absent field to "both". */
+    readonly beforeArms?: string;
+    readonly afterArms?: string;
   },
 ): CompareResult {
   const reasons: string[] = [];
@@ -227,6 +233,32 @@ export function compareSummaries(
   ) {
     reasons.push(
       `mode differs (${identity.beforeMode} vs ${identity.afterMode}): a scripted report and a live report measure different things`,
+    );
+  }
+  if (
+    identity?.beforeEvidence !== undefined &&
+    identity?.afterEvidence !== undefined &&
+    identity.beforeEvidence !== identity.afterEvidence
+  ) {
+    // 消融臂与基线的差是实验结果本身，不是倒退：把它标成"引用支撑率倒退"是把
+    // 设计好的对照读成了事故。
+    reasons.push(
+      `evidence mode differs (${identity.beforeEvidence} vs ${identity.afterEvidence}): 消融臂与基线测的是不同的东西`,
+    );
+  }
+  if (
+    identity?.beforeArms !== undefined &&
+    identity?.afterArms !== undefined &&
+    identity.beforeArms !== identity.afterArms &&
+    (identity.beforeArms === "bare" || identity.afterArms === "bare")
+  ) {
+    // Only a side *without* the harness arm breaks comparison: every threshold
+    // except the bare pass rate is a harness metric, and a bare-only run would
+    // report its citation support as a measured 0. A side without the bare arm
+    // needs no rule — its bare rate is undefined and that row already says
+    // "no data on one side".
+    reasons.push(
+      `arms differ (${identity.beforeArms} vs ${identity.afterArms}): one side did not run the harness arm`,
     );
   }
   const comparable = reasons.length === 0;

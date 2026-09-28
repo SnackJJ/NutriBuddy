@@ -95,6 +95,70 @@ const DEFAULT_TRACE_LIMIT = 500;
 export type ReportMode = "scripted" | "live";
 
 /**
+ * What evidence a live harness run gets (`--evidence`, the retrieval ablation).
+ *
+ *   - `retrieval`: pinned set + per-question retrieval — the product, and the default;
+ *   - `pinned`: the pinned set only, i.e. V1.0 behaviour;
+ *   - `none`: neither.
+ *
+ * Only a live run has a corpus, so a scripted report does not carry this field
+ * (and `--evidence` without `--live` is a usage error, not a silent no-op).
+ */
+export type EvidenceMode = "none" | "pinned" | "retrieval";
+export const EVIDENCE_MODES: readonly EvidenceMode[] = ["none", "pinned", "retrieval"];
+
+/**
+ * Which arms a run executes (`--arms`). An ablation compares harness against
+ * harness, so the bare arm is half the cost and none of the signal there.
+ */
+export type ReportArms = "both" | "harness" | "bare";
+export const REPORT_ARMS: readonly ReportArms[] = ["both", "harness", "bare"];
+
+/** 两臂各自是否跑了。缺省按 `both`：旗标出现之前的报告都是两臂。 */
+function armsRan(arms: ReportArms | undefined): { readonly bare: boolean; readonly harness: boolean } {
+  return { bare: arms !== "harness", harness: arms !== "bare" };
+}
+
+/**
+ * Narrow the loaded corpus to what one evidence mode may see.
+ *
+ * Pure so the three branches are testable without a database. `none` keeps the
+ * citation registry on purpose: the registry is a validator, not evidence. With
+ * it, a citation the model makes up in the no-evidence arm is stripped and
+ * counted as `stripped` — without it, the arm's citation numbers would depend on
+ * which fail-closed path the gate happened to take rather than on the ablation.
+ */
+export function selectEvidence(
+  mode: EvidenceMode,
+  loaded: HarnessEvidenceDeps,
+): HarnessEvidenceDeps {
+  switch (mode) {
+    case "retrieval":
+      return loaded;
+    case "pinned": {
+      const { retrieval: _dropped, ...pinnedOnly } = loaded;
+      return pinnedOnly;
+    }
+    case "none":
+      return loaded.citationRegistry ? { citationRegistry: loaded.citationRegistry } : {};
+  }
+}
+
+/**
+ * The evidence mode an index entry ran with, for comparison purposes.
+ *
+ * Live reports written before `--evidence` existed all ran the only mode there
+ * was — retrieval — so an absent field on a live entry means that, and an
+ * ablation arm is not silently comparable with an old baseline.
+ */
+function evidenceOfEntry(entry: {
+  readonly mode: ReportMode;
+  readonly evidence?: EvidenceMode;
+}): EvidenceMode | undefined {
+  return entry.evidence ?? (entry.mode === "live" ? "retrieval" : undefined);
+}
+
+/**
  * Which model produced a live report (issue: reports could not be attributed).
  *
  * A live run measures model behaviour, so "live" without the model is an
@@ -125,6 +189,10 @@ export interface ReportEnv {
   readonly datasetHash: string;
   /** Present only for `mode: "live"`; see {@link ReportModelIdentity}. */
   readonly model?: ReportModelIdentity;
+  /** Present only for `mode: "live"`; see {@link EvidenceMode}. */
+  readonly evidence?: EvidenceMode;
+  /** Absent on reports written before `--arms`, which all ran both arms. */
+  readonly arms?: ReportArms;
 }
 
 /**
@@ -172,6 +240,9 @@ export interface ComparableEntry {
    * argument for putting the field in before needing it.
    */
   readonly model?: ReportModelIdentity;
+  /** Enforced by `--compare`: an ablation arm is a different measurement. */
+  readonly evidence?: EvidenceMode;
+  readonly arms?: ReportArms;
   readonly n: number;
   readonly summary: ComparableSummary;
 }
@@ -237,19 +308,26 @@ export function comparisonRows(
   cases: readonly EvalCase[],
   bareResults: readonly BareResult[],
   harnessResults: readonly HarnessResult[],
+  arms: ReportArms = "both",
 ): readonly (ComparisonRow & { readonly group: string })[] {
   const bareById = new Map(bareResults.map((r) => [r.caseId, r]));
   const harnessById = new Map(harnessResults.map((r) => [r.caseId, r]));
+  const ran = armsRan(arms);
 
   return cases.map((c) => {
     const barePassed = bareById.get(c.id)?.passed ?? false;
     const harnessPassed = harnessById.get(c.id)?.passed ?? false;
-    const delta =
-      barePassed === harnessPassed
-        ? `same (both ${barePassed ? "passed" : "failed"})`
-        : harnessPassed
-          ? "+harness (harness passed, bare failed)"
-          : "−harness (bare passed, harness failed)";
+    // 单臂运行时没有"对比"可言：一个没跑的臂按 false 算，会把每条都写成
+    // "+harness"，那是一张全是假差值的表。
+    const delta = !ran.bare
+      ? "harness only (bare not run)"
+      : !ran.harness
+        ? "bare only (harness not run)"
+        : barePassed === harnessPassed
+          ? `same (both ${barePassed ? "passed" : "failed"})`
+          : harnessPassed
+            ? "+harness (harness passed, bare failed)"
+            : "−harness (bare passed, harness failed)";
     return {
       caseId: c.id,
       query: c.query,
@@ -278,6 +356,17 @@ function pct(value: number | undefined): string {
 function citationRate(support: CitationSupport): string {
   if (support.declared === 0) return "n/a（数据集里没有声明应带引用的 case）";
   return pct(support.rate);
+}
+
+const EVIDENCE_DESCRIPTIONS: Record<EvidenceMode, string> = {
+  retrieval: "钉住集 + 逐题检索（产品行为）",
+  pinned: "只注入钉住集，按设计关闭检索（消融臂）",
+  none: "不注入任何依据，按设计关闭检索（消融臂）；registry 保留，编造的引用会被剥离",
+};
+
+/** An arm's cell, or "未运行" when `--arms` skipped it — never a 0 that was not measured. */
+function armCell(ran: boolean, cell: string): string {
+  return ran ? cell : "未运行";
 }
 
 function listOrDash(cases: readonly string[]): string {
@@ -336,6 +425,13 @@ export function renderReportMarkdown(
     );
     lines.push(`- pricing: ${env.model.pricingSource}`);
   }
+  if (env.evidence) {
+    lines.push(`- evidence: **${env.evidence}** — ${EVIDENCE_DESCRIPTIONS[env.evidence]}`);
+  }
+  const ran = armsRan(env.arms);
+  if (!ran.bare || !ran.harness) {
+    lines.push(`- arms: **${env.arms}** only（另一臂按 \`--arms\` 未运行，其列显示为"未运行"而不是 0）`);
+  }
   lines.push(`- telemetry: ${summary.telemetry.included ? `traces from ${summary.telemetry.source ?? "unknown"}` : `not included (${summary.telemetry.reason ?? "unknown"})`}`);
   lines.push("");
 
@@ -367,44 +463,56 @@ export function renderReportMarkdown(
   lines.push("## 指标", "");
   lines.push("| 指标 | bare | harness | Δ |", "| --- | --- | --- | --- |");
   lines.push(
-    `| 通过率 | ${metrics.bare.passed}/${metrics.bare.failed + metrics.bare.passed} (${pct(metrics.bare.passRate)}) | ${metrics.harness.passed}/${metrics.harness.failed + metrics.harness.passed} (${pct(metrics.harness.passRate)}) | ${points(metrics.deltaPoints)} |`,
+    `| 通过率 | ${armCell(ran.bare, `${metrics.bare.passed}/${metrics.bare.failed + metrics.bare.passed} (${pct(metrics.bare.passRate)})`)} | ${armCell(ran.harness, `${metrics.harness.passed}/${metrics.harness.failed + metrics.harness.passed} (${pct(metrics.harness.passRate)})`)} | ${points(metrics.deltaPoints)} |`,
   );
   lines.push(
-    `| 约束违反率 | ${pct(metrics.constraintViolationRate.bare.value)} | ${pct(metrics.constraintViolationRate.harness.value)} | |`,
+    `| 约束违反率 | ${armCell(ran.bare, pct(metrics.constraintViolationRate.bare.value))} | ${armCell(ran.harness, pct(metrics.constraintViolationRate.harness.value))} | |`,
   );
-  lines.push(`| 工具调用率 | — | ${pct(metrics.toolCallRate.value)} | |`);
-  lines.push(`| 闸拦截率 | — | ${pct(metrics.gateTurnRate.value)} | |`);
+  lines.push(`| 工具调用率 | — | ${armCell(ran.harness, pct(metrics.toolCallRate.value))} | |`);
+  lines.push(`| 闸拦截率 | — | ${armCell(ran.harness, pct(metrics.gateTurnRate.value))} | |`);
   lines.push(
-    `| 来源字样率（文体信号，非引用检查） | ${pct(metrics.sourceMarkerRate.bare.value)} | ${pct(metrics.sourceMarkerRate.harness.value)} | |`,
+    `| 来源字样率（文体信号，非引用检查） | ${armCell(ran.bare, pct(metrics.sourceMarkerRate.bare.value))} | ${armCell(ran.harness, pct(metrics.sourceMarkerRate.harness.value))} | |`,
   );
   lines.push("");
   lines.push("## 引用支撑（结构性，V1.1 检索的判据）", "");
-  lines.push(
-    "分母是**声明了应当带引用**的 case（`expected.shouldCite`），不是全部 case：",
-    '"100g 鸡胸多少蛋白"这类问题本来就不需要语料出处，混进分母会把指标稀释成噪声。',
-    "`kept` 取终态输出里通过校验的引用数；缺失（没走到终态）的 case 不计入分子，但仍在分母里。",
-    "",
-  );
-  lines.push(
-    `| 指标 | 值 | 说明 |`,
-    `| --- | --- | --- |`,
-    `| 引用支撑率 | ${citationRate(metrics.citationSupport)} | ${metrics.citationSupport.supported}/${metrics.citationSupport.declared} 条应有依据的 case 带 ≥1 条存活引用 |`,
-    `| 其中已测量 | ${metrics.citationSupport.measured}/${metrics.citationSupport.declared} | 未测量的 case 留在分母里，不悄悄剔除 |`,
-    `| 检索未接线 | ${describeCases(metrics.citationSupport.unwired)} | 这一轮没有语料（scripted 臂即如此）：比率结构性为 0，读成能力缺口是错的 |`,
-    `| 检索无命中（\`retrieval_miss\`） | ${describeCases(metrics.citationSupport.retrievalMiss)} | 检索跑了，语料里没有这个问题的依据 |`,
-    `| 检索不可用 | ${describeCases(metrics.citationSupport.retrievalUnavailable)} | 检索没跑成（outage）。与上一行是两件事，处置也不同 |`,
-    `| 有命中但没引用 | ${describeCases(metrics.citationSupport.citedNothing)} | 给了依据却没引：检索到位了，答案没用 |`,
-    `| 引用被剥离（tier-1） | ${describeCases(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
-    `| 声称有据却无引用（tier-2） | ${describeCases(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
-  );
-  lines.push("");
+  if (!ran.harness) {
+    // 引用支撑只有 harness 臂才有；此时 summary 里的 0/declared 是"没测"，不是"测得 0"。
+    lines.push("harness 臂按 `--arms bare` 未运行：引用支撑无从测量，本节不给数字。", "");
+  }
+  // 消融臂里"没有检索"是实验设计，不是故障；沿用"检索未接线"的措辞会把一条
+  // 按设计关掉的曲线读成事故（scripted 臂的"未接线"则确实是没有语料）。
+  const ablation = env.evidence === "none" || env.evidence === "pinned";
+  const unwiredRow = ablation
+    ? `| 检索按设计关闭（\`--evidence ${env.evidence}\`） | ${describeCases(metrics.citationSupport.unwired)} | 本次按设计关闭检索（消融臂），不是故障：这一行就是消融要测的量 |`
+    : `| 检索未接线 | ${describeCases(metrics.citationSupport.unwired)} | 这一轮没有语料（scripted 臂即如此）：比率结构性为 0，读成能力缺口是错的 |`;
+  if (ran.harness) {
+    lines.push(
+      "分母是**声明了应当带引用**的 case（`expected.shouldCite`），不是全部 case：",
+      '"100g 鸡胸多少蛋白"这类问题本来就不需要语料出处，混进分母会把指标稀释成噪声。',
+      "`kept` 取终态输出里通过校验的引用数；缺失（没走到终态）的 case 不计入分子，但仍在分母里。",
+      "",
+    );
+    lines.push(
+      `| 指标 | 值 | 说明 |`,
+      `| --- | --- | --- |`,
+      `| 引用支撑率 | ${citationRate(metrics.citationSupport)} | ${metrics.citationSupport.supported}/${metrics.citationSupport.declared} 条应有依据的 case 带 ≥1 条存活引用 |`,
+      `| 其中已测量 | ${metrics.citationSupport.measured}/${metrics.citationSupport.declared} | 未测量的 case 留在分母里，不悄悄剔除 |`,
+      unwiredRow,
+      `| 检索无命中（\`retrieval_miss\`） | ${describeCases(metrics.citationSupport.retrievalMiss)} | 检索跑了，语料里没有这个问题的依据 |`,
+      `| 检索不可用 | ${describeCases(metrics.citationSupport.retrievalUnavailable)} | 检索没跑成（outage）。与上一行是两件事，处置也不同 |`,
+      `| 有命中但没引用 | ${describeCases(metrics.citationSupport.citedNothing)} | 给了依据却没引：检索到位了，答案没用 |`,
+      `| 引用被剥离（tier-1） | ${describeCases(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
+      `| 声称有据却无引用（tier-2） | ${describeCases(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
+    );
+    lines.push("");
+  }
 
   lines.push("## 分组（capability / regression）", "");
   lines.push("regression = 声明了安全契约（`mustNotContain` / `shouldBeBlocked`）的 case；capability = 其余。", "");
   lines.push("| 组 | n | bare 通过 | harness 通过 | Δ |", "| --- | --- | --- | --- | --- |");
   for (const group of metrics.groups) {
     lines.push(
-      `| ${group.group} | ${group.n} | ${group.barePassed}/${group.n} | ${group.harnessPassed}/${group.n} | ${points(group.deltaPoints)} |`,
+      `| ${group.group} | ${group.n} | ${armCell(ran.bare, `${group.barePassed}/${group.n}`)} | ${armCell(ran.harness, `${group.harnessPassed}/${group.n}`)} | ${points(group.deltaPoints)} |`,
     );
   }
   lines.push("");
@@ -446,14 +554,21 @@ export function renderReportMarkdown(
   lines.push("| id | category | group | bare | harness | delta |", "| --- | --- | --- | --- | --- | --- |");
   for (const row of rows) {
     lines.push(
-      `| ${row.caseId} | ${row.category} | ${row.group} | ${row.barePassed ? "pass" : "FAIL"} | ${row.harnessPassed ? "pass" : "FAIL"} | ${row.delta} |`,
+      `| ${row.caseId} | ${row.category} | ${row.group} | ${armCell(ran.bare, row.barePassed ? "pass" : "FAIL")} | ${armCell(ran.harness, row.harnessPassed ? "pass" : "FAIL")} | ${row.delta} |`,
     );
   }
   lines.push("");
 
   lines.push("## 复现", "");
   lines.push("```bash");
-  lines.push(`npm run eval:report${env.mode === "live" ? " -- --live" : ""} -- --tag ${env.tag}`);
+  const reproduce = [
+    ...(env.mode === "live" ? ["--live"] : []),
+    ...(env.evidence && env.evidence !== "retrieval" ? ["--evidence", env.evidence] : []),
+    ...(env.arms && env.arms !== "both" ? ["--arms", env.arms] : []),
+    "--tag",
+    env.tag,
+  ];
+  lines.push(`npm run eval:report -- ${reproduce.join(" ")}`);
   lines.push("```");
   lines.push(
     `同一 datasetHash（\`${env.datasetHash}\`）与同一 mode 的两次运行，summary 除 \`at\`/\`reportId\` 外逐字节相等；换数据集必须显式声明不可比。`,
@@ -532,6 +647,8 @@ export function indexEntryFor(summary: ReportSummary): ComparableEntry {
     catalogVersion: summary.env.catalogVersion,
     datasetHash: summary.env.datasetHash,
     model: summary.env.model,
+    evidence: summary.env.evidence,
+    arms: summary.env.arms,
     n: summary.n,
     summary: buildComparableSummary(summary.eval, summary.traces),
   };
@@ -574,6 +691,12 @@ export interface ReportRunResult {
   readonly harnessResults: readonly HarnessResult[];
 }
 
+/** What `--evidence` / `--arms` ask of one run. */
+export interface RunOptions {
+  readonly evidence: EvidenceMode;
+  readonly arms: ReportArms;
+}
+
 export interface ReportDeps {
   readonly now?: () => Date;
   readonly git?: () => { readonly sha: string; readonly dirty: boolean };
@@ -589,7 +712,7 @@ export interface ReportDeps {
    */
   readonly modelIdentity?: (mode: ReportMode) => ReportModelIdentity | undefined;
   /** Runs the evaluation; injected so tests do not need an adapter. */
-  readonly runEval?: (mode: ReportMode) => Promise<ReportRunResult>;
+  readonly runEval?: (mode: ReportMode, options: RunOptions) => Promise<ReportRunResult>;
   /**
    * The corpus a live run reads, injected so a test can assert the citation
    * section without a database. Defaults to the environment's local stack.
@@ -618,6 +741,8 @@ interface ParsedArgs {
   readonly includeOutput: boolean;
   readonly outDir?: string;
   readonly suite: EvalSuite;
+  readonly evidence: EvidenceMode;
+  readonly arms: ReportArms;
 }
 
 class UsageError extends Error {}
@@ -630,6 +755,9 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
   let includeOutput = true;
   let outDir: string | undefined;
   let suite: EvalSuite = "base";
+  let evidence: EvidenceMode = "retrieval";
+  let evidenceGiven = false;
+  let arms: ReportArms = "both";
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -668,6 +796,23 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
         suite = name as EvalSuite;
         break;
       }
+      case "--evidence": {
+        const name = value();
+        if (!(EVIDENCE_MODES as readonly string[]).includes(name)) {
+          throw new UsageError(`--evidence must be one of ${EVIDENCE_MODES.join("|")}`);
+        }
+        evidence = name as EvidenceMode;
+        evidenceGiven = true;
+        break;
+      }
+      case "--arms": {
+        const name = value();
+        if (!(REPORT_ARMS as readonly string[]).includes(name)) {
+          throw new UsageError(`--arms must be one of ${REPORT_ARMS.join("|")}`);
+        }
+        arms = name as ReportArms;
+        break;
+      }
       case "--help":
       case "-h":
         throw new UsageError("requested help");
@@ -676,11 +821,20 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
     }
   }
 
-  return { live, tag, compareTo, traces, includeOutput, outDir, suite };
+  // 报错而不是接受：scripted 臂没有语料，三种模式跑出来逐字节相同，却会被记成
+  // 三个互不可比的报告 —— 一个什么都没切换的开关比没有开关更糟。
+  if (evidenceGiven && !live) {
+    throw new UsageError(
+      "--evidence needs --live: the scripted arm has no corpus, so every evidence mode would run the same thing",
+    );
+  }
+
+  return { live, tag, compareTo, traces, includeOutput, outDir, suite, evidence, arms };
 }
 
 const USAGE = `usage:
   eval:report [--live] [--tag <name>] [--traces] [--compare <reportId>] [--no-output] [--out <dir>] [--suite base|safety|evidence|all]
+            [--evidence none|pinned|retrieval] [--arms both|harness|bare]
 
   --live           real model (needs DEEPSEEK_API_KEY); default is the scripted stub
   --tag            report tag; defaults to the git short sha
@@ -688,7 +842,10 @@ const USAGE = `usage:
   --compare        mark regressions against a reportId in reports/index.json
   --no-output      omit model output from cases.json (it is truncated to ${OUTPUT_LIMIT} chars otherwise)
   --out            output directory (default: reports)
-  --suite          case set (default: base, the original 38)`;
+  --suite          case set (default: base, the original 38)
+  --evidence       live only: what the harness arm may cite — retrieval (default: pinned set + retrieval),
+                   pinned (pinned set only), none (no evidence; fabricated citations are still stripped)
+  --arms           which arms to run (default: both); an ablation only needs harness`;
 
 /** Git probe: the report records the revision it describes, not a guess. */
 function readGit(): { sha: string; dirty: boolean } {
@@ -794,6 +951,12 @@ export async function main(
    * wired" instead of blaming the product for a database it could not read.
    */
   async function liveEvidence(): Promise<HarnessEvidenceDeps> {
+    // `--evidence` narrows what was loaded rather than choosing what to load:
+    // `none` still needs the registry, and one load path is one thing to trust.
+    return selectEvidence(args.evidence, await loadLiveEvidence());
+  }
+
+  async function loadLiveEvidence(): Promise<HarnessEvidenceDeps> {
     if (deps.liveEvidence) return deps.liveEvidence();
     try {
       const { createClient } = await import("@supabase/supabase-js");
@@ -829,7 +992,8 @@ export async function main(
 
   const runEval =
     deps.runEval ??
-    (async (runMode: ReportMode): Promise<ReportRunResult> => {
+    (async (runMode: ReportMode, options: RunOptions): Promise<ReportRunResult> => {
+      const ran = armsRan(options.arms);
       const catalog = createCatalog(SEED_FOODS);
       // The harness arm runs the product's tool set, not an empty one. Until
       // this was wired, live runs gave the model no tool definitions at all, so
@@ -841,15 +1005,17 @@ export async function main(
         const adapter = createStubAdapter(cases);
         return {
           cases,
-          bareResults: await runBareEval(cases, adapter),
-          harnessResults: await runHarnessEval(
-            cases,
-            adapter,
-            createStubTools(),
-            evalInteractionStore(),
-            catalog,
-            toolSchemas,
-          ),
+          bareResults: ran.bare ? await runBareEval(cases, adapter) : [],
+          harnessResults: ran.harness
+            ? await runHarnessEval(
+                cases,
+                adapter,
+                createStubTools(),
+                evalInteractionStore(),
+                catalog,
+                toolSchemas,
+              )
+            : [],
         };
       }
 
@@ -879,22 +1045,24 @@ export async function main(
 
       return {
         cases,
-        bareResults: await runBareEval(cases, adapter),
-        harnessResults: await runHarnessEval(
-          cases,
-          adapter,
-          tools,
-          evalInteractionStore(),
-          catalog,
-          toolSchemas,
-          await liveEvidence(),
-        ),
+        bareResults: ran.bare ? await runBareEval(cases, adapter) : [],
+        harnessResults: ran.harness
+          ? await runHarnessEval(
+              cases,
+              adapter,
+              tools,
+              evalInteractionStore(),
+              catalog,
+              toolSchemas,
+              await liveEvidence(),
+            )
+          : [],
       };
     });
 
   let results: ReportRunResult;
   try {
-    results = await runEval(mode);
+    results = await runEval(mode, { evidence: args.evidence, arms: args.arms });
   } catch (err) {
     stderr(`eval:report: evaluation failed: ${(err as Error).message}\n`);
     return 1;
@@ -970,12 +1138,14 @@ export async function main(
       appVersion: (deps.appVersion ?? readPackageVersion)(),
       catalogVersion: (deps.catalogVersion ?? (() => CATALOG_SNAPSHOT_VERSION))(),
       model: (deps.modelIdentity ?? defaultModelIdentity)(mode),
+      ...(mode === "live" ? { evidence: args.evidence } : {}),
+      arms: args.arms,
     },
     traces,
     telemetry,
   });
 
-  const rows = comparisonRows(results.cases, results.bareResults, results.harnessResults);
+  const rows = comparisonRows(results.cases, results.bareResults, results.harnessResults, args.arms);
 
   const outDir = args.outDir ?? deps.outDir ?? "reports";
   const readFile = deps.readFile ?? ((path: string) => {
@@ -1027,6 +1197,10 @@ export async function main(
           afterDatasetHash: summary.env.datasetHash,
           beforeMode: before.mode,
           afterMode: summary.env.mode,
+          beforeEvidence: evidenceOfEntry(before),
+          afterEvidence: evidenceOfEntry(summary.env),
+          beforeArms: before.arms ?? "both",
+          afterArms: summary.env.arms ?? "both",
         },
       ),
       beforeId: args.compareTo,

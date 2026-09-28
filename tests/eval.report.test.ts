@@ -21,11 +21,15 @@ import {
   parseReportArgs,
   renderReportMarkdown,
   reportIdFor,
+  selectEvidence,
+  comparisonRows,
   serializeIndex,
   truncateOutput,
   type ReportDeps,
   type ReportRunResult,
+  type RunOptions,
 } from "../src/eval/report";
+import type { HarnessEvidenceDeps } from "../src/eval/harness-runner";
 import { compareSummaries } from "../src/eval/compare";
 import type { BareResult, EvalCase, HarnessResult } from "../src/eval/types";
 
@@ -335,6 +339,8 @@ describe("parseReportArgs", () => {
       includeOutput: false,
       outDir: "x",
       suite: "base",
+      evidence: "retrieval",
+      arms: "both",
     });
   });
 
@@ -347,12 +353,31 @@ describe("parseReportArgs", () => {
       includeOutput: true,
       outDir: undefined,
       suite: "base",
+      evidence: "retrieval",
+      arms: "both",
     });
   });
 
   it("takes a case suite and rejects an unknown one", () => {
     expect(parseReportArgs(["--suite", "all"]).suite).toBe("all");
     expect(() => parseReportArgs(["--suite", "nope"])).toThrow(/--suite/);
+  });
+
+  it("takes --evidence and --arms, defaulting to the current behaviour", () => {
+    expect(parseReportArgs(["--live", "--evidence", "none"]).evidence).toBe("none");
+    expect(parseReportArgs(["--evidence", "pinned", "--live"]).evidence).toBe("pinned");
+    expect(parseReportArgs(["--live"]).evidence).toBe("retrieval");
+    expect(parseReportArgs(["--arms", "harness"]).arms).toBe("harness");
+    expect(parseReportArgs(["--arms", "bare"]).arms).toBe("bare");
+    expect(() => parseReportArgs(["--live", "--evidence", "all"])).toThrow(/--evidence must be one of/);
+    expect(() => parseReportArgs(["--arms", "neither"])).toThrow(/--arms must be one of/);
+  });
+
+  it("refuses --evidence on a scripted run: there is no corpus to switch", () => {
+    // Every mode would run the identical stub and still be recorded as three
+    // incomparable reports — so it is an error, not a silently ignored flag.
+    expect(() => parseReportArgs(["--evidence", "none"])).toThrow(/--evidence needs --live/);
+    expect(() => parseReportArgs(["--evidence", "retrieval"])).toThrow(/--evidence needs --live/);
   });
 
   it("rejects an unknown flag and a flag without a value", () => {
@@ -615,5 +640,254 @@ describe("compareSummaries against a written report", () => {
       afterMode: after.mode,
     });
     expect(result.comparable).toBe(false);
+  });
+});
+
+// ─── --evidence / --arms（检索消融）─────────────────────────────────────────
+
+const EVIDENCE_CASE: EvalCase = {
+  id: "v1",
+  query: "Why is vitamin D important for health?",
+  category: "evidence",
+  expected: { shouldCite: true },
+};
+
+/** A harness answer that cited nothing, from a run where retrieval was not wired. */
+function uncited(caseId: string): HarnessResult {
+  return { ...harness(caseId, true), citations: { kept: 0, stripped: false, claimedAuthorityWithoutCitation: false } };
+}
+
+function fullEvidence(): HarnessEvidenceDeps {
+  return {
+    pinnedText: "pinned text",
+    pinnedSet: { sourceVersion: "v", sectionIds: ["a#b"] } as never,
+    citationRegistry: { entries: async () => [] },
+    retrieval: { retriever: {} as never, texts: {} as never, sourceVersion: "v" },
+  };
+}
+
+describe("selectEvidence", () => {
+  it("passes everything through for retrieval (the default, today's behaviour)", () => {
+    const loaded = fullEvidence();
+    expect(selectEvidence("retrieval", loaded)).toBe(loaded);
+  });
+
+  it("keeps the pinned set and drops retrieval for pinned", () => {
+    const loaded = fullEvidence();
+    const selected = selectEvidence("pinned", loaded);
+    expect(selected.retrieval).toBeUndefined();
+    expect(selected.pinnedText).toBe("pinned text");
+    expect(selected.pinnedSet).toBe(loaded.pinnedSet);
+    expect(selected.citationRegistry).toBe(loaded.citationRegistry);
+  });
+
+  it("keeps only the registry for none, so a made-up citation is still stripped", () => {
+    const loaded = fullEvidence();
+    expect(selectEvidence("none", loaded)).toEqual({ citationRegistry: loaded.citationRegistry });
+  });
+
+  it("returns nothing for none or pinned when the corpus could not be loaded at all", () => {
+    expect(selectEvidence("none", {})).toEqual({});
+    expect(selectEvidence("pinned", {})).toEqual({});
+  });
+});
+
+describe("main with --evidence", () => {
+  const casesWithEvidence = [...CASES, EVIDENCE_CASE];
+  const results = (): ReportRunResult => ({
+    cases: casesWithEvidence,
+    bareResults: [bare("s1", true), bare("c1", true), bare("v1", true)],
+    harnessResults: [harness("s1", true), harness("c1", true), uncited("v1")],
+  });
+
+  it("hands the mode to the run and records it in summary.json, the index and report.md", async () => {
+    const fs = memoryFs();
+    const seen: RunOptions[] = [];
+    const code = await main(
+      ["--live", "--evidence", "none"],
+      reportDeps(fs, {
+        loadCases: () => casesWithEvidence,
+        runEval: async (_mode, options) => {
+          seen.push(options);
+          return results();
+        },
+      }),
+    );
+
+    expect(code).toBe(0);
+    expect(seen).toEqual([{ evidence: "none", arms: "both" }]);
+    const summary = JSON.parse(fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/summary.json") ?? "{}") as {
+      env: { evidence?: string; arms?: string };
+    };
+    expect(summary.env.evidence).toBe("none");
+    expect(summary.env.arms).toBe("both");
+    expect(parseIndex(fs.files.get("reports/index.json") ?? "")[0].evidence).toBe("none");
+
+    const markdown = fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("- evidence: **none**");
+    // An ablation arm without retrieval is the experiment, not an outage.
+    expect(markdown).toContain("本次按设计关闭检索（消融臂）");
+    expect(markdown).not.toContain("| 检索未接线");
+    expect(markdown).toContain("npm run eval:report -- --live --evidence none --tag abc1234");
+  });
+
+  it("keeps the not-wired wording for a retrieval run that had no corpus", async () => {
+    const fs = memoryFs();
+    await main(["--live"], reportDeps(fs, { loadCases: () => casesWithEvidence, runEval: async () => results() }));
+    const markdown = fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("- evidence: **retrieval**");
+    expect(markdown).toContain("| 检索未接线 | 1（v1）");
+    expect(markdown).not.toContain("消融臂）");
+  });
+
+  it("leaves the evidence field off a scripted report", async () => {
+    const fs = memoryFs();
+    await main([], reportDeps(fs));
+    const summary = JSON.parse(fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/summary.json") ?? "{}") as {
+      env: { evidence?: string };
+    };
+    expect(summary.env.evidence).toBeUndefined();
+  });
+
+  it("returns a usage error for --evidence without --live and writes nothing", async () => {
+    const fs = memoryFs();
+    const errors: string[] = [];
+    const code = await main(["--evidence", "pinned"], reportDeps(fs, { stderr: (text: string) => errors.push(text) }));
+    expect(code).toBe(1);
+    expect(errors.join(" ")).toContain("--evidence needs --live");
+    expect(fs.files.size).toBe(0);
+  });
+
+  it("refuses to compare an ablation arm with a baseline of another evidence mode", async () => {
+    const fs = memoryFs();
+    await main(["--live"], reportDeps(fs, { now: () => new Date("2026-09-13T12:00:00.000Z") }));
+    const baselineId = parseIndex(fs.files.get("reports/index.json") ?? "")[0].reportId;
+
+    await main(
+      ["--live", "--evidence", "pinned", "--compare", baselineId],
+      reportDeps(fs, { now: () => new Date("2026-09-13T13:00:00.000Z") }),
+    );
+    const markdown = fs.files.get("reports/2026-09-13T13-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("**不可比");
+    expect(markdown).toContain("evidence mode differs (retrieval vs pinned)");
+  });
+
+  it("reads a live index entry written before --evidence as a retrieval run", async () => {
+    const fs = memoryFs();
+    await main(["--live"], reportDeps(fs, { now: () => new Date("2026-09-13T12:00:00.000Z") }));
+    // Strip the fields, as an entry written by the previous version lacks them.
+    const legacy = parseIndex(fs.files.get("reports/index.json") ?? "").map(
+      ({ evidence: _evidence, arms: _arms, ...rest }) => rest,
+    );
+    fs.files.set("reports/index.json", serializeIndex(legacy));
+    const legacyId = legacy[0].reportId;
+
+    await main(
+      ["--live", "--evidence", "none", "--compare", legacyId],
+      reportDeps(fs, { now: () => new Date("2026-09-13T13:00:00.000Z") }),
+    );
+    expect(fs.files.get("reports/2026-09-13T13-00-00Z-abc1234/report.md") ?? "").toContain(
+      "evidence mode differs (retrieval vs none)",
+    );
+
+    await main(
+      ["--live", "--compare", legacyId],
+      reportDeps(fs, { now: () => new Date("2026-09-13T14:00:00.000Z") }),
+    );
+    expect(fs.files.get("reports/2026-09-13T14-00-00Z-abc1234/report.md") ?? "").not.toContain("**不可比");
+  });
+});
+
+describe("main with --arms", () => {
+  /** Honours the arms it is asked for, as the default runner does. */
+  const armsAwareRun = async (_mode: unknown, options: RunOptions): Promise<ReportRunResult> => {
+    const all = fixedResults();
+    return {
+      cases: all.cases,
+      bareResults: options.arms === "harness" ? [] : all.bareResults,
+      harnessResults: options.arms === "bare" ? [] : all.harnessResults,
+    };
+  };
+
+  it("runs only the harness arm and says so instead of reporting bare as failed", async () => {
+    const fs = memoryFs();
+    const seen: RunOptions[] = [];
+    await main(
+      ["--arms", "harness"],
+      reportDeps(fs, {
+        runEval: async (mode, options) => {
+          seen.push(options);
+          return armsAwareRun(mode, options);
+        },
+      }),
+    );
+    expect(seen).toEqual([{ evidence: "retrieval", arms: "harness" }]);
+
+    const summary = JSON.parse(fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/summary.json") ?? "{}") as {
+      env: { arms?: string };
+      eval: { bare: { passRate?: number }; deltaPoints?: number };
+    };
+    expect(summary.env.arms).toBe("harness");
+    expect(summary.eval.bare.passRate).toBeUndefined();
+    expect(summary.eval.deltaPoints).toBeUndefined();
+
+    const markdown = fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("- arms: **harness** only");
+    expect(markdown).toContain("| 通过率 | 未运行 | 2/2 (100.0%) |");
+    expect(markdown).toContain("| s1 | simple | capability | 未运行 | pass | harness only (bare not run) |");
+    expect(markdown).not.toContain("+harness");
+    expect(markdown).toContain("--arms harness");
+  });
+
+  it("does not print a citation rate for a run without the harness arm", async () => {
+    const fs = memoryFs();
+    await main(["--arms", "bare"], reportDeps(fs, { runEval: armsAwareRun }));
+    const markdown = fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/report.md") ?? "";
+    expect(markdown).toContain("harness 臂按 `--arms bare` 未运行");
+    expect(markdown).not.toContain("| 引用支撑率 |");
+    expect(markdown).toContain("| s1 | simple | capability | pass | 未运行 | bare only (harness not run) |");
+  });
+
+  it("uses the default runner: the scripted harness-only run executes no bare case", async () => {
+    const fs = memoryFs();
+    await main(["--arms", "harness"], reportDeps(fs, { runEval: undefined }));
+    const cases = JSON.parse(fs.files.get("reports/2026-09-13T12-00-00Z-abc1234/cases.json") ?? "{}") as {
+      cases: { bare: unknown; harness: unknown }[];
+    };
+    expect(cases.cases.length).toBe(CASES.length);
+    expect(cases.cases.every((c) => c.bare === null && c.harness !== null)).toBe(true);
+  });
+
+  it("compares a harness-only run with a two-arm baseline, but not a bare-only one", async () => {
+    const fs = memoryFs();
+    await main([], reportDeps(fs, { now: () => new Date("2026-09-13T12:00:00.000Z"), runEval: armsAwareRun }));
+    const baselineId = parseIndex(fs.files.get("reports/index.json") ?? "")[0].reportId;
+
+    await main(
+      ["--arms", "harness", "--compare", baselineId],
+      reportDeps(fs, { now: () => new Date("2026-09-13T13:00:00.000Z"), runEval: armsAwareRun }),
+    );
+    const harnessOnly = fs.files.get("reports/2026-09-13T13-00-00Z-abc1234/report.md") ?? "";
+    expect(harnessOnly).not.toContain("**不可比");
+    // The bare row has nothing on one side, and says so instead of regressing.
+    expect(harnessOnly).toContain("| bare 通过率 | 50.0% | n/a | n/a | no data on one side");
+
+    await main(
+      ["--arms", "bare", "--compare", baselineId],
+      reportDeps(fs, { now: () => new Date("2026-09-13T14:00:00.000Z"), runEval: armsAwareRun }),
+    );
+    const bareOnly = fs.files.get("reports/2026-09-13T14-00-00Z-abc1234/report.md") ?? "";
+    expect(bareOnly).toContain("arms differ (both vs bare)");
+    expect(bareOnly).not.toContain("倒退项");
+  });
+});
+
+describe("comparisonRows with one arm", () => {
+  it("does not invent a delta against an arm that did not run", () => {
+    const rows = comparisonRows(CASES, [], [harness("s1", true), harness("c1", false)], "harness");
+    expect(rows.map((row) => row.delta)).toEqual([
+      "harness only (bare not run)",
+      "harness only (bare not run)",
+    ]);
   });
 });
