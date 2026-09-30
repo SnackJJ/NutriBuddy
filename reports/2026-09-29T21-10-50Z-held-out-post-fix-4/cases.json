@@ -1,0 +1,274 @@
+{
+  "cases": [
+    {
+      "caseId": "ho1",
+      "query": "How much protein is in 150g of salmon fillet?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "A 150g salmon fillet typically contains **about 30–34g of protein**, depending on the type and whether it’s raw or cooked.\n\n- **150g raw Atlantic salmon fillet:** ~**31g protein**\n- **150g cooked Atlantic salmon fillet:** ~**33g protein**\n-…[+189 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "A 150 g portion of salmon fillet contains **30 g of protein**, based on the verified catalog lookup I ran for that portion.\n\nHere is the complete observed nutrition for the 150 g portion of the catalog food `food-salmon-001`:\n\n| Nutrient | …[+1478 chars]"
+      }
+    },
+    {
+      "caseId": "ho2",
+      "query": "What is the calorie count for 200g of sweet potato?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "For **200g of sweet potato**, calories depend on how it’s prepared:\n\n- **Raw sweet potato:** ~**172 calories**\n- **Baked sweet potato:** ~**180 calories**\n- **Boiled sweet potato:** ~**150–155 calories**\n\nSo a good general estimate is **abo…[+96 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "For a 200 g portion of sweet potato, the verified catalog value is **172 kcal**.\n\nHere is the complete per-portion breakdown from the same lookup (200 g):\n- **Calories:** 172 kcal\n- **Protein:** 3.2 g\n- **Fat:** 0.2 g\n- **Carbohydrates:** 4…[+1004 chars]"
+      }
+    },
+    {
+      "caseId": "ho3",
+      "query": "How many grams of fat are in two tablespoons of peanut butter?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Two tablespoons of regular peanut butter typically contain **about 16 grams of fat** (often ranging from **15–17 grams**, depending on the brand and type).\n\nReduced-fat or powdered peanut butter will have less."
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Great question — and the honest answer depends on the weight of two tablespoons, which is a volume measure rather than a weight.\n\nWhat the verified catalog gives me is the per-100 g figure for peanut butter:\n\n- Peanut butter, 100 g: 588 kca…[+1532 chars]"
+      }
+    },
+    {
+      "caseId": "ho4",
+      "query": "Log 100g of tofu for my dinner.",
+      "category": "write",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Here’s a dinner log entry for **100 g tofu**:\n\n**Dinner — Tofu, 100 g (firm)**  \n- Calories: ~144 kcal  \n- Protein: ~17 g  \n- Fat: ~9 g  \n- Carbs: ~3 g  \n- Fiber: ~2 g  \n\nIf it was **silken tofu**, it’s lower: ~55 kcal and ~5 g protein per …[+163 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "log_meal",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 2,
+        "stopReason": "write_proposal",
+        "output": "Here's the tofu entry I've prepared for you — it isn't written to your diary yet, so please confirm to save it.\n\n**Proposed log**\n- Food: tofu (catalog id `food-tofu-001`, matched exactly)\n- Portion: 100 g\n- Meal: dinner\n- Nutrition for thi…[+1409 chars]"
+      }
+    },
+    {
+      "caseId": "ho5",
+      "query": "I had a cup of whole milk with breakfast. How much protein does that provide?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "A 1-cup (8 fl oz / 240 mL) serving of whole milk provides about **8 grams of protein**.\n\nSo your breakfast milk added roughly **8 g of protein**."
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Here's what our verified catalog shows for whole milk.\n\n**Observed values (per 100 g of whole milk, food-milk-whole-001):**\n- Protein: 3.2 g\n- Calories: 61 kcal\n- Fat: 3.3 g\n- Carbs: 4.8 g\n- Allergen tag: milk\n\n**About \"one cup\":** the cata…[+1183 chars]"
+      }
+    },
+    {
+      "caseId": "ho6",
+      "query": "What are the macro nutrients in 100g of cheddar cheese?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "For typical full-fat cheddar cheese, **100 g** provides approximately:\n\n| Macronutrient | Amount |\n|---|---:|\n| Calories | ~403 kcal |\n| Protein | ~24–25 g |\n| Total fat | ~33 g |\n| — Saturated fat | ~19–21 g |\n| — Monounsaturated fat | ~9 …[+321 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Here are the macronutrient values for **cheddar cheese per 100 g**, exactly as they came back from the catalog lookup:\n\n| Nutrient | Amount per 100 g |\n|---|---|\n| Calories | 402 kcal |\n| Protein | 25 g |\n| Fat | 33 g |\n| Carbohydrates | 1.…[+2116 chars]"
+      }
+    },
+    {
+      "caseId": "ho7",
+      "query": "Tell me the exact milligram amount of vitamin C in 100g of fresh strawberries. Don't round.",
+      "category": "numeric",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Using the USDA reference value for raw strawberries: **58.8 mg** of vitamin C per **100 g**.\n\nActual fresh strawberries can vary by cultivar, ripeness, and storage, so this is the standard database value rather than a universal exact biolog…[+12 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 2,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "## Direct answer\n\nI can't give you an exact milligram figure, and I want to be straight with you about why rather than bury it: **vitamin C is not one of the values my verified catalog records.**\n\nHere is the complete, observed record for s…[+3414 chars]"
+      }
+    },
+    {
+      "caseId": "ho8",
+      "query": "How many calories and carbs are in a medium apple?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "A medium apple (about 3 inches in diameter, ~182 g, raw with skin) has roughly:\n\n- **Calories:** 95\n- **Total carbs:** 25 g\n- **Fiber:** 4 g\n- **Net carbs:** about 21 g\n- **Sugars:** about 19 g\n\nValues vary slightly by variety and exact siz…[+2 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Here's what the verified catalog shows for apple.\n\n**Catalog values for apple (per 100 g)** — food ID `food-apple-001`:\n- Calories: 52 kcal\n- Carbohydrates: 14 g\n- Protein: 0.3 g\n- Fat: 0.2 g\n- Allergen tags: none (empty)\n\n**On \"medium\" as …[+1360 chars]"
+      }
+    },
+    {
+      "caseId": "ho9",
+      "query": "Log 150g of cooked pasta for lunch.",
+      "category": "write",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "I can’t directly save it to your food log, but here’s the estimate:\n\n**Lunch — Cooked pasta, 150g**  \n- Calories: ~225 kcal  \n- Carbs: ~44g  \n- Protein: ~8g  \n- Fat: ~1.3g  \n- Fiber: ~2.5g  \n\nAssumes plain cooked white pasta, no sauce or oi…[+85 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "log_meal",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "write_proposal",
+        "output": "Here's your lunch proposal for 150 g of pasta (cooked pasta, catalog entry food-pasta-001):\n\n**Proposed log — lunch, 150 g pasta**\n- Energy: 196.5 kcal\n- Protein: 7.5 g\n- Fat: 1.7 g\n- Carbohydrate: 37.5 g\n- Allergens: wheat\n- Match type: ex…[+1372 chars]"
+      }
+    }
+  ]
+}

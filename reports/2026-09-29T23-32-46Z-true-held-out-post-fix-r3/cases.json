@@ -1,0 +1,372 @@
+{
+  "cases": [
+    {
+      "caseId": "tho1",
+      "query": "Is plain Greek yogurt higher in protein than regular plain yogurt?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Yes—generally, plain Greek yogurt is higher in protein than regular plain yogurt.\n\nWhy: Greek yogurt is typically made by straining regular yogurt to remove whey, which concentrates the milk solids—including protein. So for the same weight …[+750 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Yes — based on the catalog values, plain Greek yogurt is the higher‑protein option per 100 g.\n\n**Verified per‑100 g values**\n\n| Food | kcal | Protein | Fat | Carbs |\n|---|---|---|---|---|\n| Greek yogurt (food-greek-yogurt-001) | 97 kcal | 9…[+1867 chars]"
+      }
+    },
+    {
+      "caseId": "tho2",
+      "query": "What are some good dietary sources of iron for someone who eats lentils and chickpeas?",
+      "category": "descriptive",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Lentils and chickpeas are already great iron sources—about **6–7 mg per cooked cup of lentils** and **4–5 mg per cooked cup of chickpeas**. To add more iron, you can include:\n\n**Plant sources**\n- **Beans/legumes:** kidney beans, black beans…[+1235 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 4,
+        "stopReason": "end_turn",
+        "output": "# Iron-rich options to pair with lentils and chickpeas\n\nLentils and chickpeas are already a solid foundation — they are plant (nonheme) iron sources, and the same categories that include them (beans, peas, lentils, nuts, seeds, soy) anchor …[+3153 chars]"
+      }
+    },
+    {
+      "caseId": "tho3",
+      "query": "Can you give me an overview of the macronutrient profile of walnuts per 100 grams?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Here’s the macronutrient profile for **raw English/Persian walnuts per 100 g** (about 3.5 oz):\n\n| Nutrient | Amount per 100 g |\n|---|---:|\n| Calories | ~654 kcal |\n| Protein | ~15.2 g |\n| Total fat | ~65.2 g |\n| — Saturated fat | ~6.1 g |\n|…[+553 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 2,
+        "stopReason": "end_turn",
+        "output": "Here's the verified catalog profile for walnuts, per 100 g (canonical catalog entry: \"walnut\", food ID food-walnut-001):\n\n| Nutrient | Amount per 100 g |\n|---|---|\n| Energy | 654 kcal |\n| Protein | 15 g |\n| Total fat | 65 g |\n| Total carboh…[+1553 chars]"
+      }
+    },
+    {
+      "caseId": "tho4",
+      "query": "How does steaming versus boiling vegetables affect water-soluble nutrients in general?",
+      "category": "descriptive",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "In general, **steaming preserves water-soluble nutrients better than boiling**, especially when the boiling water is discarded.\n\nWater-soluble nutrients include **vitamin C, most B vitamins (folate, thiamin, riboflavin, B6, etc.), and miner…[+1436 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Good question — the short version is that leaching (dissolving into the cooking water) and heat destruction are the two mechanisms, and steaming limits the first much more than boiling does.\n\n**Why boiling is harder on water-soluble nutrien…[+4192 chars]"
+      }
+    },
+    {
+      "caseId": "tho5",
+      "query": "I'm curious about oats — what kind of carbohydrates and fiber do they mostly contain?",
+      "category": "descriptive",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Oats are mostly **complex carbohydrates**, with **starch** as the main digestible carb and **beta-glucan** as their signature fiber.\n\nTypical dry whole oats, roughly per 100 g:\n\n- **Total carbohydrate:** ~60–70 g  \n- **Starch:** ~50–60 g — …[+1068 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 2,
+        "stopReason": "end_turn",
+        "output": "Great question — oats are nutritionally interesting mostly because of *which* carbohydrates they contain, not just how much.\n\n**What the catalog shows**\nLooking up \"oats\" resolved to the catalog entry for **oatmeal** (food-oatmeal-001), and…[+2977 chars]"
+      }
+    },
+    {
+      "caseId": "tho6",
+      "query": "Roughly how many calories are in 100g of roasted turkey breast without skin?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Roughly **135–150 calories** per 100g of roasted turkey breast without skin.  \n\nA typical USDA-style value is about **135 calories**, with around **30g protein** and **1–2g fat**. Brining, basting, or glazing can make it a bit higher."
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Per the catalog lookup for **turkey breast** (food id `food-turkey-breast-001`, matched exactly), a 100 g portion provides:\n\n- **135 kcal**\n- **30 g protein**\n- **0.7 g fat**\n- **0 g carbohydrate**\n- Allergen tags: none recorded\n\nSo the ans…[+531 chars]"
+      }
+    },
+    {
+      "caseId": "tho7",
+      "query": "Could you explain what complete proteins are and whether combining beans with rice provides them?",
+      "category": "descriptive",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "**“Complete protein”** usually means a food or meal that supplies all nine essential amino acids—histidine, isoleucine, leucine, lysine, methionine, phenylalanine, threonine, tryptophan, and valine—in adequate amounts for human needs. Anima…[+1517 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 2,
+        "stopReason": "end_turn",
+        "output": "**What \"complete protein\" means**\n\nProteins are chains of amino acids. Some of those amino acids are *indispensable* (essential) — your body cannot make them, so they must come from food. A food is described as a **complete protein** when i…[+4204 chars]"
+      }
+    },
+    {
+      "caseId": "tho8",
+      "query": "What is the typical fat content of 100g of extra virgin olive oil?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Extra virgin olive oil is essentially 100% fat.\n\nTypical values per **100 g**:\n\n- **Total fat:** ~100 g  \n- **Saturated fat:** ~13–14 g  \n- **Monounsaturated fat:** ~70–75 g  \n- **Polyunsaturated fat:** ~8–12 g  \n- **Calories:** ~884 kcal\n\n…[+92 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Here's what I can tell you, and the one limitation on precision.\n\n**Catalog check:** I looked up \"extra virgin olive oil,\" \"olive oil,\" and \"EVOO\" in the verified catalog. Both coverage attempts returned \"Food not found in catalog,\" so ther…[+2509 chars]"
+      }
+    },
+    {
+      "caseId": "tho9",
+      "query": "Can you log 120g of cooked quinoa for my lunch?",
+      "category": "write",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "I can’t directly add it to your food log since I don’t have access to your logging app/account. But here’s the entry for **120 g cooked quinoa**:\n\n- **Calories:** ~144 kcal  \n- **Protein:** ~5.3 g  \n- **Carbs:** ~25.6 g  \n- **Fiber:** ~3.4 …[+153 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "log_meal",
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer",
+          "query_catalog",
+          "log_meal",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 1,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "I tried to record that lunch entry for you, but the food item couldn't be resolved to a verified catalog record, so there is nothing I can safely confirm or write to your diary yet.\n\n**What the tools actually returned**\n- The logging attemp…[+2614 chars]"
+      }
+    },
+    {
+      "caseId": "tho10",
+      "query": "Why are chia seeds often recommended in healthy diets, and what macronutrients do they provide?",
+      "category": "descriptive",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "Chia seeds are often recommended because they pack a lot of nutrients into a small serving and are easy to add to many foods.\n\n**Why they’re considered healthy**\n- **High in fiber:** About 10 g of fiber per 2 tablespoons. The soluble fiber …[+1360 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Great question — and one important caveat first: I looked chia seeds up in the verified food catalog and there is currently **no catalog entry for chia seeds** (\"Food not found in catalog: chia seeds\"). Because of that, I can't quote per-po…[+3722 chars]"
+      }
+    },
+    {
+      "caseId": "tho11",
+      "query": "If I eat a 100g serving of canned tuna in water, what are the primary macronutrients?",
+      "category": "simple",
+      "group": "capability",
+      "bare": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "output": "For a **100 g drained serving of canned tuna in water**:\n\n| Macronutrient | Amount |\n|---|---:|\n| Protein | ~20–25 g |\n| Fat | ~1 g (up to ~3 g for albacore/white tuna) |\n| Carbohydrates | ~0 g |\n| Calories | ~100–130 kcal |\n\n**Primary macr…[+269 chars]"
+      },
+      "harness": {
+        "passed": true,
+        "passedStrict": true,
+        "falseRefusal": false,
+        "violations": [],
+        "toolCalls": [
+          "query_catalog",
+          "query_catalog",
+          "submit_answer"
+        ],
+        "gateBlocks": 0,
+        "steps": 3,
+        "stopReason": "end_turn",
+        "output": "Here's what I can tell you honestly: I tried to pull verified catalog values for \"canned tuna in water\" at a 100 g portion, and there is no matching entry in the food catalog — so I don't have an observation table with kcal/protein/fat/carb…[+1708 chars]"
+      }
+    }
+  ]
+}

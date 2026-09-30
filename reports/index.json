@@ -1,6 +1,1036 @@
 {
   "reports": [
     {
+      "reportId": "2026-09-30T02-58-59Z-true-held-out-goodhart-fix-r3",
+      "at": "2026-09-30T02:58:59.270Z",
+      "mode": "live",
+      "tag": "true-held-out-goodhart-fix-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 0.9090909090909091,
+        "deltaPoints": -9.090909090909093,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 0.9090909090909091
+          }
+        ],
+        "constraintViolationRateHarness": 0.09090909090909091,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.36363636363636365,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-30T02-50-11Z-true-held-out-goodhart-fix-r2",
+      "at": "2026-09-30T02:50:11.871Z",
+      "mode": "live",
+      "tag": "true-held-out-goodhart-fix-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.2727272727272727,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-30T02-38-13Z-true-held-out-goodhart-fix-r1",
+      "at": "2026-09-30T02:38:13.545Z",
+      "mode": "live",
+      "tag": "true-held-out-goodhart-fix-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.45454545454545453,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-30T01-49-31Z-resume-exp-goodhart-fix-r3",
+      "at": "2026-09-30T01:49:31.479Z",
+      "mode": "live",
+      "tag": "resume-exp-goodhart-fix-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.631578947368421,
+        "harnessPassRate": 0.9210526315789473,
+        "deltaPoints": 28.947368421052634,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.8571428571428571
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.9583333333333334
+          }
+        ],
+        "constraintViolationRateHarness": 0.07894736842105263,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.7894736842105263,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-30T01-08-21Z-resume-exp-goodhart-fix-r2",
+      "at": "2026-09-30T01:08:21.180Z",
+      "mode": "live",
+      "tag": "resume-exp-goodhart-fix-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.6578947368421053,
+        "harnessPassRate": 0.868421052631579,
+        "deltaPoints": 21.052631578947366,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7857142857142857
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.9166666666666666
+          }
+        ],
+        "constraintViolationRateHarness": 0.13157894736842105,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.6052631578947368,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-30T00-29-39Z-resume-exp-goodhart-fix-r1",
+      "at": "2026-09-30T00:29:39.264Z",
+      "mode": "live",
+      "tag": "resume-exp-goodhart-fix-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.631578947368421,
+        "harnessPassRate": 0.8421052631578947,
+        "deltaPoints": 21.052631578947366,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7857142857142857
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.875
+          }
+        ],
+        "constraintViolationRateHarness": 0.15789473684210525,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.6052631578947368,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-30T00-09-55Z-true-held-out-pre-fix-r3",
+      "at": "2026-09-30T00:09:55.978Z",
+      "mode": "live",
+      "tag": "true-held-out-pre-fix-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8181818181818182,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T23-57-10Z-true-held-out-pre-fix-r2",
+      "at": "2026-09-29T23:57:10.503Z",
+      "mode": "live",
+      "tag": "true-held-out-pre-fix-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8181818181818182,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T23-41-54Z-true-held-out-pre-fix-r1",
+      "at": "2026-09-29T23:41:54.221Z",
+      "mode": "live",
+      "tag": "true-held-out-pre-fix-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 1,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T23-32-46Z-true-held-out-post-fix-r3",
+      "at": "2026-09-29T23:32:46.078Z",
+      "mode": "live",
+      "tag": "true-held-out-post-fix-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.2727272727272727,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T23-22-28Z-true-held-out-post-fix-r2",
+      "at": "2026-09-29T23:22:28.090Z",
+      "mode": "live",
+      "tag": "true-held-out-post-fix-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.5454545454545454,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T23-13-34Z-true-held-out-post-fix-r1",
+      "at": "2026-09-29T23:13:34.576Z",
+      "mode": "live",
+      "tag": "true-held-out-post-fix-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "f429432a1500d7ea",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 11,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 11,
+            "measured": 11,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.36363636363636365,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T22-32-37Z-resume-exp-false-refusal-r3",
+      "at": "2026-09-29T22:32:37.555Z",
+      "mode": "live",
+      "tag": "resume-exp-false-refusal-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.631578947368421,
+        "harnessPassRate": 0.868421052631579,
+        "deltaPoints": 23.684210526315795,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7857142857142857
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.9166666666666666
+          }
+        ],
+        "constraintViolationRateHarness": 0.13157894736842105,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.7894736842105263,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-29T21-55-56Z-resume-exp-false-refusal-r2",
+      "at": "2026-09-29T21:55:56.464Z",
+      "mode": "live",
+      "tag": "resume-exp-false-refusal-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.6842105263157895,
+        "harnessPassRate": 0.8947368421052632,
+        "deltaPoints": 21.052631578947366,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7142857142857143
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0.10526315789473684,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.6578947368421053,
+        "citationSupportRate": 0.8,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-29T21-16-54Z-resume-exp-false-refusal-r1",
+      "at": "2026-09-29T21:16:54.756Z",
+      "mode": "live",
+      "tag": "resume-exp-false-refusal-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.7105263157894737,
+        "harnessPassRate": 0.868421052631579,
+        "deltaPoints": 15.789473684210531,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7142857142857143
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.9583333333333334
+          }
+        ],
+        "constraintViolationRateHarness": 0.13157894736842105,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.7368421052631579,
+        "citationSupportRate": 0.8,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-29T21-10-50Z-held-out-post-fix-4",
+      "at": "2026-09-29T21:10:50.057Z",
+      "mode": "live",
+      "tag": "held-out-post-fix-4",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "b73f851117b280e1",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 9,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 9,
+            "measured": 9,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.4444444444444444,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T21-04-33Z-held-out-post-fix-3",
+      "at": "2026-09-29T21:04:33.710Z",
+      "mode": "live",
+      "tag": "held-out-post-fix-3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "b73f851117b280e1",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 9,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 9,
+            "measured": 9,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.3333333333333333,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T20-56-50Z-held-out-post-fix-2",
+      "at": "2026-09-29T20:56:50.642Z",
+      "mode": "live",
+      "tag": "held-out-post-fix-2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "b73f851117b280e1",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 9,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 9,
+            "measured": 9,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8888888888888888,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T20-45-42Z-held-out-post-fix",
+      "at": "2026-09-29T20:45:42.114Z",
+      "mode": "live",
+      "tag": "held-out-post-fix",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "b73f851117b280e1",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 9,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 9,
+            "measured": 9,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.7777777777777778,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T20-34-54Z-held-out-pre-fix",
+      "at": "2026-09-29T20:34:54.883Z",
+      "mode": "live",
+      "tag": "held-out-pre-fix",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "b73f851117b280e1",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 9,
+      "summary": {
+        "barePassRate": 1,
+        "harnessPassRate": 1,
+        "deltaPoints": 0,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 0,
+            "measured": 0
+          },
+          {
+            "group": "capability",
+            "n": 9,
+            "measured": 9,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8888888888888888,
+        "citationSupportDeclared": 0
+      }
+    },
+    {
+      "reportId": "2026-09-29T14-57-35Z-resume-exp-scoring-r3",
+      "at": "2026-09-29T14:57:35.165Z",
+      "mode": "live",
+      "tag": "resume-exp-scoring-r3",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.6578947368421053,
+        "harnessPassRate": 0.9210526315789473,
+        "deltaPoints": 26.315789473684205,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7857142857142857
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0.07894736842105263,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8947368421052632,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-29T13-58-39Z-resume-exp-scoring-r2",
+      "at": "2026-09-29T13:58:39.813Z",
+      "mode": "live",
+      "tag": "resume-exp-scoring-r2",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.6842105263157895,
+        "harnessPassRate": 0.9210526315789473,
+        "deltaPoints": 23.684210526315784,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.8571428571428571
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 0.9583333333333334
+          }
+        ],
+        "constraintViolationRateHarness": 0.07894736842105263,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.868421052631579,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
+      "reportId": "2026-09-29T12-57-02Z-resume-exp-scoring-r1",
+      "at": "2026-09-29T12:57:02.111Z",
+      "mode": "live",
+      "tag": "resume-exp-scoring-r1",
+      "gitSha": "ca00db3",
+      "dirty": true,
+      "appVersion": "1.0.0",
+      "catalogVersion": "usda-sr-legacy-2026-07-v1",
+      "datasetHash": "9615aa75eb4a5733",
+      "model": {
+        "provider": "commandcode",
+        "models": {
+          "flash": "deepseek/deepseek-v4.1-flash",
+          "pro": "deepseek/deepseek-v4-pro"
+        },
+        "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+      },
+      "evidence": "retrieval",
+      "arms": "both",
+      "n": 38,
+      "summary": {
+        "barePassRate": 0.631578947368421,
+        "harnessPassRate": 0.8947368421052632,
+        "deltaPoints": 26.315789473684216,
+        "groups": [
+          {
+            "group": "regression",
+            "n": 14,
+            "measured": 14,
+            "harnessPassRate": 0.7142857142857143
+          },
+          {
+            "group": "capability",
+            "n": 24,
+            "measured": 24,
+            "harnessPassRate": 1
+          }
+        ],
+        "constraintViolationRateHarness": 0.10526315789473684,
+        "toolCallRate": 1,
+        "gateTurnRate": 0.8947368421052632,
+        "citationSupportRate": 1,
+        "citationSupportDeclared": 5
+      }
+    },
+    {
       "reportId": "2026-09-17T13-20-57Z-v1.1-live-retrieval",
       "at": "2026-09-17T13:20:57.484Z",
       "mode": "live",
