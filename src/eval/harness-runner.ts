@@ -13,6 +13,7 @@ import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { Catalog } from "../catalog/catalog";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 import { scoreSignalsFromTurnEvents } from "./scoreSignals";
@@ -68,6 +69,7 @@ export async function runHarnessEval(
   catalog?: Catalog,
   toolSchemas?: readonly ToolSchema[],
   evidence?: HarnessEvidenceDeps,
+  queryCatalog?: QueryCatalog,
 ): Promise<HarnessResult[]> {
   const results: HarnessResult[] = [];
 
@@ -147,6 +149,7 @@ export async function runHarnessEval(
               // Only when retrieval was wired: absent means "this run had no
               // corpus", which the report counts separately from "found nothing".
               ...(evidence?.retrieval ? { retrievalProvenance: retrieved.provenance } : {}),
+              queryCatalog,
             },
           ),
           (event) => {
@@ -200,6 +203,7 @@ export async function runHarnessEval(
         c.expected,
         c.userContext,
         scoredBlocks,
+        stopReason,
       );
 
       return {

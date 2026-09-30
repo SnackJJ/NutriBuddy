@@ -2,6 +2,7 @@
 // Template SQL/ground truth stays in catalog/queryCatalog; this is the data port.
 
 import type { Catalog } from "./catalog";
+import { resolveFood } from "./resolver";
 import type {
   ColumnDef,
   MealRecord,
@@ -184,15 +185,34 @@ function runFoodLookup(
   catalog: Catalog,
   params: Record<string, unknown>,
 ): Observation {
-  const foodId = String(params.food_id);
+  const rawId = String(params.food_id);
   const portionG =
     typeof params.portion_g === "number" && params.portion_g > 0
       ? params.portion_g
       : DEFAULT_PORTION_G;
 
-  const food = catalog.allFoods.find((f) => f.id === foodId);
+  let food = catalog.allFoods.find((f) => f.id === rawId);
   if (!food) {
-    throw new FoodNotFoundError(foodId);
+    let resolved = resolveFood(catalog, rawId);
+    if (!resolved.foodRef) {
+      const cleaned = rawId
+        .replace(
+          /^\s*\d+(?:\.\d+)?\s*(?:g|grams?|oz|ounces?|cups?|pieces?|tbsp|tsp)?\s*(?:of\s+)?/i,
+          "",
+        )
+        .replace(/[.,;?!]+$/, "")
+        .trim();
+      if (cleaned.length > 0 && cleaned !== rawId) {
+        resolved = resolveFood(catalog, cleaned);
+      }
+    }
+    if (resolved.foodRef) {
+      food = catalog.allFoods.find((f) => f.id === resolved.foodRef.foodId);
+    }
+  }
+
+  if (!food) {
+    throw new FoodNotFoundError(rawId);
   }
 
   const scale = portionG / 100;

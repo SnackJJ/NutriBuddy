@@ -218,6 +218,29 @@ describe("createQueryCatalogHandler — food_lookup", () => {
     expect(row.food_name).toBe("chicken breast");
   });
 
+  it("resolves food by canonical name fallback", async () => {
+    const handler = makeHandler();
+    const result = await handler({
+      template_id: FOOD_LOOKUP_ID,
+      food_id: "chicken breast",
+    });
+
+    const row = firstRow(expectObservationResult(result));
+    expect(row.food_id).toBe("food-chicken-breast-001");
+    expect(row.kcal).toBe(165);
+  });
+
+  it("resolves food by alias fallback", async () => {
+    const handler = makeHandler();
+    const result = await handler({
+      template_id: FOOD_LOOKUP_ID,
+      food_id: "large egg",
+    });
+
+    const row = firstRow(expectObservationResult(result));
+    expect(row.food_id).toBe("food-egg-001");
+  });
+
   it("scales nutrition by portion_g", async () => {
     const handler = makeHandler();
     const result = await handler({
