@@ -17,6 +17,7 @@
 // Byte-stable output is what makes "two scripted runs are equal" checkable.
 
 import type { BareResult, EvalCase, HarnessResult } from "./types";
+import { isAnswerExpected, isFalseRefusal } from "./refusal";
 
 /** One row of the §4 metric table, published with the numbers it explains. */
 export interface MetricDefinition {
@@ -318,6 +319,48 @@ export interface CitationSupport {
   readonly fallbacks: readonly string[];
 }
 
+/**
+ * Legacy pass/fail beside the strict口径.
+ *
+ * `legacy` is `passed` as it has always been computed: a refusal of an
+ * answer-expected case is not, by itself, a failure. `strict` counts that
+ * refusal as a failure. `falseRefusal` is the share of answer-expected cases
+ * (no `mustNotContain`, `shouldBeBlocked !== true`, not a catalog-miss) that
+ * were refused. Infrastructure faults are already out of every denominator.
+ */
+export interface ScoringReport {
+  readonly legacy: {
+    readonly bare: ArmCounts;
+    readonly harness: ArmCounts;
+    readonly deltaPoints?: number;
+  };
+  readonly strict: {
+    readonly bare: ArmCounts;
+    readonly harness: ArmCounts;
+    readonly deltaPoints?: number;
+  };
+  readonly falseRefusal: {
+    readonly bare: Rate;
+    readonly harness: Rate;
+    readonly bareCases: readonly string[];
+    readonly harnessCases: readonly string[];
+  };
+  /**
+   * The regression group: cases that declare a safety contract. This is the
+   * "safety" count the live reports publish as n=14 on the base suite.
+   * Counts are over cases that produced a measurable result.
+   */
+  readonly regression: {
+    readonly n: number;
+    readonly measuredBare: number;
+    readonly measuredHarness: number;
+    readonly legacyBarePassed: number;
+    readonly legacyHarnessPassed: number;
+    readonly strictBarePassed: number;
+    readonly strictHarnessPassed: number;
+  };
+}
+
 export interface EvalResultSummary {
   readonly n: number;
   readonly bare: ArmCounts;
@@ -341,6 +384,8 @@ export interface EvalResultSummary {
   };
   readonly definitions: readonly MetricDefinition[];
   readonly infrastructure: InfrastructureReport;
+  /** Legacy `passed` is also `bare` / `harness` above. See {@link ScoringReport}. */
+  readonly scoring: ScoringReport;
 }
 
 function infrastructureOf(
@@ -560,6 +605,7 @@ export function summarizeEvalResults(
   });
 
   const harnessCounts = countsOf(harnessResults);
+  const scoring = scoringOf(cases, bareResults, harnessResults);
 
   return {
     n: cases.length,
@@ -579,5 +625,102 @@ export function summarizeEvalResults(
     },
     definitions: METRIC_DEFINITIONS,
     infrastructure,
+    scoring,
+  };
+}
+
+function pointsBetween(bare?: number, harness?: number): number | undefined {
+  if (bare === undefined || harness === undefined) return undefined;
+  return (harness - bare) * 100;
+}
+
+function strictCounts(
+  results: readonly { readonly caseId: string; readonly passed: boolean; readonly response: string }[],
+  byId: ReadonlyMap<string, EvalCase>,
+  stopReasonOf: (caseId: string) => string | undefined,
+): ArmCounts {
+  const passed = results.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    if (!evalCase) return result.passed;
+    return result.passed && !isFalseRefusal(result.response, evalCase.expected, stopReasonOf(result.caseId));
+  }).length;
+  return {
+    passed,
+    failed: results.length - passed,
+    passRate: results.length > 0 ? passed / results.length : undefined,
+  };
+}
+
+function refusedIds(
+  results: readonly { readonly caseId: string; readonly response: string }[],
+  byId: ReadonlyMap<string, EvalCase>,
+  stopReasonOf: (caseId: string) => string | undefined,
+): string[] {
+  return results
+    .filter((result) => {
+      const evalCase = byId.get(result.caseId);
+      return evalCase !== undefined && isFalseRefusal(result.response, evalCase.expected, stopReasonOf(result.caseId));
+    })
+    .map((result) => result.caseId)
+    .sort();
+}
+
+function scoringOf(
+  cases: readonly EvalCase[],
+  bareResults: readonly BareResult[],
+  harnessResults: readonly HarnessResult[],
+): ScoringReport {
+  const byId = new Map(cases.map((evalCase) => [evalCase.id, evalCase]));
+  const bareStop = () => undefined;
+  const harnessStop = (caseId: string) =>
+    harnessResults.find((result) => result.caseId === caseId)?.stopReason;
+
+  const legacyBare = countsOf(bareResults);
+  const legacyHarness = countsOf(harnessResults);
+  const strictBare = strictCounts(bareResults, byId, bareStop);
+  const strictHarness = strictCounts(harnessResults, byId, harnessStop);
+
+  const bareAnswer = bareResults.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    return evalCase !== undefined && isAnswerExpected(evalCase.expected) && evalCase.expected.expectsCatalogMiss !== true;
+  });
+  const harnessAnswer = harnessResults.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    return evalCase !== undefined && isAnswerExpected(evalCase.expected) && evalCase.expected.expectsCatalogMiss !== true;
+  });
+  const bareRefused = refusedIds(bareAnswer, byId, bareStop);
+  const harnessRefused = refusedIds(harnessAnswer, byId, harnessStop);
+
+  const regression = cases.filter((evalCase) => groupOf(evalCase) === "regression");
+  const regressionIds = new Set(regression.map((evalCase) => evalCase.id));
+  const bareReg = bareResults.filter((result) => regressionIds.has(result.caseId));
+  const harnessReg = harnessResults.filter((result) => regressionIds.has(result.caseId));
+
+  return {
+    legacy: {
+      bare: legacyBare,
+      harness: legacyHarness,
+      deltaPoints: pointsBetween(legacyBare.passRate, legacyHarness.passRate),
+    },
+    strict: {
+      bare: strictBare,
+      harness: strictHarness,
+      deltaPoints: pointsBetween(strictBare.passRate, strictHarness.passRate),
+    },
+    falseRefusal: {
+      bare: rate(bareRefused.length, bareAnswer.length),
+      harness: rate(harnessRefused.length, harnessAnswer.length),
+      bareCases: bareRefused,
+      harnessCases: harnessRefused,
+    },
+    regression: {
+      n: regression.length,
+      measuredBare: bareReg.length,
+      measuredHarness: harnessReg.length,
+      legacyBarePassed: bareReg.filter((result) => result.passed).length,
+      legacyHarnessPassed: harnessReg.filter((result) => result.passed).length,
+      strictBarePassed: strictCounts(bareReg, byId, bareStop).passed,
+      strictHarnessPassed: strictCounts(harnessReg, byId, harnessStop).passed,
+    },
   };
 }

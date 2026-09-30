@@ -410,7 +410,7 @@ function createTurnStepEvent(
  * what to do next, and they claim nothing about the food. Wording rules follow
  * the rest of the file — no internals, no numbers, no advice.
  */
-const EMPTY_REPLY_FALLBACK: Record<TurnResult["stopReason"], string> = {
+export const EMPTY_REPLY_FALLBACK: Record<TurnResult["stopReason"], string> = {
   end_turn:
     "I could not put an answer together for that. Try rephrasing it, or ask about one thing at a time.",
   max_steps:
@@ -616,18 +616,35 @@ const OUTPUT_CITATION_ASSERTION_CHECK = "citation_assertion";
 const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
 function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
+  const hasUngrounded = reasons.some((r) =>
+    r.toLowerCase().includes("ungrounded numeric"),
+  );
+  const ungroundedNote = hasUngrounded
+    ? "\nCRITICAL GUIDANCE FOR UNGROUNDED NUMBERS: Remove all unit-attached numbers that do not appear in the tool observation table. " +
+      "Do NOT invent alternative numbers, estimates, or ranges. Quote only the exact numbers present in the observation rows, " +
+      "or provide a purely qualitative explanation without numbers."
+    : "";
+
   return (
     `Your response was BLOCKED by safety checks:\n${reasons.map((r) => `  - ${r}`).join("\n")}\n\n` +
     `Please regenerate your response. Make absolutely sure you do NOT mention ` +
     `or recommend any blocked foods or allergens, all numeric facts come from ` +
-    `tool results, and all safety advisories are cited. This is a hard requirement.`
+    `tool results, and all safety advisories are cited. This is a hard requirement.` +
+    ungroundedNote
   );
 }
+
+/**
+ * Lead of the reply written once the output gate's retry budget is spent.
+ * The eval scorer treats this sentence as a refusal. It lives here so a
+ * rewording of the terminal and a rewording of the scorer cannot drift apart.
+ */
+export const GATE_EXHAUSTED_REFUSAL_PREFIX = "I cannot safely answer your question.";
 
 function consolidatedGateRefusalReply(reasons: readonly string[]): string {
   const list = reasons.map((r) => `  - ${r}`).join("\n");
   return (
-    `I cannot safely answer your question. My responses were blocked ` +
+    `${GATE_EXHAUSTED_REFUSAL_PREFIX} My responses were blocked ` +
     `after ${MAX_OUTPUT_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
     `Please consult a doctor or registered dietitian for personalized advice.`
   );

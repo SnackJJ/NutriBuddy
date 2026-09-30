@@ -23,6 +23,7 @@ describe("isTransientProviderError", () => {
       "ECONNRESET",
       "rate limit exceeded",
       "upstream overloaded",
+      "TypeError: fetch failed",
     ]) {
       expect(isTransientProviderError(message), message).toBe(true);
     }

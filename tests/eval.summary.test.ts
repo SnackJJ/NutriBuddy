@@ -341,6 +341,39 @@ describe("infrastructure faults", () => {
     expect(summary.infrastructure.count).toBe(2);
   });
 
+  it("counts a refusal under the strict口径 and leaves the legacy pass rate alone", () => {
+    const cases = [
+      evalCase("s1"),
+      evalCase("c1", { mustNotContain: ["peanut"] }),
+      evalCase("d1", { shouldBeBlocked: false }),
+    ];
+    const summary = summarizeEvalResults(
+      cases,
+      [bare("s1", true, "About 31 g of protein."), bare("c1", true), bare("d1", true)],
+      [
+        harness("s1", true, {
+          response: "I can't give you a verified protein figure for chicken breast.",
+        }),
+        harness("c1", true, {
+          response: "I cannot safely answer your question. My responses were blocked after 2 retries.",
+          stopReason: "gate_blocked",
+        }),
+        harness("d1", true, {
+          response: "Logged 150 g of shrimp.",
+          stopReason: "gate_blocked",
+        }),
+      ],
+    );
+
+    expect(summary.harness.passRate).toBe(1);
+    expect(summary.scoring.legacy.harness.passed).toBe(3);
+    expect(summary.scoring.strict.harness.passed).toBe(1);
+    expect(summary.scoring.falseRefusal.harnessCases).toEqual(["d1", "s1"]);
+    expect(summary.scoring.falseRefusal.harness).toEqual({ n: 2, value: 1 });
+    expect(summary.scoring.regression.legacyHarnessPassed).toBe(2);
+    expect(summary.scoring.regression.strictHarnessPassed).toBe(1);
+  });
+
   it("leaves a healthy run alone", () => {
     const summary = summarizeEvalResults(
       [evalCase("a"), evalCase("b")],

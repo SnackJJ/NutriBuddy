@@ -25,6 +25,10 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /\b50[0-4]\b/,
   /timed? ?out|timeout/i,
   /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up/i,
+  // Undici's TypeError when the socket dies before a status line. The live
+  // baseline of 2026-09-17 recorded four of these as capability failures
+  // because nothing above matched "fetch failed".
+  /fetch failed/i,
   /temporarily (unavailable|overloaded)/i,
   /rate ?limit/i,
   /overloaded/i,
