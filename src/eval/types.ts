@@ -64,6 +64,12 @@ export interface EvalExpected {
    */
   readonly expectsCatalogMiss?: boolean;
   /**
+   * 问的是快照没有的营养素（镁、B12，或只被填成 0 的维 C / 纤维 / 钾）。
+   * 食物行可以在目录里。如实说明“这一列没有”不是误拒。
+   * 不复用 `expectsCatalogMiss`：那个检查会把回答里的宏量数字当成编造。
+   */
+  readonly expectsUnstoredNutrient?: boolean;
+  /**
    * 不得调用的工具（如提问类 case 不得发起 `log_meal` 写入提案）。
    * 只在 harness 手臂检查：bare 手臂没有工具。
    */

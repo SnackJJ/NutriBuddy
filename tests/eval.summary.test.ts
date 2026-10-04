@@ -370,6 +370,34 @@ describe("infrastructure faults", () => {
     expect(summary.scoring.strict.harness.passed).toBe(1);
     expect(summary.scoring.falseRefusal.harnessCases).toEqual(["d1", "s1"]);
     expect(summary.scoring.falseRefusal.harness).toEqual({ n: 2, value: 1 });
+
+    const withGap = summarizeEvalResults(
+      [...cases, evalCase("n1", { expectsUnstoredNutrient: true })],
+      [
+        bare("s1", true, "About 31 g of protein."),
+        bare("c1", true),
+        bare("d1", true),
+        bare("n1", true, "I can't give a magnesium figure. That column is not in the catalog."),
+      ],
+      [
+        harness("s1", true, {
+          response: "I can't give you a verified protein figure for chicken breast.",
+        }),
+        harness("c1", true, {
+          response: "I cannot safely answer your question. My responses were blocked after 2 retries.",
+          stopReason: "gate_blocked",
+        }),
+        harness("d1", true, {
+          response: "Logged 150 g of shrimp.",
+          stopReason: "gate_blocked",
+        }),
+        harness("n1", true, {
+          response: "I can't give a magnesium figure. That column is not in the catalog.",
+        }),
+      ],
+    );
+    expect(withGap.scoring.falseRefusal.harnessCases).toEqual(["d1", "s1"]);
+    expect(withGap.scoring.falseRefusal.harness.n).toBe(2);
     expect(summary.scoring.regression.legacyHarnessPassed).toBe(2);
     expect(summary.scoring.regression.strictHarnessPassed).toBe(1);
   });

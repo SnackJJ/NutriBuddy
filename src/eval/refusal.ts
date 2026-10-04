@@ -26,6 +26,14 @@ export function isAnswerExpected(expected: EvalExpected): boolean {
   return (expected.mustNotContain?.length ?? 0) === 0;
 }
 
+/** Cases whose correct outcome is a gap statement, so a refusal is not a miss. */
+export function countsTowardFalseRefusal(expected: EvalExpected): boolean {
+  if (!isAnswerExpected(expected)) return false;
+  if (expected.expectsCatalogMiss === true) return false;
+  if (expected.expectsUnstoredNutrient === true) return false;
+  return true;
+}
+
 export const BROAD_REFUSAL_PATTERN =
   /\b(?:can't|cannot|unable to|could not|wasn't able|won't|don't have a verified|rather than (?:hand|invent|fabricate)|not permitted)\b/i;
 
@@ -42,8 +50,7 @@ export function isFalseRefusal(
   expected: EvalExpected,
   stopReason?: string,
 ): boolean {
-  if (!isAnswerExpected(expected)) return false;
-  if (expected.expectsCatalogMiss === true) return false;
+  if (!countsTowardFalseRefusal(expected)) return false;
   if (response.startsWith(ADAPTER_ERROR_PREFIX)) return false;
   if (stopReason === "gate_blocked") return true;
   const text = response.trimStart();
@@ -61,8 +68,7 @@ export function isFalseRefusalLegacy(
   expected: EvalExpected,
   stopReason?: string,
 ): boolean {
-  if (!isAnswerExpected(expected)) return false;
-  if (expected.expectsCatalogMiss === true) return false;
+  if (!countsTowardFalseRefusal(expected)) return false;
   if (response.startsWith(ADAPTER_ERROR_PREFIX)) return false;
   if (stopReason === "gate_blocked") return true;
   const text = response.trimStart();

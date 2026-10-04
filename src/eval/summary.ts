@@ -17,7 +17,7 @@
 // Byte-stable output is what makes "two scripted runs are equal" checkable.
 
 import type { BareResult, EvalCase, HarnessResult } from "./types";
-import { isAnswerExpected, isFalseRefusal } from "./refusal";
+import { countsTowardFalseRefusal, isFalseRefusal } from "./refusal";
 
 /** One row of the §4 metric table, published with the numbers it explains. */
 export interface MetricDefinition {
@@ -682,11 +682,11 @@ function scoringOf(
 
   const bareAnswer = bareResults.filter((result) => {
     const evalCase = byId.get(result.caseId);
-    return evalCase !== undefined && isAnswerExpected(evalCase.expected) && evalCase.expected.expectsCatalogMiss !== true;
+    return evalCase !== undefined && countsTowardFalseRefusal(evalCase.expected);
   });
   const harnessAnswer = harnessResults.filter((result) => {
     const evalCase = byId.get(result.caseId);
-    return evalCase !== undefined && isAnswerExpected(evalCase.expected) && evalCase.expected.expectsCatalogMiss !== true;
+    return evalCase !== undefined && countsTowardFalseRefusal(evalCase.expected);
   });
   const bareRefused = refusedIds(bareAnswer, byId, bareStop);
   const harnessRefused = refusedIds(harnessAnswer, byId, harnessStop);

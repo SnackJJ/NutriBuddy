@@ -975,3 +975,29 @@ describe("expectsCatalogMiss (#130)", () => {
     expect(declared).toEqual(["s2", "e2"]);
   });
 });
+
+describe("expectsUnstoredNutrient", () => {
+  const gap = { expectsUnstoredNutrient: true } as const;
+  const reply =
+    "Spinach is in the catalog at 23 kcal per 100 g. Magnesium is not a stored field, so I can't give a precise milligram figure.";
+
+  it("keeps a gap statement out of the false-refusal count", () => {
+    const result = scoreHarness(reply, ["query_catalog"], gap, undefined, 0, "end_turn");
+    expect(result.passed).toBe(true);
+    expect(result.falseRefusal).toBe(false);
+    expect(result.passedStrict).toBe(true);
+  });
+
+  it("still passes when the reply quotes the stored macros", () => {
+    const result = scoreBare(reply, gap, undefined);
+    expect(result.passed).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("is declared on n1 through n5", () => {
+    const declared = loadEvalCases()
+      .filter((c) => c.expected.expectsUnstoredNutrient === true)
+      .map((c) => c.id);
+    expect(declared).toEqual(["n1", "n2", "n3", "n4", "n5"]);
+  });
+});
