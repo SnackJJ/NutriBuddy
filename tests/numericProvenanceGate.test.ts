@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkNumericProvenance } from "../src/harness/numericProvenanceGate";
+import { checkNumericProvenance, extractNumbersFromProse } from "../src/harness/numericProvenanceGate";
 import type { Observation, ColumnDef } from "../src/catalog/queryCatalog";
 import type { TypedOutput } from "../src/harness/turn";
 
@@ -453,6 +453,230 @@ describe("checkNumericProvenance", () => {
       observations: [obs],
     });
 
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ── the unit vocabulary is measured against the corpus, not remembered ──────
+//
+// This test exists because the gap it guards was invisible: the gate could not
+// extract "600 IU" or "15 mcg" at all, so a figure stated from the evidence text
+// was never checked — and vitamin D's recommended intake is written in exactly
+// those two units. Nothing failed; the gate simply did not look.
+//
+// The list is derived from the committed corpus (counts in the comment below), so
+// a new source whose units are not recognized shows up here rather than as an
+// unchecked number in an answer.
+
+describe("unit vocabulary covers what the corpus states", () => {
+  // Occurrences of `<number> <unit>` in sources/*/sections.jsonl, measured
+  // 2026-09-17: mg 420, mcg 285, g 64, iu 92, nmol 58, ng 58.
+  const CORPUS_UNITS = ["mg", "mcg", "g", "iu", "nmol", "ng"];
+
+  for (const unit of CORPUS_UNITS) {
+    it(`extracts a number attached to "${unit}"`, () => {
+      const extracted = extractNumbersFromProse(`The value is 123 ${unit} per day.`);
+      expect(extracted.map((entry) => entry.unit)).toContain(unit);
+    });
+  }
+
+  it("writes micrograms in the three spellings the corpus uses", () => {
+    for (const spelling of ["mcg", "µg", "ug"]) {
+      expect(extractNumbersFromProse(`15 ${spelling}`).map((entry) => entry.unit)).toContain(spelling);
+    }
+  });
+
+  it("converts micrograms against milligram observations instead of calling it a mismatch", () => {
+    // 0.5 mg and 500 mcg are the same amount; without the conversion table the
+    // gate would have seen a grounded figure as ungrounded, which is the failure
+    // direction that costs a correct answer.
+    const check = checkNumericProvenance({
+      output: { prose: "That food has 500 mcg of folate.", foodRefs: [], ruleRefs: [] },
+      observations: [
+        makeObservation(
+          "food_lookup",
+          [{ name: "folate", type: "number", unit: "mg", description: "folate" }],
+          [{ folate: 0.5 }],
+        ),
+      ],
+    });
+    expect(check.passed).toBe(true);
+  });
+});
+
+// ── spelled-out units must be groundable, not merely visible ────────────────
+//
+// Recognizing a unit the catalog cannot express is worse than not recognizing it:
+// the figure becomes visible to the gate and then fails to match an observation
+// column written as `mg`, so a correctly grounded answer gets refused. The
+// reviewer of this change found exactly that, which is why the direction is
+// asserted rather than the extraction alone.
+
+describe("spelled-out mass units fold onto the catalog's vocabulary", () => {
+  const cases = [
+    { prose: "That food has 500 milligrams of sodium.", unit: "mg", value: 500 },
+    { prose: "It provides 100 grams of protein.", unit: "g", value: 100 },
+    { prose: "It has 500 micrograms of folate.", unit: "mcg", value: 500 },
+    { prose: "That is 2 kilograms of food.", unit: "kg", value: 2 },
+  ];
+
+  for (const { prose, unit, value } of cases) {
+    it(`passes "${prose}" against an observation in ${unit}`, () => {
+      const check = checkNumericProvenance({
+        output: { prose, foodRefs: [], ruleRefs: [] },
+        observations: [
+          makeObservation(
+            "food_lookup",
+            [{ name: "amount", type: "number", unit, description: "amount" }],
+            [{ amount: value }],
+          ),
+        ],
+      });
+      expect(check.reasons).toEqual([]);
+      expect(check.passed).toBe(true);
+    });
+  }
+
+  it("still blocks a spelled-out unit with no matching observation", () => {
+    const check = checkNumericProvenance({
+      output: { prose: "It provides 100 grams of protein.", foodRefs: [], ruleRefs: [] },
+      observations: [],
+    });
+    expect(check.passed).toBe(false);
+  });
+});
+
+// ── the user's own portion is a source (live d1) ────────────────────────────
+//
+// d1 said "about 150g" and the answer's "150 g" was refused as ungrounded. The
+// user's words may ground a *portion*; they may not ground nutrient content, and
+// they never ground energy — those still have to come from the catalog.
+
+describe("user-stated quantities", () => {
+  function check(prose: string, userInput: string, observations: Observation[] = []) {
+    return checkNumericProvenance({ output: typedOutput(prose), observations, userInput });
+  }
+
+  describe("ground a portion the user said", () => {
+    const cases = [
+      { userInput: "Log the shrimp I ate — about 150g with rice.", prose: "Logged 150 g of shrimp." },
+      { userInput: "I had 150 g of shrimp", prose: "Logged 150g shrimp." },
+      { userInput: "I had 150g of shrimp", prose: "Logged 150 grams of shrimp." },
+      { userInput: "I had 150 grams of shrimp", prose: "Logged 150 g of shrimp." },
+      { userInput: "I had 150g of shrimp", prose: "Logged 0.15 kg of shrimp." },
+      { userInput: "I drank 2 cups of milk", prose: "Logged 2 cups of milk." },
+      { userInput: "I drank 1 cup of milk", prose: "That is about 237 ml of milk." },
+      { userInput: "I had 5 oz of salmon", prose: "Logged 142 g of salmon." },
+      { userInput: "I drank half a cup of milk", prose: "Logged 0.5 cup of milk." },
+      { userInput: "Log 250g of salmon", prose: "| Food | Portion |\n| salmon | 250 g |" },
+    ];
+    for (const { userInput, prose } of cases) {
+      it(`"${userInput}" → "${prose.replace(/\n/g, " ")}"`, () => {
+        const result = check(prose, userInput);
+        expect(result.reasons).toEqual([]);
+        expect(result.passed).toBe(true);
+      });
+    }
+  });
+
+  describe("do not ground nutrient content or other units", () => {
+    const cases = [
+      // The user's number, reframed as a nutrient: the case the fix must not open.
+      { userInput: "I had 150g of shrimp", prose: "That is 150 g protein." },
+      { userInput: "I had 150g of shrimp", prose: "That is 150 g of protein." },
+      { userInput: "I had 150g of shrimp", prose: "It has 150 g of total fat." },
+      { userInput: "I had 150g of shrimp", prose: "Protein: 150 g" },
+      { userInput: "I had 150g of shrimp", prose: "| Protein | 150 g |" },
+      { userInput: "I had 150g of shrimp", prose: "carbs of 150 g" },
+      // Energy is never a portion, even when the user said it.
+      { userInput: "I had 500 kcal of pasta", prose: "Logged 500 kcal of pasta." },
+      // A user's own nutrient claim is not a source either.
+      { userInput: "My shake had 30 g protein", prose: "Logged a shake with 30 g of protein." },
+      // Mass ↔ volume needs a density — a food fact, not a unit fact.
+      { userInput: "I drank 250 ml of milk", prose: "Logged 250 g of milk." },
+      // A different number is not the user's number.
+      { userInput: "I had 150g of shrimp", prose: "Logged 200 g of shrimp." },
+      // No user input, no user source.
+      { userInput: "", prose: "Logged 150 g of shrimp." },
+    ];
+    for (const { userInput, prose } of cases) {
+      it(`"${userInput}" ↛ "${prose}"`, () => {
+        expect(check(prose, userInput).passed).toBe(false);
+      });
+    }
+  });
+
+  it("releases the portion but still blocks a nutrient figure in the same answer", () => {
+    const result = check("Logged 150 g of shrimp — 150 g protein, 20 g fat.", "about 150g of shrimp");
+    expect(result.reasons).toHaveLength(2);
+    expect(result.reasons[0]).toContain('"150 g"');
+    expect(result.reasons[1]).toContain('"20 g"');
+  });
+
+  it("does not replace observations: catalog figures still ground as before", () => {
+    const obs = makeObservation("food_lookup", CHICKEN_COLUMNS, [
+      {
+        food_id: "food-shrimp-001",
+        food_name: "shrimp",
+        portion_g: 150,
+        kcal: 127.5,
+        protein_g: 30,
+        fat_g: 0.8,
+        carbs_g: 0,
+        allergen_tags: "shellfish",
+      },
+    ]);
+    const result = check("150 g shrimp: 127.5 kcal, 30 g protein.", "about 150g of shrimp", [obs]);
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ── a portion column grounds portions, not nutrient amounts ─────────────────
+//
+// Matching is by unit and value, so a `portion_g` of 150 used to ground
+// "150 g protein" too. Every logging turn now carries its proposal's portion as
+// an observation, which would have made that routine.
+
+describe("portion columns", () => {
+  const portionOnly = makeObservation(
+    "log_meal_proposal",
+    [
+      { name: "portion_g", type: "number", unit: "g", description: "portion" },
+      { name: "protein_g", type: "number", unit: "g", description: "protein" },
+    ],
+    [{ portion_g: 150, protein_g: 30 }],
+  );
+
+  it("ground the portion", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Logged 150 g of shrimp with 30 g protein."),
+      observations: [portionOnly],
+    });
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("do not ground a nutrient amount that happens to equal the portion", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Shrimp gives you 150 g protein."),
+      observations: [portionOnly],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.reasons[0]).toContain('"150 g"');
+  });
+
+  it("still ground a reference basis written after a nutrient (\"per 150 g\")", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("That is 30 g protein per 150 g."),
+      observations: [portionOnly],
+    });
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("a nutrient column can still ground a nutrient-framed figure", () => {
+    const result = checkNumericProvenance({
+      output: typedOutput("Protein: 30 g"),
+      observations: [portionOnly],
+    });
     expect(result.passed).toBe(true);
   });
 });

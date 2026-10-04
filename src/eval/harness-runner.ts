@@ -13,11 +13,42 @@ import { consumeTurn, turn, type AnyTurnEvent } from "../harness/turn";
 import { Tracer } from "../harness/tracer";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { Catalog } from "../catalog/catalog";
+import type { QueryCatalog } from "../catalog/queryCatalog";
 import type { EvalCase, HarnessResult } from "./types";
 import { scoreHarness, EVAL_ERROR_PREFIX } from "./metrics";
 import { scoreSignalsFromTurnEvents } from "./scoreSignals";
 import { isTransientProviderError, withTransientRetry } from "./providerRetry";
 import { PROVIDER_ATTEMPTS } from "./bare-runner";
+import type { TurnEvidenceSet } from "../harness/turn";
+import type { CitationRegistry } from "../harness/citationGate";
+import type { RetrieverPort } from "../evidence/retrieval";
+import {
+  loadRetrievalEvidence,
+  withRetrievedSections,
+  type EvidenceTextSource,
+} from "../evidence/retrievalContext";
+
+/**
+ * The corpus half of a harness run (RFC 0011 §3.7, RFC 0013 §5).
+ *
+ * Optional as a whole, and per piece: scripted runs have no corpus at all, and a
+ * live run whose corpus cannot be read is a run that measures a product without
+ * evidence rather than a run that fails. When `retrieval` is absent the metric
+ * says "not wired" instead of reporting the absence of citations as a capability
+ * gap — the same distinction #129 drew for provider faults.
+ */
+export interface HarnessEvidenceDeps {
+  /** Pinned evidence text, as the route assembles it once per instance. */
+  readonly pinnedText?: string;
+  readonly pinnedSet?: TurnEvidenceSet;
+  readonly citationRegistry?: CitationRegistry;
+  /** Per-question retrieval; each case runs it against that case's query. */
+  readonly retrieval?: {
+    readonly retriever: RetrieverPort;
+    readonly texts: EvidenceTextSource;
+    readonly sourceVersion: string;
+  };
+}
 
 /**
  * 对一批 eval case 执行完整 harness 运行。
@@ -37,6 +68,8 @@ export async function runHarnessEval(
   interactionStore?: InteractionStore,
   catalog?: Catalog,
   toolSchemas?: readonly ToolSchema[],
+  evidence?: HarnessEvidenceDeps,
+  queryCatalog?: QueryCatalog,
 ): Promise<HarnessResult[]> {
   const results: HarnessResult[] = [];
 
@@ -53,11 +86,45 @@ export async function runHarnessEval(
       let stopReason: StopReason = "end_turn";
       const toolCalls: string[] = [];
       let gateVerdictBlocks = 0;
+      let keptCitations: number | undefined;
+      let sawTerminalResult = false;
 
       const turnEvents: AnyTurnEvent[] = [];
 
       const shouldRunGate =
         c.userContext !== undefined && interactionStore !== undefined;
+
+      // Retrieval is per case, exactly as it is per turn in the route: the query
+      // is the case's own question. A failure here must not fail the case — it
+      // becomes provenance the report can attribute (RFC 0013 §5).
+      let retrieved: Awaited<ReturnType<typeof loadRetrievalEvidence>> = {
+        sectionIds: [],
+        provenance: { sourceVersion: evidence?.retrieval?.sourceVersion ?? "", hits: [] },
+      };
+      if (evidence?.retrieval) {
+        try {
+          retrieved = await loadRetrievalEvidence({
+            retriever: evidence.retrieval.retriever,
+            texts: evidence.retrieval.texts,
+            query: c.query,
+            sourceVersion: evidence.retrieval.sourceVersion,
+          });
+        } catch (error) {
+          // Bound and logged: a report that lists a case under "retrieval
+          // unavailable" without the reason is a report nobody can diagnose.
+          console.error(
+            `[eval] retrieval failed for ${c.id}; counting the case as an outage: ${String(error).slice(0, 200)}`,
+          );
+          retrieved = {
+            sectionIds: [],
+            provenance: {
+              sourceVersion: evidence.retrieval.sourceVersion,
+              hits: [],
+              degraded: "unavailable",
+            },
+          };
+        }
+      }
 
       try {
         const result = await consumeTurn(
@@ -75,6 +142,14 @@ export async function runHarnessEval(
               // throwing (RFC 0008 §3.6), so the runner's own error text has to
               // ride the port: scoring keys off EVAL_ERROR_PREFIX.
               crashReply: (err) => `${EVAL_ERROR_PREFIX}${String(err)}`,
+              evidenceText: evidence?.pinnedText,
+              evidenceSet: withRetrievedSections(evidence?.pinnedSet, retrieved.sectionIds),
+              citationRegistry: evidence?.citationRegistry,
+              ...(retrieved.text ? { retrievedEvidence: retrieved.text } : {}),
+              // Only when retrieval was wired: absent means "this run had no
+              // corpus", which the report counts separately from "found nothing".
+              ...(evidence?.retrieval ? { retrievalProvenance: retrieved.provenance } : {}),
+              queryCatalog,
             },
           ),
           (event) => {
@@ -99,6 +174,12 @@ export async function runHarnessEval(
         reply = result.reply;
         steps = result.steps;
         stopReason = result.stopReason;
+        // The turn writes the citation gate's *stripped* output back onto its own
+        // result (turn.ts), so what is left here is what the answer actually
+        // cites. Reading it is the only way to tell "cited something" from "cited
+        // nothing, and the gate passed anyway" — a `pass` verdict is true of both.
+        keptCitations = result.output?.citations?.length ?? 0;
+        sawTerminalResult = true;
       } catch (err) {
         // Safety net only: turn() reports its own fatal errors as a crash terminal
         // (RFC 0008 §3.6), and `crashReply` above already put this text in the
@@ -122,6 +203,7 @@ export async function runHarnessEval(
         c.expected,
         c.userContext,
         scoredBlocks,
+        stopReason,
       );
 
       return {
@@ -134,6 +216,26 @@ export async function runHarnessEval(
         toolCalls: scored.toolCalls,
         gateBlocks: scored.gateBlocks,
         durationMs,
+        // Absent rather than zero when no terminal result arrived (a crash
+        // outside the seam): "cited nothing" and "never got that far" are
+        // different facts, and a rate computed over the second would be a lie.
+        ...(evidence?.retrieval
+          ? {
+              retrieval: {
+                hits: retrieved.sectionIds.length,
+                ...(retrieved.provenance.degraded
+                  ? { degraded: retrieved.provenance.degraded }
+                  : {}),
+              },
+            }
+          : {}),
+        citations: sawTerminalResult
+          ? {
+              kept: keptCitations ?? 0,
+              stripped: signals.citationStripped,
+              claimedAuthorityWithoutCitation: signals.citationClaimedWithoutSource,
+            }
+          : undefined,
       };
     };
 

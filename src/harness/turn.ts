@@ -56,12 +56,18 @@ export type { FoodRef, RuleRef, TypedOutput } from "./types";
 /**
  * Bump minor for compatible additions, major for breaking event-shape changes.
  *
+ * 1.11.0 adds one optional field (RFC 0013 §5 / #135): `TurnStartEvent.retrieval`
+ * — which sections retrieval contributed, and why it contributed none. Additive,
+ * so a reader of 1.10.0 events stays correct: a turn written before this version
+ * simply has no retrieval to report, which is also true of a turn with no
+ * retriever wired.
+ *
  * 1.10.0 adds two optional fields (RFC 0011 §3.3/§3.4): `TypedOutput.citations`
  * and `TurnStartEvent.evidenceSet`. Both are additive, so a reader of 1.9.0
  * events stays correct — which is the point of the minor bump and the reason the
  * new fields land *before* the assertions that use them.
  */
-export const SCHEMA_VERSION = "1.10.0";
+export const SCHEMA_VERSION = "1.11.0";
 const QUERY_CATALOG_TOOL = "query_catalog";
 const CONFIRM_PORTS_INCOMPLETE = "confirm_ports_incomplete";
 
@@ -277,6 +283,35 @@ export interface TurnStartEvent extends TurnEvent {
   readonly profileVersion?: string;
   /** Evidence available to this turn; absent when no corpus is wired. */
   readonly evidenceSet?: TurnEvidenceSet;
+  /** What retrieval contributed to this turn (RFC 0013 §5). */
+  readonly retrieval?: TurnRetrieval;
+}
+
+/**
+ * What retrieval contributed to a turn (RFC 0013 §5 / issue #135).
+ *
+ * Ids and scores, not text. The corpus is a versioned snapshot and its chunk
+ * text is immutable within a version, so a replay can reload exactly what the
+ * model was shown by id — while inlining the text would put several thousand
+ * characters of corpus into every turn's event stream, which the browser also
+ * reads as NDJSON.
+ *
+ * The distinction this type exists for: `evidenceSet` says what the model was
+ * *allowed* to cite; `retrieval` says what it was *given*, and why. Without it a
+ * trace cannot tell a pinned citation from a retrieved one, or tell a question
+ * the corpus could not answer from a retrieval outage.
+ */
+export interface TurnRetrieval {
+  /** Corpus snapshot the ids resolve in. */
+  readonly sourceVersion: string;
+  readonly hits: readonly {
+    readonly sectionId: string;
+    readonly chunkId: string;
+    readonly score: number;
+    readonly via: readonly ("lexical" | "vector")[];
+  }[];
+  /** Present when retrieval returned nothing; absent when it returned hits. */
+  readonly degraded?: "unavailable" | "no_hits";
 }
 
 export interface TurnStepEvent extends TurnEvent {
@@ -350,6 +385,9 @@ function createTurnStartEvent(
     // and "evidence was assembled and it was empty" are different, and only the
     // second one is a configured turn.
     ...(ports.evidenceSet ? { evidenceSet: ports.evidenceSet } : {}),
+    // Same reasoning for retrieval: a turn with no retrieval wired and a turn
+    // whose retrieval found nothing must not look alike in a trace.
+    ...(ports.retrievalProvenance ? { retrieval: ports.retrievalProvenance } : {}),
   };
 }
 
@@ -372,7 +410,7 @@ function createTurnStepEvent(
  * what to do next, and they claim nothing about the food. Wording rules follow
  * the rest of the file — no internals, no numbers, no advice.
  */
-const EMPTY_REPLY_FALLBACK: Record<TurnResult["stopReason"], string> = {
+export const EMPTY_REPLY_FALLBACK: Record<TurnResult["stopReason"], string> = {
   end_turn:
     "I could not put an answer together for that. Try rephrasing it, or ask about one thing at a time.",
   max_steps:
@@ -578,18 +616,35 @@ const OUTPUT_CITATION_ASSERTION_CHECK = "citation_assertion";
 const NO_SAFETY_VIOLATIONS_EVIDENCE = "No safety violations detected";
 
 function buildConsolidatedGateFeedback(reasons: readonly string[]): string {
+  const hasUngrounded = reasons.some((r) =>
+    r.toLowerCase().includes("ungrounded numeric"),
+  );
+  const ungroundedNote = hasUngrounded
+    ? "\nCRITICAL GUIDANCE FOR UNGROUNDED NUMBERS: Remove all unit-attached numbers that do not appear in the tool observation table. " +
+      "Do NOT invent alternative numbers, estimates, or ranges. Quote only the exact numbers present in the observation rows, " +
+      "or provide a purely qualitative explanation without numbers."
+    : "";
+
   return (
     `Your response was BLOCKED by safety checks:\n${reasons.map((r) => `  - ${r}`).join("\n")}\n\n` +
     `Please regenerate your response. Make absolutely sure you do NOT mention ` +
     `or recommend any blocked foods or allergens, all numeric facts come from ` +
-    `tool results, and all safety advisories are cited. This is a hard requirement.`
+    `tool results, and all safety advisories are cited. This is a hard requirement.` +
+    ungroundedNote
   );
 }
+
+/**
+ * Lead of the reply written once the output gate's retry budget is spent.
+ * The eval scorer treats this sentence as a refusal. It lives here so a
+ * rewording of the terminal and a rewording of the scorer cannot drift apart.
+ */
+export const GATE_EXHAUSTED_REFUSAL_PREFIX = "I cannot safely answer your question.";
 
 function consolidatedGateRefusalReply(reasons: readonly string[]): string {
   const list = reasons.map((r) => `  - ${r}`).join("\n");
   return (
-    `I cannot safely answer your question. My responses were blocked ` +
+    `${GATE_EXHAUSTED_REFUSAL_PREFIX} My responses were blocked ` +
     `after ${MAX_OUTPUT_GATE_RETRIES} retries due to safety constraints:\n${list}\n\n` +
     `Please consult a doctor or registered dietitian for personalized advice.`
   );
@@ -780,8 +835,11 @@ async function runCitationCheck(
 function createNumericProvenanceCheck(
   output: TypedOutput,
   observations: readonly Observation[],
+  userInput: string,
 ): OutputGateCheck {
-  const check = checkNumericProvenance({ output, observations });
+  // The utterance rides along so a portion the user stated ("about 150g") can
+  // be said back without counting as invented (live d1).
+  const check = checkNumericProvenance({ output, observations, userInput });
   const passEvidence =
     observations.length > 0
       ? "All numeric facts trace to observations"
@@ -910,6 +968,7 @@ function collectOutputGateChecks(
   observations: readonly Observation[],
   conflicts: readonly Conflict[],
   catalog: Catalog | undefined,
+  userInput: string,
 ): OutputGateCheck[] {
   const checks: OutputGateCheck[] = [];
   const lexicalCheck = createLexicalBackstopCheck(
@@ -934,7 +993,7 @@ function collectOutputGateChecks(
   }
 
   checks.push(
-    createNumericProvenanceCheck(result.output, observations),
+    createNumericProvenanceCheck(result.output, observations, userInput),
     createAdvisoryStructureCheck(result.output, conflicts),
   );
   return checks;
@@ -977,6 +1036,40 @@ function readStringArray(
     return value;
   }
   return undefined;
+}
+
+const PROPOSAL_OBSERVATION_TEMPLATE_ID = "log_meal_proposal";
+
+/**
+ * A log_meal proposal's figures, as an observation the numeric gate can match.
+ *
+ * Live d1/d3/d4/w2 were refused for quoting their own proposal ("150 g shrimp,
+ * 127.5 kcal"): those numbers are scaled from the catalog by `log_meal`'s code,
+ * exactly as `food_lookup` scales them, but only query_catalog outcomes were
+ * observations. Gate-only: this does not enter the event stream or the model's
+ * context, so the event schema is unchanged.
+ */
+function proposalObservation(proposal: WriteProposalData): Observation {
+  const figures: ReadonlyArray<readonly [string, "g" | "kcal", number | undefined]> = [
+    ["portion_g", "g", proposal.portionG],
+    ["kcal", "kcal", proposal.kcal],
+    ["protein_g", "g", proposal.proteinG],
+    ["fat_g", "g", proposal.fatG],
+    ["carbs_g", "g", proposal.carbsG],
+  ];
+  const present = figures.filter(([, , value]) => value !== undefined);
+  return {
+    templateId: PROPOSAL_OBSERVATION_TEMPLATE_ID,
+    columns: present.map(([name, unit]) => ({
+      name,
+      type: "number" as const,
+      unit,
+      description: `log_meal proposal ${name}`,
+    })),
+    rows: [Object.fromEntries(present.map(([name, , value]) => [name, value]))],
+    rowCount: 1,
+    truncated: false,
+  };
 }
 
 /**
@@ -1134,6 +1227,9 @@ async function* runUtteranceTurn(
     lastResolverMiss = undefined;
     lastWriteProposalData = undefined;
     lastLogMealActArgs = undefined;
+    // Per attempt, like the proposal itself: a blocked attempt's proposal is not
+    // the one this attempt's answer describes, so its figures must not ground it.
+    const proposalObservations: Observation[] = [];
 
     const history: ChatMessage[] = [...(ports.history ?? [])];
 
@@ -1209,6 +1305,9 @@ async function* runUtteranceTurn(
         if (outcome.kind === "ok" && outcome.name === "log_meal") {
           lastWriteProposalData = parseWriteProposalData(outcome.data);
           lastResolverMiss = undefined;
+          if (lastWriteProposalData) {
+            proposalObservations.push(proposalObservation(lastWriteProposalData));
+          }
         }
 
         if (outcome.kind === "typed_miss" && outcome.name === "log_meal") {
@@ -1277,9 +1376,10 @@ async function* runUtteranceTurn(
     const outputGateChecks = collectOutputGateChecks(
       result,
       ports.userContext,
-      observations,
+      [...observations, ...proposalObservations],
       conflicts,
       ports.catalog,
+      input.content,
     );
 
     // ── Tier-2: authority claimed, evidence absent (RFC 0011 §3.6) ────
@@ -1345,6 +1445,10 @@ function createRunTurnInput(
     inputDirective,
     userId: ports.userId,
     evidenceText: ports.evidenceText,
+    // Both halves of retrieval have to survive this whitelist: the block the
+    // model reads, and the provenance the trace keeps. A field added to
+    // TurnPorts but not copied here is a port nothing observes.
+    retrievedEvidence: ports.retrievedEvidence,
     adapter: ports.adapter,
     tracer: ports.tracer,
     eventLog: ports.eventLog,

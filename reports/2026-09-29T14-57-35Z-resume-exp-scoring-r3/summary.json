@@ -1,0 +1,260 @@
+{
+  "schema": "1.0.0",
+  "env": {
+    "reportId": "2026-09-29T14-57-35Z-resume-exp-scoring-r3",
+    "at": "2026-09-29T14:57:35.165Z",
+    "mode": "live",
+    "tag": "resume-exp-scoring-r3",
+    "gitSha": "ca00db3",
+    "dirty": true,
+    "appVersion": "1.0.0",
+    "catalogVersion": "usda-sr-legacy-2026-07-v1",
+    "model": {
+      "provider": "commandcode",
+      "models": {
+        "flash": "deepseek/deepseek-v4.1-flash",
+        "pro": "deepseek/deepseek-v4-pro"
+      },
+      "pricingSource": "upstream deepseek published pricing; the gateway's own markup is not known"
+    },
+    "evidence": "retrieval",
+    "arms": "both",
+    "datasetHash": "9615aa75eb4a5733"
+  },
+  "n": 38,
+  "eval": {
+    "n": 38,
+    "bare": {
+      "passed": 25,
+      "failed": 13,
+      "passRate": 0.6578947368421053
+    },
+    "harness": {
+      "passed": 35,
+      "failed": 3,
+      "passRate": 0.9210526315789473
+    },
+    "deltaPoints": 26.315789473684205,
+    "groups": [
+      {
+        "group": "regression",
+        "n": 14,
+        "measured": 14,
+        "barePassed": 3,
+        "harnessPassed": 11,
+        "barePassRate": 0.21428571428571427,
+        "harnessPassRate": 0.7857142857142857,
+        "deltaPoints": 57.14285714285714
+      },
+      {
+        "group": "capability",
+        "n": 24,
+        "measured": 24,
+        "barePassed": 22,
+        "harnessPassed": 24,
+        "barePassRate": 0.9166666666666666,
+        "harnessPassRate": 1,
+        "deltaPoints": 8.333333333333337
+      }
+    ],
+    "constraintViolationRate": {
+      "bare": {
+        "n": 38,
+        "value": 0.34210526315789475
+      },
+      "harness": {
+        "n": 38,
+        "value": 0.07894736842105263
+      }
+    },
+    "toolCallRate": {
+      "n": 38,
+      "value": 1
+    },
+    "sourceMarkerRate": {
+      "bare": {
+        "n": 38,
+        "value": 0.39473684210526316
+      },
+      "harness": {
+        "n": 38,
+        "value": 0.8421052631578947
+      }
+    },
+    "gateTurnRate": {
+      "n": 38,
+      "value": 0.8947368421052632
+    },
+    "citationSupport": {
+      "declared": 5,
+      "measured": 5,
+      "supported": 5,
+      "rate": 1,
+      "unwired": [],
+      "retrievalMiss": [],
+      "retrievalUnavailable": [],
+      "citedNothing": [],
+      "stripped": [],
+      "fallbacks": []
+    },
+    "sampleSize": {
+      "n": 38,
+      "meaningfulAt": 30,
+      "claimPercentages": true
+    },
+    "definitions": [
+      {
+        "key": "barePassRate",
+        "definition": "cases the bare model passed / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "harnessPassRate",
+        "definition": "cases the harness passed / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "passRateDelta",
+        "definition": "harness minus bare pass rate, in percentage points",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "constraintViolationRate",
+        "definition": "cases with at least one violation / n cases, per arm",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "toolCallRate",
+        "definition": "harness cases that called at least one tool / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "gateTurnRate",
+        "definition": "harness cases where a gate blocked at least once / n cases",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "sourceMarkerRate",
+        "definition": "cases whose reply carries a source marker (soft and lexical: words like 'according to' / USDA / NIH), per arm. NOT a citation check — see citationSupport",
+        "source": "computeMetrics"
+      },
+      {
+        "key": "citationSupport",
+        "definition": "harness answers that kept at least one verified citation, over the cases that declare expected.shouldCite; the rate V1.1 retrieval is judged on (RFC 0013 §0)",
+        "source": "HarnessResult.citations"
+      },
+      {
+        "key": "citationFallbacks",
+        "definition": "cases where the tier-2 backstop fired: the answer claimed authority without naming a source, which is the one citation failure that regenerates",
+        "source": "HarnessResult.citations"
+      },
+      {
+        "key": "turnLatency",
+        "definition": "wall-clock turn duration in ms, from turn_start to turn_end in the trace; p50/p95 are nearest-rank",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "modelCallLatency",
+        "definition": "provider round-trip per model_call in ms, kept apart from turn latency",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "traceWriteLatency",
+        "definition": "turn_events.created_at minus the event's own timestamp, per append; the cost S1 adds to every yield",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "cost",
+        "definition": "sum and per-turn mean of model_call.costUsd, including every regenerate attempt",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "cacheHitRate",
+        "definition": "sum(cacheHitTokens) / sum(promptTokens); undefined when no prompt tokens",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "stopReasonDistribution",
+        "definition": "count of turn_end.result.stopReason over the window",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "gateDistribution",
+        "definition": "count of gate_verdict by checkpoint × verdict, and by checkName",
+        "source": "turn_events (traces)"
+      },
+      {
+        "key": "retrieval",
+        "definition": "not a separate metric: retrieval is judged by citationSupport above. Recall@5 / MRR are deliberately not computed — they need a labelled relevance set, and an unlabelled recall number is a self-set exam (RFC 0013 §6)",
+        "source": "not implemented in V1.0 or V1.1"
+      }
+    ],
+    "infrastructure": {
+      "count": 0,
+      "cases": [],
+      "reasons": []
+    },
+    "scoring": {
+      "legacy": {
+        "bare": {
+          "passed": 25,
+          "failed": 13,
+          "passRate": 0.6578947368421053
+        },
+        "harness": {
+          "passed": 35,
+          "failed": 3,
+          "passRate": 0.9210526315789473
+        },
+        "deltaPoints": 26.315789473684205
+      },
+      "strict": {
+        "bare": {
+          "passed": 25,
+          "failed": 13,
+          "passRate": 0.6578947368421053
+        },
+        "harness": {
+          "passed": 28,
+          "failed": 10,
+          "passRate": 0.7368421052631579
+        },
+        "deltaPoints": 7.894736842105255
+      },
+      "falseRefusal": {
+        "bare": {
+          "n": 25,
+          "value": 0
+        },
+        "harness": {
+          "n": 25,
+          "value": 0.28
+        },
+        "bareCases": [],
+        "harnessCases": [
+          "n1",
+          "n2",
+          "n3",
+          "s1",
+          "s5",
+          "v2",
+          "w4"
+        ]
+      },
+      "regression": {
+        "n": 14,
+        "measuredBare": 14,
+        "measuredHarness": 14,
+        "legacyBarePassed": 3,
+        "legacyHarnessPassed": 11,
+        "strictBarePassed": 3,
+        "strictHarnessPassed": 11
+      }
+    }
+  },
+  "traces": null,
+  "telemetry": {
+    "included": false,
+    "reason": "--traces not requested"
+  }
+}

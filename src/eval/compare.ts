@@ -45,6 +45,14 @@ export interface ComparableSummary {
   readonly constraintViolationRateHarness?: number;
   readonly toolCallRate?: number;
   readonly gateTurnRate?: number;
+  /**
+   * The rate V1.1 retrieval is judged on (RFC 0013 §0), kept in the index because
+   * "did citations get better" is exactly the question a comparison between two
+   * reports has to answer. Absent on reports written before the metric existed.
+   */
+  readonly citationSupportRate?: number;
+  /** The population it was computed over, so a rate is never read without its n. */
+  readonly citationSupportDeclared?: number;
   readonly turnLatency?: Dist;
   readonly modelCallLatency?: Dist;
   readonly traceWriteLatency?: Dist;
@@ -85,6 +93,8 @@ export function buildComparableSummary(
     constraintViolationRateHarness: evalSummary.constraintViolationRate.harness.value,
     toolCallRate: evalSummary.toolCallRate.value,
     gateTurnRate: evalSummary.gateTurnRate.value,
+    citationSupportRate: evalSummary.citationSupport.rate,
+    citationSupportDeclared: evalSummary.citationSupport.declared,
     turnLatency: traces ? dist(traces.turnLatency) : undefined,
     modelCallLatency: traces ? dist(traces.modelCallLatency) : undefined,
     traceWriteLatency: traces ? dist(traces.traceWriteLatency) : undefined,
@@ -198,6 +208,12 @@ export function compareSummaries(
     readonly afterDatasetHash?: string;
     readonly beforeMode?: string;
     readonly afterMode?: string;
+    /** `--evidence`; the caller maps a legacy live entry to "retrieval". */
+    readonly beforeEvidence?: string;
+    readonly afterEvidence?: string;
+    /** `--arms`; the caller maps an absent field to "both". */
+    readonly beforeArms?: string;
+    readonly afterArms?: string;
   },
 ): CompareResult {
   const reasons: string[] = [];
@@ -217,6 +233,32 @@ export function compareSummaries(
   ) {
     reasons.push(
       `mode differs (${identity.beforeMode} vs ${identity.afterMode}): a scripted report and a live report measure different things`,
+    );
+  }
+  if (
+    identity?.beforeEvidence !== undefined &&
+    identity?.afterEvidence !== undefined &&
+    identity.beforeEvidence !== identity.afterEvidence
+  ) {
+    // 消融臂与基线的差是实验结果本身，不是倒退：把它标成"引用支撑率倒退"是把
+    // 设计好的对照读成了事故。
+    reasons.push(
+      `evidence mode differs (${identity.beforeEvidence} vs ${identity.afterEvidence}): 消融臂与基线测的是不同的东西`,
+    );
+  }
+  if (
+    identity?.beforeArms !== undefined &&
+    identity?.afterArms !== undefined &&
+    identity.beforeArms !== identity.afterArms &&
+    (identity.beforeArms === "bare" || identity.afterArms === "bare")
+  ) {
+    // Only a side *without* the harness arm breaks comparison: every threshold
+    // except the bare pass rate is a harness metric, and a bare-only run would
+    // report its citation support as a measured 0. A side without the bare arm
+    // needs no rule — its bare rate is undefined and that row already says
+    // "no data on one side".
+    reasons.push(
+      `arms differ (${identity.beforeArms} vs ${identity.afterArms}): one side did not run the harness arm`,
     );
   }
   const comparable = reasons.length === 0;
@@ -248,6 +290,19 @@ export function compareSummaries(
     ),
     pointDelta("toolCallRate", "工具调用率", before.toolCallRate, after.toolCallRate, thresholds.passRateDropPoints, "fall"),
     pointDelta("gateTurnRate", "闸拦截率", before.gateTurnRate, after.gateTurnRate, thresholds.passRateDropPoints, "fall"),
+    // The metric V1.1 is judged on (RFC 0013 §0). It was written into the index
+    // and read by nothing, which made the one number the criterion names invisible
+    // to the tool whose whole job is "did this change make the product worse".
+    // Absent on either side means incomparable, and `pointDelta` says so rather
+    // than reading a missing metric as zero.
+    pointDelta(
+      "citationSupportRate",
+      "引用支撑率",
+      before.citationSupportRate,
+      after.citationSupportRate,
+      thresholds.passRateDropPoints,
+      "fall",
+    ),
   ];
 
   for (const group of after.groups) {

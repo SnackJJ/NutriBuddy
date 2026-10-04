@@ -13,6 +13,7 @@
 //   重试，而是将词法 backstop、numeric provenance、advisory structure
 //   全部交给 turn 边界的 consolidated output gate 处理。
 
+import type { TurnRetrieval } from "./turn";
 import {
   assembleContext,
   assemblePinnedRegion,
@@ -270,6 +271,19 @@ export interface RunTurnInput {
   readonly inputDirective?: string;
   /** Pinned evidence text for this turn (RFC 0011 §3.7); see `evidenceSet`. */
   readonly evidenceText?: string;
+  /**
+   * Retrieved evidence for this turn (RFC 0013 §5), already rendered.
+   *
+   * The pinned region carries what is always true; this carries what this
+   * question made relevant, so it cannot live there — the pinned region is
+   * byte-stable by design and a per-question block would invalidate the cached
+   * prefix on every turn. It rides the current user message, ahead of the
+   * question, which is the same dynamic-region route `inputDirective` takes and
+   * needs no mid-conversation `system` message that a provider might reject.
+   */
+  readonly retrievedEvidence?: string;
+  /** Retrieval provenance for this turn (RFC 0013 §5); see {@link TurnRetrieval}. */
+  readonly retrievalProvenance?: TurnRetrieval;
 }
 
 export type TurnResult = TerminalResult;
@@ -408,12 +422,20 @@ export async function* run(
     clock,
     inputDirective,
     evidenceText,
+    retrievedEvidence,
   } = input;
 
   const nowMs = clock ? () => clock().getTime() : () => Date.now();
-  const modelUserInput = inputDirective
+  // Retrieved evidence goes *before* the question, the input directive after it:
+  // the directive is an instruction about the question, while evidence is what
+  // the question is answered from, and a reader of the prompt sees the sources
+  // then the ask.
+  const questionWithDirective = inputDirective
     ? `${userInput}\n\n${inputDirective}`
     : userInput;
+  const modelUserInput = retrievedEvidence
+    ? `${retrievedEvidence}\n\n${questionWithDirective}`
+    : questionWithDirective;
 
   tracer.record({ step: 0, type: "user_input", payload: userInput });
   eventLog?.record({ type: "user_message", data: { content: userInput } });

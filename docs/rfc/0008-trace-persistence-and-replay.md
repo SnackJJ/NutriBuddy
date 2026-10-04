@@ -1,6 +1,6 @@
 # RFC 0008 — 轨迹持久化与 turn 重放（S1 spec）
 
-> 状态：**Proposed**（2026-07-26；经第三轮评审修订，依据 `docs/reviews/2026-07-26-v1-specs-review-opus.md` 的阻断 #1–#3 与应修 #4–#17）。
+> 状态：**Implemented**（2026-07-26 提出，2026-09-17 归位；经第三轮评审修订，依据 `docs/reviews/2026-07-26-v1-specs-review-opus.md` 的阻断 #1–#3 与应修 #4–#17）。T1–T9 全部落地。**未闭合两项**：① **D4 的真人刷新验证**（仓库无 jsdom，见 `docs/reviews/2026-09-13-s1-turn-replay-review.md`）——**这条当前没有票**，原票 #89 已关闭；② `supabase/config.toml` 的 `major_version` 与 hosted 核对（归 #113）。
 > 关联：`docs/rfc/0007` §3 S1（验收 D3/D4/D9）、`docs/rfc/0006` §2/§3/§7、`docs/rfc/0003` T3（权威事件面）、`supabase/migrations/0007`（写者身份的既有先例）。
 > 对应 issue 草稿见 §11。
 

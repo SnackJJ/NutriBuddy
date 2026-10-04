@@ -46,7 +46,19 @@ import {
 import type { MealRecord, QueryRunner } from "@/catalog/queryCatalog";
 import { createSupabaseQueryRunner } from "@/lib/sqlQueryRunner";
 import { assertSessionSubject, getSessionFromHeader } from "@/lib/auth";
-import { loadPinnedEvidence, type LoadedEvidence } from "@/evidence/registry";
+import {
+  createSupabaseEvidenceTextSource,
+  loadPinnedEvidence,
+  type LoadedEvidence,
+} from "@/evidence/registry";
+import { createEdgeFunctionEmbedder } from "@/evidence/embedding";
+import { createSupabaseRetriever, type RetrieverPort } from "@/evidence/retrieval";
+import {
+  loadRetrievalEvidence,
+  withRetrievedSections,
+  type EvidenceTextSource,
+  type RetrievalEvidence,
+} from "@/evidence/retrievalContext";
 import {
   checkQuota,
   parseQuotaLimits,
@@ -101,6 +113,71 @@ const turnCostBounds = buildTurnCostBounds({
 });
 
 const quotaLimits = parseQuotaLimits();
+
+/**
+ * Retrieval for one turn (RFC 0013 §5).
+ *
+ * Per request, not per instance: unlike the pinned set this depends on the
+ * question, which is exactly why it rides the dynamic region instead of the
+ * cached prefix.
+ *
+ * Nothing here is allowed to fail the turn. A retriever that throws, an edge
+ * function that is down, a corpus that cannot be read — all of them return
+ * `unavailable` provenance and no block, and the answer goes out without a
+ * citation rather than with an invented one (ADR 0004 §4). The pinned evidence
+ * still rides the turn, so a retrieval outage is a smaller failure than the
+ * pre-S4 behaviour it degrades towards.
+ */
+/** A server-side variable the retrieval path cannot work without. */
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+}
+
+const NO_RETRIEVAL: RetrievalEvidence = {
+  sectionIds: [],
+  provenance: { sourceVersion: "", hits: [], degraded: "unavailable" },
+};
+
+/**
+ * Retrieval runs through the *session* client, not the service role.
+ *
+ * The corpus is public read-only data, so the service role would work — and using
+ * it would add a third service-role door to this route for no gain. Reading
+ * through the caller's client instead means the row level security that already
+ * says "signed-in users may read chunks of active sources" is what decides what
+ * is retrievable, so a superseded document is unavailable on this path for the
+ * same reason it is unavailable to any other reader, and the audit invariant this
+ * route's test asserts stays true.
+ */
+function retrievalFor(client: SupabaseClient): { retriever: RetrieverPort; texts: EvidenceTextSource } {
+  return {
+    retriever: createSupabaseRetriever(client, {
+      embed: createEdgeFunctionEmbedder({
+        baseUrl: requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
+        apiKey: requiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      }),
+      onFailure: (side, error) =>
+        console.error(`[chat] retrieval ${side} side failed; answering without retrieved evidence`, error),
+    }),
+    texts: createSupabaseEvidenceTextSource(client),
+  };
+}
+
+async function retrieveForTurn(
+  client: SupabaseClient,
+  query: string,
+  sourceVersion: string,
+): Promise<RetrievalEvidence> {
+  try {
+    const { retriever, texts } = retrievalFor(client);
+    return await loadRetrievalEvidence({ retriever, texts, query, sourceVersion });
+  } catch (err) {
+    console.error("[chat] retrieval failed; answering without retrieved evidence", err);
+    return { ...NO_RETRIEVAL, provenance: { ...NO_RETRIEVAL.provenance, sourceVersion } };
+  }
+}
 
 /**
  * The pinned evidence set, loaded once per instance (RFC 0011 §3.7).
@@ -445,6 +522,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   // needs both halves — the text the model reads and the set the gate checks.
   const loaded = await evidence();
 
+  // Retrieval is per turn, and only for a question: a proposal confirmation is a
+  // commit short-circuit, and spending an embedding call to decorate it would be
+  // cost with no reader.
+  const retrieved =
+    turnInput.tag === "utterance"
+      ? await retrieveForTurn(userClient, turnInput.content, loaded?.evidence.evidenceSet.sourceVersion ?? "")
+      : NO_RETRIEVAL;
+
   // Phase 6: fail-closed assembly (ConfirmPorts spirit for confirm path)
   const assembly = assembleChatTurnPorts({
     kind: turnInput.tag,
@@ -464,8 +549,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     userContext,
     interactionStore,
     evidenceText: loaded?.evidence.text,
-    evidenceSet: loaded?.evidence.evidenceSet,
+    evidenceSet: withRetrievedSections(loaded?.evidence.evidenceSet, retrieved.sectionIds),
     citationRegistry: loaded?.registry,
+    retrievedEvidence: retrieved.text,
+    // Only for a question. A commit short-circuit was never meant to retrieve, and
+    // stamping it `unavailable` would report an outage that never happened — the
+    // conflation the attribution buckets exist to prevent.
+    ...(turnInput.tag === "utterance" ? { retrievalProvenance: retrieved.provenance } : {}),
     requireTools: turnInput.tag === "utterance",
   });
 

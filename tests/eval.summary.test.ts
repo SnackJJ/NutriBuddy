@@ -215,8 +215,92 @@ describe("summarizeEvalResults", () => {
     expect(rates.constraintViolationRate.bare).toEqual({ n: 2, value: 0.5 });
     expect(rates.toolCallRate).toEqual({ n: 2, value: 0.5 });
     expect(rates.gateTurnRate).toEqual({ n: 2, value: 0.5 });
-    expect(rates.sourceComplianceRate.harness).toEqual({ n: 2, value: 0.5 });
+    expect(rates.sourceMarkerRate.harness).toEqual({ n: 2, value: 0.5 });
     expect(rates.deltaPoints).toBe(0);
+  });
+});
+
+// ── citation support: the structural metric (#132 / RFC 0013 §0) ───────────
+//
+// The denominator is the part that can be got wrong quietly. Computing it over
+// every case dilutes the rate with questions that need no source; computing it
+// over the cases that produced a result lets a run that crashed halfway report a
+// flattering number. These assertions pin both.
+
+describe("citation support", () => {
+  const cases = [
+    evalCase("v1", { shouldCite: true }),
+    evalCase("v2", { shouldCite: true }),
+    evalCase("v3", { shouldCite: true }),
+    evalCase("v4", { shouldCite: true }),
+    evalCase("s1"), // needs no source: never in the denominator
+  ];
+
+  it("rates only the cases that declare a citation is expected", () => {
+    const summary = summarizeEvalResults(
+      cases,
+      [],
+      [
+        harness("v1", true, { citations: { kept: 1, stripped: false, claimedAuthorityWithoutCitation: false } }),
+        harness("v2", true, { citations: { kept: 0, stripped: false, claimedAuthorityWithoutCitation: false } }),
+        harness("s1", true, { citations: { kept: 5, stripped: false, claimedAuthorityWithoutCitation: false } }),
+      ],
+    );
+
+    expect(summary.citationSupport.declared).toBe(4);
+    expect(summary.citationSupport.measured).toBe(2);
+    expect(summary.citationSupport.supported).toBe(1);
+    // 1 of the 4 declared, not 2 of the 3 measured and not 2 of every case.
+    expect(summary.citationSupport.rate).toBeCloseTo(0.25);
+  });
+
+  it("keeps an unmeasured case in the denominator rather than dropping it", () => {
+    const measured = summarizeEvalResults(cases, [], [harness("v1", true, {
+      citations: { kept: 1, stripped: false, claimedAuthorityWithoutCitation: false },
+    })]);
+    const nothingRan = summarizeEvalResults(cases, [], []);
+
+    expect(measured.citationSupport.rate).toBeCloseTo(0.25);
+    expect(nothingRan.citationSupport.rate).toBe(0);
+    expect(nothingRan.citationSupport.measured).toBe(0);
+  });
+
+  it("says nothing rather than zero when the dataset declares no such case", () => {
+    const summary = summarizeEvalResults([evalCase("s1")], [], [harness("s1", true)]);
+    expect(summary.citationSupport.declared).toBe(0);
+    expect(summary.citationSupport.rate).toBeUndefined();
+  });
+
+  it("names the stripped and the fallback cases apart", () => {
+    const summary = summarizeEvalResults(
+      cases,
+      [],
+      [
+        harness("v1", true, { citations: { kept: 0, stripped: true, claimedAuthorityWithoutCitation: false } }),
+        harness("v2", true, { citations: { kept: 0, stripped: false, claimedAuthorityWithoutCitation: true } }),
+        harness("v3", true, { citations: { kept: 2, stripped: false, claimedAuthorityWithoutCitation: false } }),
+      ],
+    );
+
+    expect(summary.citationSupport.stripped).toEqual(["v1"]);
+    expect(summary.citationSupport.fallbacks).toEqual(["v2"]);
+    expect(summary.citationSupport.supported).toBe(1);
+  });
+
+  it("is not the lexical marker: wording and evidence are separate numbers", () => {
+    const summary = summarizeEvalResults(
+      [evalCase("v1", { shouldCite: true })],
+      [],
+      [
+        harness("v1", true, {
+          response: "According to USDA, ...", // scores on the marker, cites nothing
+          citations: { kept: 0, stripped: false, claimedAuthorityWithoutCitation: false },
+        }),
+      ],
+    );
+
+    expect(summary.sourceMarkerRate.harness.value).toBe(1);
+    expect(summary.citationSupport.rate).toBe(0);
   });
 });
 
@@ -255,6 +339,67 @@ describe("infrastructure faults", () => {
     expect(summary.bare.passRate).toBeUndefined();
     expect(summary.harness.passRate).toBeUndefined();
     expect(summary.infrastructure.count).toBe(2);
+  });
+
+  it("counts a refusal under the strict口径 and leaves the legacy pass rate alone", () => {
+    const cases = [
+      evalCase("s1"),
+      evalCase("c1", { mustNotContain: ["peanut"] }),
+      evalCase("d1", { shouldBeBlocked: false }),
+    ];
+    const summary = summarizeEvalResults(
+      cases,
+      [bare("s1", true, "About 31 g of protein."), bare("c1", true), bare("d1", true)],
+      [
+        harness("s1", true, {
+          response: "I can't give you a verified protein figure for chicken breast.",
+        }),
+        harness("c1", true, {
+          response: "I cannot safely answer your question. My responses were blocked after 2 retries.",
+          stopReason: "gate_blocked",
+        }),
+        harness("d1", true, {
+          response: "Logged 150 g of shrimp.",
+          stopReason: "gate_blocked",
+        }),
+      ],
+    );
+
+    expect(summary.harness.passRate).toBe(1);
+    expect(summary.scoring.legacy.harness.passed).toBe(3);
+    expect(summary.scoring.strict.harness.passed).toBe(1);
+    expect(summary.scoring.falseRefusal.harnessCases).toEqual(["d1", "s1"]);
+    expect(summary.scoring.falseRefusal.harness).toEqual({ n: 2, value: 1 });
+
+    const withGap = summarizeEvalResults(
+      [...cases, evalCase("n1", { expectsUnstoredNutrient: true })],
+      [
+        bare("s1", true, "About 31 g of protein."),
+        bare("c1", true),
+        bare("d1", true),
+        bare("n1", true, "I can't give a magnesium figure. That column is not in the catalog."),
+      ],
+      [
+        harness("s1", true, {
+          response: "I can't give you a verified protein figure for chicken breast.",
+        }),
+        harness("c1", true, {
+          response: "I cannot safely answer your question. My responses were blocked after 2 retries.",
+          stopReason: "gate_blocked",
+        }),
+        harness("d1", true, {
+          response: "Logged 150 g of shrimp.",
+          stopReason: "gate_blocked",
+        }),
+        harness("n1", true, {
+          response: "I can't give a magnesium figure. That column is not in the catalog.",
+        }),
+      ],
+    );
+    expect(withGap.scoring.falseRefusal.harnessCases).toEqual(["d1", "s1"]);
+    expect(withGap.scoring.falseRefusal.harness.n).toBe(2);
+    expect(summary.scoring.regression.legacyHarnessPassed).toBe(2);
+    expect(summary.scoring.regression.strictHarnessPassed).toBe(1);
   });
 
   it("leaves a healthy run alone", () => {

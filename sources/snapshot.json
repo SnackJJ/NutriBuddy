@@ -1,11 +1,33 @@
 {
-  "schema": "1.0.0",
-  "ingestedAt": "2026-09-14T15:48:09.601Z",
+  "schema": "1.1.0",
+  "ingestedAt": "2026-09-17T00:52:12.430Z",
   "pinnedBudget": {
     "maxSections": 40,
     "maxChars": 24000,
     "sections": 29,
     "chars": 23862
+  },
+  "chunks": {
+    "total": 707,
+    "sections": 360,
+    "bibliography": {
+      "sections": 12,
+      "chunks": 251,
+      "sectionIds": [
+        "ods-calcium#calcium-references",
+        "ods-folate#folate-references",
+        "ods-iodine#iodine-references",
+        "ods-iron#iron-references",
+        "ods-magnesium#magnesium-references",
+        "ods-omega-3#omega-3-fatty-acids-references",
+        "ods-potassium#potassium-references",
+        "ods-vitamin-b12#vitamin-b12-references",
+        "ods-vitamin-c#vitamin-c-references",
+        "ods-vitamin-d#vitamin-d-references",
+        "ods-vitamin-k#vitamin-k-references",
+        "ods-zinc#zinc-references"
+      ]
+    }
   },
   "sources": [
     {

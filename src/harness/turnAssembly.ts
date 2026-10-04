@@ -13,7 +13,7 @@ import type {
   ProposalStore,
 } from "./logMeal";
 import type { TraceStore } from "./traceStore";
-import type { TurnEvidenceSet, TurnPorts, TurnResult } from "./turn";
+import type { TurnEvidenceSet, TurnPorts, TurnResult, TurnRetrieval } from "./turn";
 import type { CitationRegistry } from "./citationGate";
 import { resolveConfirmPorts } from "./turn";
 
@@ -58,6 +58,17 @@ export interface CreateTurnAssemblyInput {
   readonly evidenceText?: string;
   readonly evidenceSet?: TurnEvidenceSet;
   readonly citationRegistry?: CitationRegistry;
+  /**
+   * Retrieved evidence for this turn (RFC 0013 §5): the rendered block the model
+   * reads, and the provenance the trace keeps.
+   *
+   * Separate from `evidenceText` because it is not part of the pinned region —
+   * it changes with the question, so it cannot be in the cached prefix. The
+   * caller runs retrieval (it owns the corpus and the port) and passes both
+   * halves, exactly as it does for the pinned set.
+   */
+  readonly retrievedEvidence?: string;
+  readonly retrievalProvenance?: TurnRetrieval;
   /**
    * Trace port (RFC 0008 §3.2). Optional because the CLI and scripted tests run
    * without a database; the chat route always supplies one.
@@ -150,6 +161,8 @@ export function createTurnAssembly(
     tracer: input.tracer,
     evidenceText: input.evidenceText,
     evidenceSet: input.evidenceSet,
+    retrievedEvidence: input.retrievedEvidence,
+    retrievalProvenance: input.retrievalProvenance,
     citationRegistry: input.citationRegistry,
     clock: input.clock,
     eventLog: input.eventLog,

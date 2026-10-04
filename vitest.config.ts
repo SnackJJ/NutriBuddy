@@ -19,6 +19,6 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**", "**/.sandcastle/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**", "**/.sandcastle/**", "**/.claude/**"],
   },
 });

@@ -5,7 +5,7 @@
 // The route handler is thin — just wires parsed inputs into the Turn Seam.
 
 import type { ChatMessage } from "../harness/types";
-import type { TurnEvidenceSet, TurnInput, TurnPorts } from "../harness/turn";
+import type { TurnEvidenceSet, TurnInput, TurnPorts, TurnRetrieval } from "../harness/turn";
 import type { CitationRegistry } from "../harness/citationGate";
 import type { Tracer } from "../harness/tracer";
 import type { ModelAdapter } from "../harness/types";
@@ -166,6 +166,10 @@ export interface BuildChatTurnPortsInput {
   readonly evidenceSet?: TurnEvidenceSet;
   /** Registry the citation gate checks against (RFC 0011 §3.5). */
   readonly citationRegistry?: CitationRegistry;
+  /** Retrieved evidence block for the model (RFC 0013 §5). */
+  readonly retrievedEvidence?: string;
+  /** What retrieval contributed, for the trace (RFC 0013 §5). */
+  readonly retrievalProvenance?: TurnRetrieval;
 }
 
 /**
@@ -220,6 +224,18 @@ export function assembleChatTurnPorts(
     userContext: input.userContext,
     interactionStore: input.interactionStore,
     trace: input.trace,
+    // The evidence ports. This list is the seam between the chat route and
+    // `turn()`: a field that is accepted in the input type but not forwarded here
+    // is a port nothing observes, and the failure is silent in the worst way —
+    // the answer still streams, with no evidence and every citation stripped by
+    // the fail-closed gate, so it looks like a product that simply cites nothing.
+    // The V1.0 evidence trio was dropped here from the day it landed; V1.1's pair
+    // joined it, and `tests/chat.seam.test.ts` now asserts all five survive.
+    evidenceText: input.evidenceText,
+    evidenceSet: input.evidenceSet,
+    citationRegistry: input.citationRegistry,
+    retrievedEvidence: input.retrievedEvidence,
+    retrievalProvenance: input.retrievalProvenance,
     crashReply: input.crashReply,
     requireTools: input.requireTools,
   });

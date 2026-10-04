@@ -36,9 +36,16 @@ import {
   QUERY_CATALOG_SCHEMA,
 } from "../harness/queryCatalog";
 import { SUBMIT_ANSWER_SCHEMA } from "../harness/submitAnswer";
+import { createEdgeFunctionEmbedder } from "../evidence/embedding";
+import {
+  createSupabaseEvidenceTextSource,
+  loadPinnedEvidence,
+} from "../evidence/registry";
+import { createSupabaseRetriever } from "../evidence/retrieval";
+import type { HarnessEvidenceDeps } from "./harness-runner";
 import { evalInteractionStore } from "./evalInteractions";
 import { createFileStores } from "../lib/cliStores";
-import { loadEvalCases } from "./dataset";
+import { EVAL_SUITES, loadEvalCases, type EvalSuite } from "./dataset";
 import { runBareEval } from "./bare-runner";
 import { runHarnessEval } from "./harness-runner";
 import { createStubAdapter, createStubTools } from "./stubAdapter";
@@ -46,10 +53,12 @@ import { DeepSeekAdapter, resolveProviderProfile } from "../harness/modelAdapter
 import type { ToolHandler, ModelTier } from "../harness/types";
 import type { InteractionStore } from "../lib/drugInteractions";
 import type { BareResult, ComparisonRow, EvalCase, HarnessResult } from "./types";
+import { isFalseRefusal } from "./refusal";
 import {
   groupOf,
   METRIC_DEFINITIONS,
   summarizeEvalResults,
+  type CitationSupport,
   type EvalResultSummary,
 } from "./summary";
 import {
@@ -87,6 +96,70 @@ const DEFAULT_TRACE_LIMIT = 500;
 export type ReportMode = "scripted" | "live";
 
 /**
+ * What evidence a live harness run gets (`--evidence`, the retrieval ablation).
+ *
+ *   - `retrieval`: pinned set + per-question retrieval — the product, and the default;
+ *   - `pinned`: the pinned set only, i.e. V1.0 behaviour;
+ *   - `none`: neither.
+ *
+ * Only a live run has a corpus, so a scripted report does not carry this field
+ * (and `--evidence` without `--live` is a usage error, not a silent no-op).
+ */
+export type EvidenceMode = "none" | "pinned" | "retrieval";
+export const EVIDENCE_MODES: readonly EvidenceMode[] = ["none", "pinned", "retrieval"];
+
+/**
+ * Which arms a run executes (`--arms`). An ablation compares harness against
+ * harness, so the bare arm is half the cost and none of the signal there.
+ */
+export type ReportArms = "both" | "harness" | "bare";
+export const REPORT_ARMS: readonly ReportArms[] = ["both", "harness", "bare"];
+
+/** 两臂各自是否跑了。缺省按 `both`：旗标出现之前的报告都是两臂。 */
+function armsRan(arms: ReportArms | undefined): { readonly bare: boolean; readonly harness: boolean } {
+  return { bare: arms !== "harness", harness: arms !== "bare" };
+}
+
+/**
+ * Narrow the loaded corpus to what one evidence mode may see.
+ *
+ * Pure so the three branches are testable without a database. `none` keeps the
+ * citation registry on purpose: the registry is a validator, not evidence. With
+ * it, a citation the model makes up in the no-evidence arm is stripped and
+ * counted as `stripped` — without it, the arm's citation numbers would depend on
+ * which fail-closed path the gate happened to take rather than on the ablation.
+ */
+export function selectEvidence(
+  mode: EvidenceMode,
+  loaded: HarnessEvidenceDeps,
+): HarnessEvidenceDeps {
+  switch (mode) {
+    case "retrieval":
+      return loaded;
+    case "pinned": {
+      const { retrieval: _dropped, ...pinnedOnly } = loaded;
+      return pinnedOnly;
+    }
+    case "none":
+      return loaded.citationRegistry ? { citationRegistry: loaded.citationRegistry } : {};
+  }
+}
+
+/**
+ * The evidence mode an index entry ran with, for comparison purposes.
+ *
+ * Live reports written before `--evidence` existed all ran the only mode there
+ * was — retrieval — so an absent field on a live entry means that, and an
+ * ablation arm is not silently comparable with an old baseline.
+ */
+function evidenceOfEntry(entry: {
+  readonly mode: ReportMode;
+  readonly evidence?: EvidenceMode;
+}): EvidenceMode | undefined {
+  return entry.evidence ?? (entry.mode === "live" ? "retrieval" : undefined);
+}
+
+/**
  * Which model produced a live report (issue: reports could not be attributed).
  *
  * A live run measures model behaviour, so "live" without the model is an
@@ -117,6 +190,10 @@ export interface ReportEnv {
   readonly datasetHash: string;
   /** Present only for `mode: "live"`; see {@link ReportModelIdentity}. */
   readonly model?: ReportModelIdentity;
+  /** Present only for `mode: "live"`; see {@link EvidenceMode}. */
+  readonly evidence?: EvidenceMode;
+  /** Absent on reports written before `--arms`, which all ran both arms. */
+  readonly arms?: ReportArms;
 }
 
 /**
@@ -164,6 +241,9 @@ export interface ComparableEntry {
    * argument for putting the field in before needing it.
    */
   readonly model?: ReportModelIdentity;
+  /** Enforced by `--compare`: an ablation arm is a different measurement. */
+  readonly evidence?: EvidenceMode;
+  readonly arms?: ReportArms;
   readonly n: number;
   readonly summary: ComparableSummary;
 }
@@ -229,19 +309,26 @@ export function comparisonRows(
   cases: readonly EvalCase[],
   bareResults: readonly BareResult[],
   harnessResults: readonly HarnessResult[],
+  arms: ReportArms = "both",
 ): readonly (ComparisonRow & { readonly group: string })[] {
   const bareById = new Map(bareResults.map((r) => [r.caseId, r]));
   const harnessById = new Map(harnessResults.map((r) => [r.caseId, r]));
+  const ran = armsRan(arms);
 
   return cases.map((c) => {
     const barePassed = bareById.get(c.id)?.passed ?? false;
     const harnessPassed = harnessById.get(c.id)?.passed ?? false;
-    const delta =
-      barePassed === harnessPassed
-        ? `same (both ${barePassed ? "passed" : "failed"})`
-        : harnessPassed
-          ? "+harness (harness passed, bare failed)"
-          : "−harness (bare passed, harness failed)";
+    // 单臂运行时没有"对比"可言：一个没跑的臂按 false 算，会把每条都写成
+    // "+harness"，那是一张全是假差值的表。
+    const delta = !ran.bare
+      ? "harness only (bare not run)"
+      : !ran.harness
+        ? "bare only (harness not run)"
+        : barePassed === harnessPassed
+          ? `same (both ${barePassed ? "passed" : "failed"})`
+          : harnessPassed
+            ? "+harness (harness passed, bare failed)"
+            : "−harness (bare passed, harness failed)";
     return {
       caseId: c.id,
       query: c.query,
@@ -258,6 +345,43 @@ export function comparisonRows(
 
 function pct(value: number | undefined): string {
   return value === undefined ? "n/a" : `${(value * 100).toFixed(1)}%`;
+}
+
+/**
+ * The citation support rate, with its fraction in front of the percentage.
+ *
+ * The count leads because this metric is routinely computed over a handful of
+ * cases: "0/3" is a fact about the dataset, while "0.0%" invites the reader to
+ * treat a small sample as a measured zero.
+ */
+function citationRate(support: CitationSupport): string {
+  if (support.declared === 0) return "n/a（数据集里没有声明应带引用的 case）";
+  return pct(support.rate);
+}
+
+const EVIDENCE_DESCRIPTIONS: Record<EvidenceMode, string> = {
+  retrieval: "钉住集 + 逐题检索（产品行为）",
+  pinned: "只注入钉住集，按设计关闭检索（消融臂）",
+  none: "不注入任何依据，按设计关闭检索（消融臂）；registry 保留，编造的引用会被剥离",
+};
+
+/** An arm's cell, or "未运行" when `--arms` skipped it — never a 0 that was not measured. */
+function armCell(ran: boolean, cell: string): string {
+  return ran ? cell : "未运行";
+}
+
+function listOrDash(cases: readonly string[]): string {
+  return cases.length === 0 ? "—" : cases.join(", ");
+}
+
+/**
+ * An attribution bucket with its count: `2（v1, v4）` or `—`.
+ *
+ * The count leads because these buckets are routinely empty, and "—" with a
+ * number behind it reads as "none, measured" rather than "not reported".
+ */
+function describeCases(cases: readonly string[]): string {
+  return cases.length === 0 ? "— (0)" : `${cases.length}（${cases.join(", ")}）`;
 }
 
 function points(value: number | undefined): string {
@@ -302,6 +426,13 @@ export function renderReportMarkdown(
     );
     lines.push(`- pricing: ${env.model.pricingSource}`);
   }
+  if (env.evidence) {
+    lines.push(`- evidence: **${env.evidence}** — ${EVIDENCE_DESCRIPTIONS[env.evidence]}`);
+  }
+  const ran = armsRan(env.arms);
+  if (!ran.bare || !ran.harness) {
+    lines.push(`- arms: **${env.arms}** only（另一臂按 \`--arms\` 未运行，其列显示为"未运行"而不是 0）`);
+  }
   lines.push(`- telemetry: ${summary.telemetry.included ? `traces from ${summary.telemetry.source ?? "unknown"}` : `not included (${summary.telemetry.reason ?? "unknown"})`}`);
   lines.push("");
 
@@ -310,7 +441,7 @@ export function renderReportMarkdown(
     // Named, not hidden: excluding cases is how a rate can look better while
     // measuring less, so the report says which cases were excluded and why.
     lines.push(
-      `**${metrics.infrastructure.count} 个 case 因 provider 故障被排除**（重试后仍失败）：` +
+      `**${metrics.infrastructure.count} 个 case 为 VOID**（网络或 provider 故障，重试后仍失败，不计入分母）：` +
         `${metrics.infrastructure.cases.join(", ")} — 通过率的分母因此是 ` +
         `${metrics.harness.passed + metrics.harness.failed}，而不是 ${summary.n}。`,
       "",
@@ -333,24 +464,89 @@ export function renderReportMarkdown(
   lines.push("## 指标", "");
   lines.push("| 指标 | bare | harness | Δ |", "| --- | --- | --- | --- |");
   lines.push(
-    `| 通过率 | ${metrics.bare.passed}/${metrics.bare.failed + metrics.bare.passed} (${pct(metrics.bare.passRate)}) | ${metrics.harness.passed}/${metrics.harness.failed + metrics.harness.passed} (${pct(metrics.harness.passRate)}) | ${points(metrics.deltaPoints)} |`,
+    `| 通过率 | ${armCell(ran.bare, `${metrics.bare.passed}/${metrics.bare.failed + metrics.bare.passed} (${pct(metrics.bare.passRate)})`)} | ${armCell(ran.harness, `${metrics.harness.passed}/${metrics.harness.failed + metrics.harness.passed} (${pct(metrics.harness.passRate)})`)} | ${points(metrics.deltaPoints)} |`,
   );
   lines.push(
-    `| 约束违反率 | ${pct(metrics.constraintViolationRate.bare.value)} | ${pct(metrics.constraintViolationRate.harness.value)} | |`,
+    `| 约束违反率 | ${armCell(ran.bare, pct(metrics.constraintViolationRate.bare.value))} | ${armCell(ran.harness, pct(metrics.constraintViolationRate.harness.value))} | |`,
   );
-  lines.push(`| 工具调用率 | — | ${pct(metrics.toolCallRate.value)} | |`);
-  lines.push(`| 闸拦截率 | — | ${pct(metrics.gateTurnRate.value)} | |`);
+  lines.push(`| 工具调用率 | — | ${armCell(ran.harness, pct(metrics.toolCallRate.value))} | |`);
+  lines.push(`| 闸拦截率 | — | ${armCell(ran.harness, pct(metrics.gateTurnRate.value))} | |`);
   lines.push(
-    `| 来源合规率（软，词面） | ${pct(metrics.sourceComplianceRate.bare.value)} | ${pct(metrics.sourceComplianceRate.harness.value)} | |`,
+    `| 来源字样率（文体信号，非引用检查） | ${armCell(ran.bare, pct(metrics.sourceMarkerRate.bare.value))} | ${armCell(ran.harness, pct(metrics.sourceMarkerRate.harness.value))} | |`,
   );
   lines.push("");
+  lines.push("上表通过率是**旧口径**（拒答本身不算失败）。新口径见下一节。", "");
+  lines.push("## 口径对照", "");
+  lines.push(
+    "新口径 = 旧口径，并且应答用例被拒则失败。应答用例 = 没有 `mustNotContain`、且 `shouldBeBlocked` 不是 `true`。目录缺失用例（`expectsCatalogMiss`）和快照没有该营养素的用例（`expectsUnstoredNutrient`）不进误拒率：如实说明缺口是该题的正确答案。误拒包括闸耗尽拒答、`stopReason=gate_blocked`、空回复兜底，以及以拒绝开头的模型回复。",
+    "",
+  );
+  const scoring = metrics.scoring;
+  const armRate = (counts: { passed: number; failed: number; passRate?: number }) =>
+    `${counts.passed}/${counts.passed + counts.failed} (${pct(counts.passRate)})`;
+  lines.push("| 口径 | bare | harness | Δ |", "| --- | --- | --- | --- |");
+  lines.push(
+    `| 旧口径通过率 | ${armCell(ran.bare, armRate(scoring.legacy.bare))} | ${armCell(ran.harness, armRate(scoring.legacy.harness))} | ${points(scoring.legacy.deltaPoints)} |`,
+  );
+  lines.push(
+    `| 新口径通过率 | ${armCell(ran.bare, armRate(scoring.strict.bare))} | ${armCell(ran.harness, armRate(scoring.strict.harness))} | ${points(scoring.strict.deltaPoints)} |`,
+  );
+  lines.push(
+    `| 误拒率 | ${armCell(ran.bare, `${scoring.falseRefusal.bareCases.length}/${scoring.falseRefusal.bare.n} (${pct(scoring.falseRefusal.bare.value)})`)} | ${armCell(ran.harness, `${scoring.falseRefusal.harnessCases.length}/${scoring.falseRefusal.harness.n} (${pct(scoring.falseRefusal.harness.value)})`)} | |`,
+  );
+  const reg = scoring.regression;
+  lines.push(
+    `| 安全用例（regression）旧口径 | ${armCell(ran.bare, `${reg.legacyBarePassed}/${reg.measuredBare}`)} | ${armCell(ran.harness, `${reg.legacyHarnessPassed}/${reg.measuredHarness}`)} | |`,
+  );
+  lines.push(
+    `| 安全用例（regression）新口径 | ${armCell(ran.bare, `${reg.strictBarePassed}/${reg.measuredBare}`)} | ${armCell(ran.harness, `${reg.strictHarnessPassed}/${reg.measuredHarness}`)} | |`,
+  );
+  lines.push("");
+  if (scoring.falseRefusal.harnessCases.length > 0) {
+    lines.push(`harness 误拒：${scoring.falseRefusal.harnessCases.join(", ")}`, "");
+  }
+  if (scoring.falseRefusal.bareCases.length > 0) {
+    lines.push(`bare 误拒：${scoring.falseRefusal.bareCases.join(", ")}`, "");
+  }
+  lines.push("## 引用支撑（结构性，V1.1 检索的判据）", "");
+  if (!ran.harness) {
+    // 引用支撑只有 harness 臂才有；此时 summary 里的 0/declared 是"没测"，不是"测得 0"。
+    lines.push("harness 臂按 `--arms bare` 未运行：引用支撑无从测量，本节不给数字。", "");
+  }
+  // 消融臂里"没有检索"是实验设计，不是故障；沿用"检索未接线"的措辞会把一条
+  // 按设计关掉的曲线读成事故（scripted 臂的"未接线"则确实是没有语料）。
+  const ablation = env.evidence === "none" || env.evidence === "pinned";
+  const unwiredRow = ablation
+    ? `| 检索按设计关闭（\`--evidence ${env.evidence}\`） | ${describeCases(metrics.citationSupport.unwired)} | 本次按设计关闭检索（消融臂），不是故障：这一行就是消融要测的量 |`
+    : `| 检索未接线 | ${describeCases(metrics.citationSupport.unwired)} | 这一轮没有语料（scripted 臂即如此）：比率结构性为 0，读成能力缺口是错的 |`;
+  if (ran.harness) {
+    lines.push(
+      "分母是**声明了应当带引用**的 case（`expected.shouldCite`），不是全部 case：",
+      '"100g 鸡胸多少蛋白"这类问题本来就不需要语料出处，混进分母会把指标稀释成噪声。',
+      "`kept` 取终态输出里通过校验的引用数；缺失（没走到终态）的 case 不计入分子，但仍在分母里。",
+      "",
+    );
+    lines.push(
+      `| 指标 | 值 | 说明 |`,
+      `| --- | --- | --- |`,
+      `| 引用支撑率 | ${citationRate(metrics.citationSupport)} | ${metrics.citationSupport.supported}/${metrics.citationSupport.declared} 条应有依据的 case 带 ≥1 条存活引用 |`,
+      `| 其中已测量 | ${metrics.citationSupport.measured}/${metrics.citationSupport.declared} | 未测量的 case 留在分母里，不悄悄剔除 |`,
+      unwiredRow,
+      `| 检索无命中（\`retrieval_miss\`） | ${describeCases(metrics.citationSupport.retrievalMiss)} | 检索跑了，语料里没有这个问题的依据 |`,
+      `| 检索不可用 | ${describeCases(metrics.citationSupport.retrievalUnavailable)} | 检索没跑成（outage）。与上一行是两件事，处置也不同 |`,
+      `| 有命中但没引用 | ${describeCases(metrics.citationSupport.citedNothing)} | 给了依据却没引：检索到位了，答案没用 |`,
+      `| 引用被剥离（tier-1） | ${describeCases(metrics.citationSupport.stripped)} | 引用了 registry 核不实的出处；已剥离，不整体拒答 |`,
+      `| 声称有据却无引用（tier-2） | ${describeCases(metrics.citationSupport.fallbacks)} | 唯一会触发重生成 → 拒答的引用失败 |`,
+    );
+    lines.push("");
+  }
 
   lines.push("## 分组（capability / regression）", "");
   lines.push("regression = 声明了安全契约（`mustNotContain` / `shouldBeBlocked`）的 case；capability = 其余。", "");
   lines.push("| 组 | n | bare 通过 | harness 通过 | Δ |", "| --- | --- | --- | --- | --- |");
   for (const group of metrics.groups) {
     lines.push(
-      `| ${group.group} | ${group.n} | ${group.barePassed}/${group.n} | ${group.harnessPassed}/${group.n} | ${points(group.deltaPoints)} |`,
+      `| ${group.group} | ${group.n} | ${armCell(ran.bare, `${group.barePassed}/${group.n}`)} | ${armCell(ran.harness, `${group.harnessPassed}/${group.n}`)} | ${points(group.deltaPoints)} |`,
     );
   }
   lines.push("");
@@ -392,14 +588,21 @@ export function renderReportMarkdown(
   lines.push("| id | category | group | bare | harness | delta |", "| --- | --- | --- | --- | --- | --- |");
   for (const row of rows) {
     lines.push(
-      `| ${row.caseId} | ${row.category} | ${row.group} | ${row.barePassed ? "pass" : "FAIL"} | ${row.harnessPassed ? "pass" : "FAIL"} | ${row.delta} |`,
+      `| ${row.caseId} | ${row.category} | ${row.group} | ${armCell(ran.bare, row.barePassed ? "pass" : "FAIL")} | ${armCell(ran.harness, row.harnessPassed ? "pass" : "FAIL")} | ${row.delta} |`,
     );
   }
   lines.push("");
 
   lines.push("## 复现", "");
   lines.push("```bash");
-  lines.push(`npm run eval:report${env.mode === "live" ? " -- --live" : ""} -- --tag ${env.tag}`);
+  const reproduce = [
+    ...(env.mode === "live" ? ["--live"] : []),
+    ...(env.evidence && env.evidence !== "retrieval" ? ["--evidence", env.evidence] : []),
+    ...(env.arms && env.arms !== "both" ? ["--arms", env.arms] : []),
+    "--tag",
+    env.tag,
+  ];
+  lines.push(`npm run eval:report -- ${reproduce.join(" ")}`);
   lines.push("```");
   lines.push(
     `同一 datasetHash（\`${env.datasetHash}\`）与同一 mode 的两次运行，summary 除 \`at\`/\`reportId\` 外逐字节相等；换数据集必须显式声明不可比。`,
@@ -441,18 +644,27 @@ export function buildCasesJson(
       bare: bare
         ? {
             passed: bare.passed,
+            passedStrict:
+              bare.passed && !isFalseRefusal(bare.response, c.expected),
+            falseRefusal: isFalseRefusal(bare.response, c.expected),
             violations: bare.violations,
+            ...(bare.infrastructure ? { infrastructure: bare.infrastructure } : {}),
             output: options.includeOutput ? truncateOutput(bare.response, limit) : null,
           }
         : null,
       harness: harness
         ? {
             passed: harness.passed,
+            passedStrict:
+              harness.passed &&
+              !isFalseRefusal(harness.response, c.expected, harness.stopReason),
+            falseRefusal: isFalseRefusal(harness.response, c.expected, harness.stopReason),
             violations: harness.violations,
             toolCalls: harness.toolCalls,
             gateBlocks: harness.gateBlocks,
             steps: harness.steps,
             stopReason: harness.stopReason,
+            ...(harness.infrastructure ? { infrastructure: harness.infrastructure } : {}),
             output: options.includeOutput
               ? truncateOutput(harness.response, limit)
               : null,
@@ -478,6 +690,8 @@ export function indexEntryFor(summary: ReportSummary): ComparableEntry {
     catalogVersion: summary.env.catalogVersion,
     datasetHash: summary.env.datasetHash,
     model: summary.env.model,
+    evidence: summary.env.evidence,
+    arms: summary.env.arms,
     n: summary.n,
     summary: buildComparableSummary(summary.eval, summary.traces),
   };
@@ -520,6 +734,12 @@ export interface ReportRunResult {
   readonly harnessResults: readonly HarnessResult[];
 }
 
+/** What `--evidence` / `--arms` ask of one run. */
+export interface RunOptions {
+  readonly evidence: EvidenceMode;
+  readonly arms: ReportArms;
+}
+
 export interface ReportDeps {
   readonly now?: () => Date;
   readonly git?: () => { readonly sha: string; readonly dirty: boolean };
@@ -535,7 +755,12 @@ export interface ReportDeps {
    */
   readonly modelIdentity?: (mode: ReportMode) => ReportModelIdentity | undefined;
   /** Runs the evaluation; injected so tests do not need an adapter. */
-  readonly runEval?: (mode: ReportMode) => Promise<ReportRunResult>;
+  readonly runEval?: (mode: ReportMode, options: RunOptions) => Promise<ReportRunResult>;
+  /**
+   * The corpus a live run reads, injected so a test can assert the citation
+   * section without a database. Defaults to the environment's local stack.
+   */
+  readonly liveEvidence?: () => Promise<HarnessEvidenceDeps>;
   /** Trace telemetry, or null when it is unavailable/not requested. */
   readonly loadTraces?: (mode: ReportMode, until: Date) => Promise<{
     readonly metrics: TraceMetrics;
@@ -558,6 +783,9 @@ interface ParsedArgs {
   readonly traces: boolean;
   readonly includeOutput: boolean;
   readonly outDir?: string;
+  readonly suite: EvalSuite;
+  readonly evidence: EvidenceMode;
+  readonly arms: ReportArms;
 }
 
 class UsageError extends Error {}
@@ -569,6 +797,10 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
   let traces = false;
   let includeOutput = true;
   let outDir: string | undefined;
+  let suite: EvalSuite = "base";
+  let evidence: EvidenceMode = "retrieval";
+  let evidenceGiven = false;
+  let arms: ReportArms = "both";
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -599,6 +831,31 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
       case "--out":
         outDir = value();
         break;
+      case "--suite": {
+        const name = value();
+        if (!(EVAL_SUITES as readonly string[]).includes(name)) {
+          throw new UsageError(`--suite must be one of ${EVAL_SUITES.join("|")}`);
+        }
+        suite = name as EvalSuite;
+        break;
+      }
+      case "--evidence": {
+        const name = value();
+        if (!(EVIDENCE_MODES as readonly string[]).includes(name)) {
+          throw new UsageError(`--evidence must be one of ${EVIDENCE_MODES.join("|")}`);
+        }
+        evidence = name as EvidenceMode;
+        evidenceGiven = true;
+        break;
+      }
+      case "--arms": {
+        const name = value();
+        if (!(REPORT_ARMS as readonly string[]).includes(name)) {
+          throw new UsageError(`--arms must be one of ${REPORT_ARMS.join("|")}`);
+        }
+        arms = name as ReportArms;
+        break;
+      }
       case "--help":
       case "-h":
         throw new UsageError("requested help");
@@ -607,18 +864,31 @@ export function parseReportArgs(argv: readonly string[]): ParsedArgs {
     }
   }
 
-  return { live, tag, compareTo, traces, includeOutput, outDir };
+  // 报错而不是接受：scripted 臂没有语料，三种模式跑出来逐字节相同，却会被记成
+  // 三个互不可比的报告 —— 一个什么都没切换的开关比没有开关更糟。
+  if (evidenceGiven && !live) {
+    throw new UsageError(
+      "--evidence needs --live: the scripted arm has no corpus, so every evidence mode would run the same thing",
+    );
+  }
+
+  return { live, tag, compareTo, traces, includeOutput, outDir, suite, evidence, arms };
 }
 
 const USAGE = `usage:
-  eval:report [--live] [--tag <name>] [--traces] [--compare <reportId>] [--no-output] [--out <dir>]
+  eval:report [--live] [--tag <name>] [--traces] [--compare <reportId>] [--no-output] [--out <dir>] [--suite base|safety|evidence|all]
+            [--evidence none|pinned|retrieval] [--arms both|harness|bare]
 
   --live           real model (needs DEEPSEEK_API_KEY); default is the scripted stub
   --tag            report tag; defaults to the git short sha
   --traces         include trace telemetry (delays/cost) from Supabase
   --compare        mark regressions against a reportId in reports/index.json
   --no-output      omit model output from cases.json (it is truncated to ${OUTPUT_LIMIT} chars otherwise)
-  --out            output directory (default: reports)`;
+  --out            output directory (default: reports)
+  --suite          case set (default: base, the original 38)
+  --evidence       live only: what the harness arm may cite — retrieval (default: pinned set + retrieval),
+                   pinned (pinned set only), none (no evidence; fabricated citations are still stripped)
+  --arms           which arms to run (default: both); an ablation only needs harness`;
 
 /** Git probe: the report records the revision it describes, not a guess. */
 function readGit(): { sha: string; dirty: boolean } {
@@ -712,31 +982,86 @@ export async function main(
   const tag = args.tag ?? git.sha;
   const reportId = reportIdFor(at, tag);
   const mode: ReportMode = args.live ? "live" : "scripted";
-  const cases = (deps.loadCases ?? loadEvalCases)();
+  const cases = deps.loadCases ? deps.loadCases() : loadEvalCases(args.suite);
+
+  /**
+   * The corpus for a live run (RFC 0011 §3.7, RFC 0013 §5).
+   *
+   * Read once per run, from whatever the environment points at — the local stack
+   * a human ingested into, which is where live runs happen (AGENTS.md). Failure
+   * returns no dependencies rather than throwing: a live report with no corpus is
+   * still a report about the model, and its citation section says "retrieval not
+   * wired" instead of blaming the product for a database it could not read.
+   */
+  async function liveEvidence(): Promise<HarnessEvidenceDeps> {
+    // `--evidence` narrows what was loaded rather than choosing what to load:
+    // `none` still needs the registry, and one load path is one thing to trust.
+    return selectEvidence(args.evidence, await loadLiveEvidence());
+  }
+
+  async function loadLiveEvidence(): Promise<HarnessEvidenceDeps> {
+    if (deps.liveEvidence) return deps.liveEvidence();
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const env = process.env as Record<string, string | undefined>;
+      const url = env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+      const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !serviceKey || !anonKey) return {};
+
+      const client = createClient(url, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const loaded = await loadPinnedEvidence(client);
+      return {
+        pinnedText: loaded.evidence.text,
+        pinnedSet: loaded.evidence.evidenceSet,
+        citationRegistry: loaded.registry,
+        retrieval: {
+          retriever: createSupabaseRetriever(client, {
+            embed: createEdgeFunctionEmbedder({ baseUrl: url, apiKey: anonKey }),
+          }),
+          texts: createSupabaseEvidenceTextSource(client),
+          sourceVersion: loaded.evidence.evidenceSet.sourceVersion,
+        },
+      };
+    } catch (err) {
+      console.error(
+        `[eval] corpus unavailable; this run reports retrieval as not wired: ${String(err).slice(0, 200)}`,
+      );
+      return {};
+    }
+  }
 
   const runEval =
     deps.runEval ??
-    (async (runMode: ReportMode): Promise<ReportRunResult> => {
+    (async (runMode: ReportMode, options: RunOptions): Promise<ReportRunResult> => {
+      const ran = armsRan(options.arms);
       const catalog = createCatalog(SEED_FOODS);
       // The harness arm runs the product's tool set, not an empty one. Until
       // this was wired, live runs gave the model no tool definitions at all, so
       // every `mustCallTools` case failed for a configuration reason and the
       // report could not tell that apart from a capability gap.
       const toolSchemas = [LOG_MEAL_SCHEMA, QUERY_CATALOG_SCHEMA, SUBMIT_ANSWER_SCHEMA];
+      const evalQueryCatalog = createQueryCatalog(ALL_QUERY_TEMPLATES);
 
       if (runMode === "scripted") {
         const adapter = createStubAdapter(cases);
         return {
           cases,
-          bareResults: await runBareEval(cases, adapter),
-          harnessResults: await runHarnessEval(
-            cases,
-            adapter,
-            createStubTools(),
-            evalInteractionStore(),
-            catalog,
-            toolSchemas,
-          ),
+          bareResults: ran.bare ? await runBareEval(cases, adapter) : [],
+          harnessResults: ran.harness
+            ? await runHarnessEval(
+                cases,
+                adapter,
+                createStubTools(),
+                evalInteractionStore(),
+                catalog,
+                toolSchemas,
+                undefined,
+                evalQueryCatalog,
+              )
+            : [],
         };
       }
 
@@ -757,7 +1082,7 @@ export async function main(
         [
           "query_catalog",
           createQueryCatalogHandler({
-            queryCatalog: createQueryCatalog(ALL_QUERY_TEMPLATES),
+            queryCatalog: evalQueryCatalog,
             runner: createInMemoryQueryRunner(catalog, stores.listMealRecords()),
             userId: EVAL_USER_ID,
           }),
@@ -766,21 +1091,25 @@ export async function main(
 
       return {
         cases,
-        bareResults: await runBareEval(cases, adapter),
-        harnessResults: await runHarnessEval(
-          cases,
-          adapter,
-          tools,
-          evalInteractionStore(),
-          catalog,
-          toolSchemas,
-        ),
+        bareResults: ran.bare ? await runBareEval(cases, adapter) : [],
+        harnessResults: ran.harness
+          ? await runHarnessEval(
+              cases,
+              adapter,
+              tools,
+              evalInteractionStore(),
+              catalog,
+              toolSchemas,
+              await liveEvidence(),
+              evalQueryCatalog,
+            )
+          : [],
       };
     });
 
   let results: ReportRunResult;
   try {
-    results = await runEval(mode);
+    results = await runEval(mode, { evidence: args.evidence, arms: args.arms });
   } catch (err) {
     stderr(`eval:report: evaluation failed: ${(err as Error).message}\n`);
     return 1;
@@ -856,12 +1185,14 @@ export async function main(
       appVersion: (deps.appVersion ?? readPackageVersion)(),
       catalogVersion: (deps.catalogVersion ?? (() => CATALOG_SNAPSHOT_VERSION))(),
       model: (deps.modelIdentity ?? defaultModelIdentity)(mode),
+      ...(mode === "live" ? { evidence: args.evidence } : {}),
+      arms: args.arms,
     },
     traces,
     telemetry,
   });
 
-  const rows = comparisonRows(results.cases, results.bareResults, results.harnessResults);
+  const rows = comparisonRows(results.cases, results.bareResults, results.harnessResults, args.arms);
 
   const outDir = args.outDir ?? deps.outDir ?? "reports";
   const readFile = deps.readFile ?? ((path: string) => {
@@ -913,6 +1244,10 @@ export async function main(
           afterDatasetHash: summary.env.datasetHash,
           beforeMode: before.mode,
           afterMode: summary.env.mode,
+          beforeEvidence: evidenceOfEntry(before),
+          afterEvidence: evidenceOfEntry(summary.env),
+          beforeArms: before.arms ?? "both",
+          afterArms: summary.env.arms ?? "both",
         },
       ),
       beforeId: args.compareTo,

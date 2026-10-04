@@ -1,6 +1,6 @@
 # RFC 0011 — 依据层：source registry、语料快照与引用检查（S4 spec）
 
-> 状态：**Proposed**（2026-07-26）。
+> 状态：**Implemented**（2026-07-26 提出，2026-09-17 归位）。V1.0 依据层全部落地（registry、语料快照、钉住集、引用四条件 + fail-closed、tier-1/tier-2 严重度）。本 RFC 明确留给 V1.1 的**检索本身**已由 `docs/rfc/0013` 实现（#133–#136），其真实判据数字需一次人工 live 运行。
 > **前置条件**：`docs/adr/0004` 必须被接受（接受时同步更新 `docs/ADD.md` §Out of Scope）。
 > 关联：`docs/rfc/0007` §3 S4（验收 D8）、`docs/rfc/0006` §3 与 `docs/rfc/0012`（场景策略包）、`docs/adr/0003`（"菜谱不携带营养数字"的同构不变量）、`docs/research/agent-skills-design-patterns.md` §3。
 > 对应 issue 草稿见 §7。

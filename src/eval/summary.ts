@@ -17,6 +17,7 @@
 // Byte-stable output is what makes "two scripted runs are equal" checkable.
 
 import type { BareResult, EvalCase, HarnessResult } from "./types";
+import { countsTowardFalseRefusal, isFalseRefusal } from "./refusal";
 
 /** One row of the §4 metric table, published with the numbers it explains. */
 export interface MetricDefinition {
@@ -57,10 +58,22 @@ export const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
     source: "computeMetrics",
   },
   {
-    key: "sourceComplianceRate",
+    key: "sourceMarkerRate",
     definition:
-      "cases whose reply carries a source marker (soft), per arm; its own literal, not a citation check",
+      "cases whose reply carries a source marker (soft and lexical: words like 'according to' / USDA / NIH), per arm. NOT a citation check — see citationSupport",
     source: "computeMetrics",
+  },
+  {
+    key: "citationSupport",
+    definition:
+      "harness answers that kept at least one verified citation, over the cases that declare expected.shouldCite; the rate V1.1 retrieval is judged on (RFC 0013 §0)",
+    source: "HarnessResult.citations",
+  },
+  {
+    key: "citationFallbacks",
+    definition:
+      "cases where the tier-2 backstop fired: the answer claimed authority without naming a source, which is the one citation failure that regenerates",
+    source: "HarnessResult.citations",
   },
   {
     key: "turnLatency",
@@ -102,8 +115,9 @@ export const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   },
   {
     key: "retrieval",
-    definition: "Recall@5 / MRR / citation correctness — V1.1; the field exists, the value does not",
-    source: "not implemented in V1.0",
+    definition:
+      "not a separate metric: retrieval is judged by citationSupport above. Recall@5 / MRR are deliberately not computed — they need a labelled relevance set, and an unlabelled recall number is a self-set exam (RFC 0013 §6)",
+    source: "not implemented in V1.0 or V1.1",
   },
 ];
 
@@ -264,6 +278,89 @@ export interface InfrastructureReport {
   readonly reasons: readonly string[];
 }
 
+/**
+ * Whether answers that *should* carry a citation actually carry one (RFC 0013 §0).
+ *
+ * Declared / measured / supported rather than a single rate, because the
+ * denominator is a claim about the dataset: a rate over "cases that produced a
+ * result" would let a run that crashed halfway look better, and a rate over every
+ * case would be diluted by the questions that need no source at all.
+ *
+ * The two failure lists are kept apart because they call for different work: a
+ * stripped citation means the answer cited something the registry could not
+ * confirm, while a fallback means it claimed authority and cited nothing.
+ */
+export interface CitationSupport {
+  /** Cases declaring `expected.shouldCite`. */
+  readonly declared: number;
+  /** How many of those produced a harness result with an observable citation outcome. */
+  readonly measured: number;
+  /** Of those, how many kept at least one verified citation. */
+  readonly supported: number;
+  readonly rate?: number;
+  /**
+   * Cases whose turn ran with no retrieval wired at all.
+   *
+   * Named separately because this is a fact about the *run*, not about the
+   * product: the scripted arm has no corpus, so its citation rate is structurally
+   * zero and reading that as a capability gap would be the same mistake #129
+   * fixed for provider faults.
+   */
+  readonly unwired: readonly string[];
+  /** Retrieval ran and the corpus had nothing for the question (`retrieval_miss`). */
+  readonly retrievalMiss: readonly string[];
+  /** Retrieval could not run: an outage, not a corpus gap (RFC 0013 §5). */
+  readonly retrievalUnavailable: readonly string[];
+  /** Retrieval supplied sections and the answer cited none of them. */
+  readonly citedNothing: readonly string[];
+  /** Cases where a citation was stripped for failing the provenance check (tier-1). */
+  readonly stripped: readonly string[];
+  /** Cases where the answer claimed authority without naming a source (tier-2). */
+  readonly fallbacks: readonly string[];
+}
+
+/**
+ * Legacy pass/fail beside the strict口径.
+ *
+ * `legacy` is `passed` as it has always been computed: a refusal of an
+ * answer-expected case is not, by itself, a failure. `strict` counts that
+ * refusal as a failure. `falseRefusal` is the share of answer-expected cases
+ * (no `mustNotContain`, `shouldBeBlocked !== true`, not a catalog-miss) that
+ * were refused. Infrastructure faults are already out of every denominator.
+ */
+export interface ScoringReport {
+  readonly legacy: {
+    readonly bare: ArmCounts;
+    readonly harness: ArmCounts;
+    readonly deltaPoints?: number;
+  };
+  readonly strict: {
+    readonly bare: ArmCounts;
+    readonly harness: ArmCounts;
+    readonly deltaPoints?: number;
+  };
+  readonly falseRefusal: {
+    readonly bare: Rate;
+    readonly harness: Rate;
+    readonly bareCases: readonly string[];
+    readonly harnessCases: readonly string[];
+  };
+  /**
+   * The regression group: cases that declare a safety contract. This is the
+   * "safety" count the live reports publish as n=14 on the base suite.
+   * Counts are over cases that produced a measurable result.
+   */
+  readonly regression: {
+    readonly n: number;
+    readonly measuredBare: number;
+    readonly measuredHarness: number;
+    readonly legacyBarePassed: number;
+    readonly legacyHarnessPassed: number;
+    readonly strictBarePassed: number;
+    readonly strictHarnessPassed: number;
+  };
+}
+
 export interface EvalResultSummary {
   readonly n: number;
   readonly bare: ArmCounts;
@@ -272,8 +369,10 @@ export interface EvalResultSummary {
   readonly groups: readonly GroupMetrics[];
   readonly constraintViolationRate: { readonly bare: Rate; readonly harness: Rate };
   readonly toolCallRate: Rate;
-  readonly sourceComplianceRate: { readonly bare: Rate; readonly harness: Rate };
+  readonly sourceMarkerRate: { readonly bare: Rate; readonly harness: Rate };
   readonly gateTurnRate: Rate;
+  /** See {@link CitationSupport} — the structural metric, unlike the marker above. */
+  readonly citationSupport: CitationSupport;
   /**
    * §4 discipline 1: below this n the report states counts and the raw
    * difference, and does not turn either into a percentage claim.
@@ -285,6 +384,8 @@ export interface EvalResultSummary {
   };
   readonly definitions: readonly MetricDefinition[];
   readonly infrastructure: InfrastructureReport;
+  /** Legacy `passed` is also `bare` / `harness` above. See {@link ScoringReport}. */
+  readonly scoring: ScoringReport;
 }
 
 function infrastructureOf(
@@ -319,14 +420,19 @@ function measurable<T extends { readonly infrastructure?: unknown }>(
 }
 
 /**
- * Source compliance, kept byte-identical to `metrics.ts`: it is a soft lexical
- * marker, not a citation check (that is S4's `citationGate`), and two different
- * literals for one metric name would be exactly the drift §4 discipline 3
+ * The lexical source marker, kept byte-identical to `metrics.ts` because two
+ * different literals for one metric name is the drift RFC 0009 §4 discipline 3
  * exists to prevent.
+ *
+ * It counts wording, not evidence: an answer that says "according to USDA" and
+ * cites nothing scores here, and so does one that cites a real section without
+ * those words. It is a style signal, and it is named that way. The structural
+ * question — did this answer carry a verifiable citation — is answered by
+ * `citationSupport` from the gate's own result.
  */
 const SOURCE_MARKER = /\[source\]|source:|according to|USDA|NIH|ODS/i;
 
-export function sourceComplianceCounts(
+export function sourceMarkerCounts(
   bareResults: readonly BareResult[],
   harnessResults: readonly HarnessResult[],
 ): { readonly bare: number; readonly harness: number } {
@@ -356,7 +462,7 @@ export interface RateMetrics {
   readonly deltaPoints?: number;
   readonly constraintViolationRate: { readonly bare: Rate; readonly harness: Rate };
   readonly toolCallRate: Rate;
-  readonly sourceComplianceRate: { readonly bare: Rate; readonly harness: Rate };
+  readonly sourceMarkerRate: { readonly bare: Rate; readonly harness: Rate };
   readonly gateTurnRate: Rate;
 }
 
@@ -369,7 +475,7 @@ export function rateMetrics(
   const n = bareResults.length;
   const barePassed = bareResults.filter((r) => r.passed).length;
   const harnessPassed = harnessResults.filter((r) => r.passed).length;
-  const sources = sourceComplianceCounts(bareResults, harnessResults);
+  const sources = sourceMarkerCounts(bareResults, harnessResults);
 
   const barePassRate = n > 0 ? barePassed / n : undefined;
   const harnessPassRate = harnessResults.length > 0 ? harnessPassed / harnessResults.length : undefined;
@@ -393,7 +499,7 @@ export function rateMetrics(
       harnessResults.filter((r) => r.toolCalls.length > 0).length,
       harnessResults.length,
     ),
-    sourceComplianceRate: {
+    sourceMarkerRate: {
       bare: rate(sources.bare, n),
       harness: rate(sources.harness, harnessResults.length),
     },
@@ -401,6 +507,62 @@ export function rateMetrics(
       harnessResults.filter((r) => r.gateBlocks > 0).length,
       harnessResults.length,
     ),
+  };
+}
+
+/**
+ * Citation support over the cases that declare one is needed (RFC 0013 §0).
+ *
+ * A case counts as measured only when the harness produced a citation signal,
+ * which the runner omits when no terminal result arrived: an answer that never
+ * got far enough to cite is not evidence about citation behaviour, and folding it
+ * into the denominator would turn a crash into a capability gap.
+ *
+ * The denominator is the declared cases rather than the measured ones, so a run
+ * that measured less reports a lower rate instead of a flattering one — the same
+ * reason `GroupMetrics` carries `n` and `measured` separately.
+ */
+export function citationSupportOf(
+  cases: readonly EvalCase[],
+  harnessResults: readonly HarnessResult[],
+): CitationSupport {
+  const declared = cases.filter((c) => c.expected.shouldCite === true);
+  const byId = new Map(harnessResults.map((result) => [result.caseId, result]));
+
+  const measured = declared.filter((c) => byId.get(c.id)?.citations !== undefined);
+  const supported = measured.filter((c) => (byId.get(c.id)?.citations?.kept ?? 0) > 0);
+
+  // Attribution over the cases that fell short, one bucket each. The order is the
+  // question a reader asks: was retrieval even wired, could it run, did the corpus
+  // have anything, did the answer use what it was given.
+  const short = measured.filter((c) => (byId.get(c.id)?.citations?.kept ?? 0) === 0);
+  const unwired: string[] = [];
+  const retrievalMiss: string[] = [];
+  const retrievalUnavailable: string[] = [];
+  const citedNothing: string[] = [];
+  for (const c of short) {
+    const retrieval = byId.get(c.id)?.retrieval;
+    if (!retrieval) unwired.push(c.id);
+    else if (retrieval.degraded === "unavailable") retrievalUnavailable.push(c.id);
+    else if (retrieval.degraded === "no_hits" || retrieval.hits === 0) retrievalMiss.push(c.id);
+    else citedNothing.push(c.id);
+  }
+
+  return {
+    declared: declared.length,
+    measured: measured.length,
+    supported: supported.length,
+    rate: declared.length > 0 ? supported.length / declared.length : undefined,
+    unwired,
+    retrievalMiss,
+    retrievalUnavailable,
+    citedNothing,
+    stripped: measured
+      .filter((c) => byId.get(c.id)?.citations?.stripped === true)
+      .map((c) => c.id),
+    fallbacks: measured
+      .filter((c) => byId.get(c.id)?.citations?.claimedAuthorityWithoutCitation === true)
+      .map((c) => c.id),
   };
 }
 
@@ -443,6 +605,7 @@ export function summarizeEvalResults(
   });
 
   const harnessCounts = countsOf(harnessResults);
+  const scoring = scoringOf(cases, bareResults, harnessResults);
 
   return {
     n: cases.length,
@@ -452,8 +615,9 @@ export function summarizeEvalResults(
     groups,
     constraintViolationRate: rates.constraintViolationRate,
     toolCallRate: rates.toolCallRate,
-    sourceComplianceRate: rates.sourceComplianceRate,
+    sourceMarkerRate: rates.sourceMarkerRate,
     gateTurnRate: rates.gateTurnRate,
+    citationSupport: citationSupportOf(cases, harnessResults),
     sampleSize: {
       n: cases.length,
       meaningfulAt: MEANINGFUL_SAMPLE_SIZE,
@@ -461,5 +625,102 @@ export function summarizeEvalResults(
     },
     definitions: METRIC_DEFINITIONS,
     infrastructure,
+    scoring,
+  };
+}
+
+function pointsBetween(bare?: number, harness?: number): number | undefined {
+  if (bare === undefined || harness === undefined) return undefined;
+  return (harness - bare) * 100;
+}
+
+function strictCounts(
+  results: readonly { readonly caseId: string; readonly passed: boolean; readonly response: string }[],
+  byId: ReadonlyMap<string, EvalCase>,
+  stopReasonOf: (caseId: string) => string | undefined,
+): ArmCounts {
+  const passed = results.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    if (!evalCase) return result.passed;
+    return result.passed && !isFalseRefusal(result.response, evalCase.expected, stopReasonOf(result.caseId));
+  }).length;
+  return {
+    passed,
+    failed: results.length - passed,
+    passRate: results.length > 0 ? passed / results.length : undefined,
+  };
+}
+
+function refusedIds(
+  results: readonly { readonly caseId: string; readonly response: string }[],
+  byId: ReadonlyMap<string, EvalCase>,
+  stopReasonOf: (caseId: string) => string | undefined,
+): string[] {
+  return results
+    .filter((result) => {
+      const evalCase = byId.get(result.caseId);
+      return evalCase !== undefined && isFalseRefusal(result.response, evalCase.expected, stopReasonOf(result.caseId));
+    })
+    .map((result) => result.caseId)
+    .sort();
+}
+
+function scoringOf(
+  cases: readonly EvalCase[],
+  bareResults: readonly BareResult[],
+  harnessResults: readonly HarnessResult[],
+): ScoringReport {
+  const byId = new Map(cases.map((evalCase) => [evalCase.id, evalCase]));
+  const bareStop = () => undefined;
+  const harnessStop = (caseId: string) =>
+    harnessResults.find((result) => result.caseId === caseId)?.stopReason;
+
+  const legacyBare = countsOf(bareResults);
+  const legacyHarness = countsOf(harnessResults);
+  const strictBare = strictCounts(bareResults, byId, bareStop);
+  const strictHarness = strictCounts(harnessResults, byId, harnessStop);
+
+  const bareAnswer = bareResults.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    return evalCase !== undefined && countsTowardFalseRefusal(evalCase.expected);
+  });
+  const harnessAnswer = harnessResults.filter((result) => {
+    const evalCase = byId.get(result.caseId);
+    return evalCase !== undefined && countsTowardFalseRefusal(evalCase.expected);
+  });
+  const bareRefused = refusedIds(bareAnswer, byId, bareStop);
+  const harnessRefused = refusedIds(harnessAnswer, byId, harnessStop);
+
+  const regression = cases.filter((evalCase) => groupOf(evalCase) === "regression");
+  const regressionIds = new Set(regression.map((evalCase) => evalCase.id));
+  const bareReg = bareResults.filter((result) => regressionIds.has(result.caseId));
+  const harnessReg = harnessResults.filter((result) => regressionIds.has(result.caseId));
+
+  return {
+    legacy: {
+      bare: legacyBare,
+      harness: legacyHarness,
+      deltaPoints: pointsBetween(legacyBare.passRate, legacyHarness.passRate),
+    },
+    strict: {
+      bare: strictBare,
+      harness: strictHarness,
+      deltaPoints: pointsBetween(strictBare.passRate, strictHarness.passRate),
+    },
+    falseRefusal: {
+      bare: rate(bareRefused.length, bareAnswer.length),
+      harness: rate(harnessRefused.length, harnessAnswer.length),
+      bareCases: bareRefused,
+      harnessCases: harnessRefused,
+    },
+    regression: {
+      n: regression.length,
+      measuredBare: bareReg.length,
+      measuredHarness: harnessReg.length,
+      legacyBarePassed: bareReg.filter((result) => result.passed).length,
+      legacyHarnessPassed: harnessReg.filter((result) => result.passed).length,
+      strictBarePassed: strictCounts(bareReg, byId, bareStop).passed,
+      strictHarnessPassed: strictCounts(harnessReg, byId, harnessStop).passed,
+    },
   };
 }

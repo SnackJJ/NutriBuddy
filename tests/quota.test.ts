@@ -34,6 +34,7 @@ import {
   tokensForChars,
   ROUTE_TURN_TIER,
 } from "../src/lib/turnCostEstimate";
+import { RETRIEVAL_MAX_CHARS } from "../src/evidence/retrievalContext";
 
 const LIMITS: QuotaLimits = {
   dailyTurns: 40,
@@ -248,7 +249,11 @@ describe("estimateWorstCaseTurnCostUsd (#100)", () => {
         (bounds.pinnedTokens +
           bounds.toolSchemaTokens +
           bounds.catalogSignatureTokens +
-          bounds.evidenceTokens) +
+          bounds.evidenceTokens +
+          // The retrieved-evidence block is charged at the ceiling the renderer
+          // enforces (RFC 0013 §5). It is not in the cached prefix — it changes
+          // with the question — and the bound assumes no cache hits either way.
+          bounds.retrievalTokens) +
       bounds.observationTokensPerStep * ((MAX_STEPS * (MAX_STEPS - 1)) / 2);
     const expected = computeCostUsd("flash", {
       promptTokens,
@@ -259,6 +264,14 @@ describe("estimateWorstCaseTurnCostUsd (#100)", () => {
       expected,
       12,
     );
+  });
+
+  it("charges the retrieved-evidence block at its own ceiling", () => {
+    // Five sections at 2,000 characters is the most the renderer will build, and
+    // the allowance has to be that rather than what a typical hit happens to be:
+    // a bound that only holds for the questions asked so far is not a bound.
+    expect(bounds.retrievalTokens).toBe(tokensForChars(RETRIEVAL_MAX_CHARS));
+    expect(bounds.retrievalTokens).toBeGreaterThan(0);
   });
 
   it("grows with the request it is bounding", () => {

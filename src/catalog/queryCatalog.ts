@@ -462,7 +462,7 @@ export function renderObservationText(
 export const FOOD_LOOKUP_TEMPLATE: QueryTemplate = {
   id: "food_lookup",
   description:
-    "Look up nutrition data for a single food by its catalog food ID. " +
+    "Look up nutrition data for a single food by its name, alias, or catalog food ID. " +
     "Returns per-portion kcal, protein, fat, carbs, and allergen tags.",
   parameters: [
     {
@@ -470,8 +470,7 @@ export const FOOD_LOOKUP_TEMPLATE: QueryTemplate = {
       type: "string",
       required: true,
       description:
-        "Catalog food ID from the food resolver (e.g. 'food-chicken-breast-001'). " +
-        "The model must obtain this from a prior resolver call; it cannot invent food IDs.",
+        "Food name, alias, or catalog food ID (e.g. 'chicken breast', 'large egg', or 'food-chicken-breast-001').",
     },
     {
       name: "portion_g",

@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assemblePinnedEvidence, type EvidenceSection, type PinnedEvidence } from "./pinnedSet";
+import type { EvidenceTextSource } from "./retrievalContext";
 import type {
   CitationRegistry,
   CitationRegistryEntry,
@@ -197,4 +198,79 @@ export async function loadPinnedEvidence(
     registry: createSupabaseCitationRegistry(client),
     index,
   };
+}
+
+/**
+ * Read the text of retrieved sections and chunks (RFC 0013 §5 / #135).
+ *
+ * The same client `loadPinnedEvidence` uses, and the same embedded `sources` join,
+ * because the block the model reads must carry the document identity the citation
+ * gate checks: a retrieved section rendered without its source id and version
+ * would be a hit the model cannot cite correctly.
+ *
+ * A missing section or chunk is skipped rather than thrown on: retrieval ran
+ * against a snapshot and the caller is asking about ids it just received, so a
+ * gap means the corpus moved under it — not a reason to fail the turn.
+ */
+export function createSupabaseEvidenceTextSource(client: SupabaseClient): EvidenceTextSource {
+  return {
+    async loadSections(sectionIds) {
+      if (sectionIds.length === 0) return [];
+      const { data, error } = await client
+        .from("source_sections")
+        .select(
+          "id, source_id, section_path, heading, anchor, text, sources!inner(slug, doc_version, status)",
+        )
+        .in("id", [...sectionIds]);
+      if (error) throw new Error(`retrieved sections read failed: ${error.message}`);
+
+      return (data ?? []).flatMap((row: RetrievalRow) => {
+        const source = Array.isArray(row.sources) ? row.sources[0] : row.sources;
+        if (!source || String(source.status) !== "active") return [];
+        return [
+          {
+            id: String(row.id),
+            sourceId: String(source.slug),
+            docVersion: String(source.doc_version),
+            sectionPath: String(row.section_path),
+            anchor: row.anchor === null ? undefined : String(row.anchor),
+            text: String(row.text),
+          },
+        ];
+      });
+    },
+
+    async loadChunks(chunkIds) {
+      if (chunkIds.length === 0) return [];
+      const { data, error } = await client
+        .from("source_chunks")
+        .select("id, section_id, heading_text, text")
+        .in("id", [...chunkIds]);
+      if (error) throw new Error(`retrieved chunks read failed: ${error.message}`);
+
+      return (data ?? []).map((row: ChunkTextRow) => ({
+        id: String(row.id),
+        sectionId: String(row.section_id),
+        headingText: String(row.heading_text),
+        text: String(row.text),
+      }));
+    },
+  };
+}
+
+interface RetrievalRow {
+  readonly id: unknown;
+  readonly section_path: unknown;
+  readonly anchor: unknown;
+  readonly text: unknown;
+  readonly sources?:
+    | { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }
+    | readonly { readonly slug?: unknown; readonly doc_version?: unknown; readonly status?: unknown }[];
+}
+
+interface ChunkTextRow {
+  readonly id: unknown;
+  readonly section_id: unknown;
+  readonly heading_text: unknown;
+  readonly text: unknown;
 }

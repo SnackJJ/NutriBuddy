@@ -10,6 +10,7 @@ const CATEGORIES: EvalCategory[] = [
   "edge_case",
   "descriptive",
   "write",
+  "evidence",
 ];
 
 const EVAL_CASES = loadEvalCases();

@@ -255,3 +255,42 @@ describe("buildComparableSummary", () => {
     expect(comparable.cacheHitRate).toBeUndefined();
   });
 });
+
+// ── the criterion's metric must be able to move the verdict (#135 review) ────
+//
+// `citationSupportRate` was added to the index and then read by nothing, so the
+// number RFC 0013 §0 names as the criterion could collapse without `--compare`
+// saying a word about it. A metric nobody consumes is a metric that cannot warn.
+
+describe("citation support in a comparison", () => {
+  const withCitation = (rate: number | undefined, declared?: number) => ({
+    harnessPassRate: 0.9,
+    citationSupportRate: rate,
+    citationSupportDeclared: declared,
+    groups: [],
+  });
+
+  it("reports the delta and marks a fall as a regression", () => {
+    const result = compareSummaries(withCitation(1, 5), withCitation(0.2, 5));
+    const delta = result.deltas.find((candidate) => candidate.key === "citationSupportRate");
+
+    expect(delta?.label).toBe("引用支撑率");
+    expect(delta?.regressed).toBe(true);
+  });
+
+  it("does not mark a rise as a regression", () => {
+    const result = compareSummaries(withCitation(0.2, 5), withCitation(1, 5));
+    const delta = result.deltas.find((candidate) => candidate.key === "citationSupportRate");
+    expect(delta?.regressed).toBe(false);
+  });
+
+  it("says nothing rather than zero when a report predates the metric", () => {
+    // Older reports in the index have no citationSupportRate; reading that as 0
+    // would manufacture a regression out of a field that did not exist.
+    const result = compareSummaries(withCitation(undefined), withCitation(1, 5));
+    const delta = result.deltas.find((candidate) => candidate.key === "citationSupportRate");
+    expect(delta?.before).toBeUndefined();
+    expect(delta?.delta).toBeUndefined();
+    expect(delta?.regressed).toBe(false);
+  });
+});
